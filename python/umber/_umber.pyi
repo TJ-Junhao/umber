@@ -259,6 +259,11 @@ class Theme:
 class TwinAxes:
     """An internal handle to the right-hand y axis of a Cartesian panel."""
 
+    @property
+    def row(self) -> int: ...
+    @property
+    def col(self) -> int: ...
+
 @final
 class Figure:
     """A figure with a grid of axes. Every axes method takes the axes' top-left cell first.
@@ -306,6 +311,17 @@ class Figure:
         y_kind: int,
         y_base: float,
     ) -> tuple[int, int]: ...
+    def twin_axes_at(
+        self,
+        row_kind: int,
+        row: int,
+        col_kind: int,
+        col: int,
+        x_kind: int,
+        x_base: float,
+        y_kind: int,
+        y_base: float,
+    ) -> TwinAxes: ...
     def add_pie_axes(
         self, row_kind: int, row: int, col_kind: int, col: int, row_span: int, col_span: int
     ) -> tuple[int, int]: ...

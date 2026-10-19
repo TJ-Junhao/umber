@@ -39,6 +39,7 @@
 //! theme's line width or marker size. Axes are resolved from these records, once per layout
 //! pass, and drawing and the legend read them instead of the marks.
 
+use crate::model::Layer;
 use std::collections::BTreeMap;
 
 pub(crate) mod swarm;
@@ -457,10 +458,10 @@ pub(crate) struct Limits<'a> {
 
 impl<'a> Limits<'a> {
     /// The scales, explicit limits and tick settings of `axes`.
-    pub fn of(panel: impl Into<crate::Panel<'a>>) -> Limits<'a> {
+    pub fn of(panel: impl Into<Layer<'a>>) -> Limits<'a> {
         let axes = match panel.into() {
-            crate::Panel::Cartesian(axes, _) => axes,
-            crate::Panel::Pie(_) => {
+            Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => axes,
+            Layer::Primary(crate::Panel::Pie(_)) => {
                 return Limits {
                     x: AxisLimits::Category,
                     y: AxisLimits::Category,
@@ -890,7 +891,7 @@ fn categories<'a, 'm: 'a>(
 /// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
 /// the layout errors of [`pipeline::scene`](crate::pipeline) do.
 pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
-    for axes in figure.cartesian_axes() {
+    for axes in figure.all_cartesian_axes() {
         if axes.x_scale() != ScaleKind::Category {
             continue;
         }
@@ -909,7 +910,7 @@ pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result
         let key = figure.x_group_of(cells.row(), cells.col());
         let scale = CategoryScale::from_first_appearance(
             figure
-                .cartesian_axes()
+                .all_cartesian_axes()
                 .filter(|member| {
                     let c = member.cells();
                     figure.x_group_of(c.row(), c.col()) == key
@@ -3837,25 +3838,28 @@ pub(crate) fn resolve_axes_marks<'a>(
 /// of the colorbar ticks: the colorbar's own format, the figure's under shared colors, or else
 /// the panel's y tick format.
 pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>> {
-    let slots = label_slots(figure.cartesian_axes().flat_map(|axes| axes.marks()));
+    let slots = label_slots(figure.all_cartesian_axes().flat_map(|axes| axes.marks()));
     let shared = figure.grid().share_color() != crate::Share::None;
-    let mut next_auto = slots.len();
-    figure
-        .layers()
-        .map(|panel| match panel {
-            crate::Panel::Cartesian(axes, _) => {
-                if !axes.is_twin() {
-                    next_auto = slots.len();
-                }
-                let start = next_auto;
-                next_auto += axes
-                    .marks()
-                    .iter()
-                    .flat_map(color_sources)
-                    .filter(|(label, color)| {
-                        label.is_empty() && matches!(color, ColorSpec::Auto(_))
-                    })
-                    .count();
+    let layers: Vec<_> = figure.layers().collect();
+    let mut next_auto = vec![slots.len(); layers.len()];
+    layers
+        .into_iter()
+        .enumerate()
+        .map(|(i, panel)| match panel {
+            Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => {
+                let start = match panel {
+                    Layer::Primary(_) => slots.len(),
+                    Layer::Twin { parent, .. } => next_auto[parent],
+                };
+                next_auto[i] = start
+                    + axes
+                        .marks()
+                        .iter()
+                        .flat_map(color_sources)
+                        .filter(|(label, color)| {
+                            label.is_empty() && matches!(color, ColorSpec::Auto(_))
+                        })
+                        .count();
                 let orientation = Limits::of(axes).orientation();
                 let colorbar = if shared {
                     figure.colorbar_options()
@@ -3871,7 +3875,7 @@ pub(crate) fn resolve_figure_marks(figure: &Figure) -> Vec<Vec<ResolvedMark<'_>>
                     start,
                 )
             }
-            crate::Panel::Pie(_) => Vec::new(),
+            Layer::Primary(crate::Panel::Pie(_)) => Vec::new(),
         })
         .collect()
 }

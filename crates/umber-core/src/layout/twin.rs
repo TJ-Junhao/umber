@@ -2,8 +2,10 @@
 
 use std::borrow::Cow;
 
-use super::{LayoutInput, PanelBands};
-use crate::Axes;
+use super::{Layout, LayoutInput, PanelBands};
+use crate::error::quoted;
+use crate::model::Layer;
+use crate::{Error, Result};
 
 #[cfg(test)]
 #[path = "twin_tests.rs"]
@@ -14,15 +16,34 @@ pub(super) fn aligned<'a>(
     inputs: &[LayoutInput<'_>],
     bands: &'a [PanelBands],
 ) -> Cow<'a, [PanelBands]> {
-    if !inputs
-        .iter()
-        .any(|input| input.axes.cartesian().is_some_and(Axes::is_twin))
-    {
+    if !inputs.iter().any(|input| match input.axes {
+        Layer::Primary(_) => false,
+        Layer::Twin { .. } => true,
+    }) {
         return Cow::Borrowed(bands);
     }
     let mut bands = bands.to_vec();
     align(inputs, &mut bands);
     Cow::Owned(bands)
+}
+
+/// The parent's bottom legend and colorbar precede the twin's bottom colorbar.
+/// Before column placement the measured legend height is used; afterwards it is rewrapped.
+pub(super) fn bottom_offset(
+    layer: Layer<'_>,
+    inputs: &[LayoutInput<'_>],
+    bands: &[PanelBands],
+    span: Option<(f64, f64)>,
+) -> f64 {
+    match layer {
+        Layer::Primary(_) => 0.0,
+        Layer::Twin { parent, .. } => {
+            let legend = span.map_or(bands[parent].bottom_legend, |(left, right)| {
+                inputs[parent].legend.bottom_reserve(left, right)
+            });
+            legend + bands[parent].bottom_colorbar
+        }
+    }
 }
 
 /// Uses the final wrapped legend height when stacking the two axes' bottom colorbars.
@@ -32,29 +53,32 @@ pub(crate) fn align_placed(
     solution: &super::GridSolution,
 ) {
     align(inputs, bands);
-    for i in 1..inputs.len() {
-        if inputs[i].axes.cartesian().is_some_and(Axes::is_twin) {
-            let header = solution.panels[i - 1].header;
-            bands[i].bottom_offset = inputs[i - 1]
-                .legend
-                .bottom_reserve(header.left, header.right)
-                + bands[i - 1].bottom_colorbar;
-        }
+    for (i, input) in inputs.iter().enumerate() {
+        let header = solution.panels[i].header;
+        bands[i].bottom_offset =
+            bottom_offset(input.axes, inputs, bands, Some((header.left, header.right)));
     }
 }
 
-/// Shares top and bottom axis bands and places right-hand decorations outside the right ticks.
+/// Shares axis bands and orders right ticks, both axes' colorbars, then the right legend.
 /// Direct labels keep their own y scale; each axes gets a separate horizontal column.
 pub(crate) fn align(inputs: &[LayoutInput<'_>], bands: &mut [PanelBands]) {
-    for i in 1..inputs.len() {
-        if !inputs[i].axes.cartesian().is_some_and(Axes::is_twin) {
-            continue;
-        }
+    for (i, input) in inputs.iter().enumerate() {
+        let parent = match input.axes {
+            Layer::Primary(_) => continue,
+            Layer::Twin { parent, .. } => parent,
+        };
+        let bottom = bottom_offset(input.axes, inputs, bands, None);
         let (before, after) = bands.split_at_mut(i);
-        let (left, right) = (&mut before[i - 1], &mut after[0]);
+        let (left, right) = (&mut before[parent], &mut after[0]);
         left.right_offset = right.right_axis;
-        right.right_offset = right.right_axis + left.beside_axis();
-        right.bottom_offset = left.bottom_legend + left.bottom_colorbar;
+        left.right_legend_offset = if left.right_legend > 0.0 {
+            right.beside_axis()
+        } else {
+            0.0
+        };
+        right.right_offset = right.right_axis + left.direct_reserve + left.right_colorbar;
+        right.bottom_offset = bottom;
         right.x_band = left.x_band;
         right.x_title_band = left.x_title_band;
         let rise = left.top_label_rise().max(right.top_label_rise());
@@ -69,4 +93,20 @@ pub(crate) fn align(inputs: &[LayoutInput<'_>], bands: &mut [PanelBands]) {
             bands.label_drop = drop;
         }
     }
+}
+
+/// Both y titles must fit on their shared band, including a gap between them.
+pub(super) fn check_titles(left: &Layout, right: &Layout, context: &'static str) -> Result<()> {
+    if let (Some(left), Some(right)) = (&left.ylabel, &right.ylabel) {
+        let width = left.width() + super::AXIS_LABEL_GAP + right.width();
+        let room = right.x + right.width() - left.x;
+        if width > room + super::inset::CONTAINMENT_TOLERANCE {
+            let (width, room) = super::widths(width, room);
+            return Err(Error::style(context, format!(
+                "the y axis titles {} and {} are {width} pt wide with a gap; the panel has {room} pt.",
+                quoted(&left.text), quoted(&right.text),
+            )).with_hint("shorten a y axis title or widen the figure."));
+        }
+    }
+    Ok(())
 }

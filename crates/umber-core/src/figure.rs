@@ -21,7 +21,7 @@
 //!     .title("Growth")
 //!     .line(AxisData::Numbers(vec![0.0, 1.0, 2.0]), &[1.0, 3.0, 2.0], LineOptions::default())?;
 //! let marks = figure.panels().map(|panel| match panel {
-//!     umber_core::Panel::Cartesian(axes, twin) => axes.marks().len() + twin.map_or(0, |a| a.marks().len()),
+//!     umber_core::Panel::Cartesian { axes, twin } => axes.marks().len() + twin.map_or(0, |a| a.marks().len()),
 //!     umber_core::Panel::Pie(_) => 0,
 //! });
 //! assert_eq!(marks.sum::<usize>(), 1);

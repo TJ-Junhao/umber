@@ -921,7 +921,7 @@ pub(crate) struct LayoutInput<'a> {
     /// The figure title size, for attributing vertical room errors.
     pub figure_title_size: SizeSpec,
     /// The axes, for their texts and cells.
-    pub axes: crate::Panel<'a>,
+    pub axes: crate::model::Layer<'a>,
     /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
     /// The fonts.

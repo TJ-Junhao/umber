@@ -3,7 +3,7 @@
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Final, Never, Self, final
+from typing import Any, Final, Never, Self, cast, final
 
 from umber import _args, _axes, _cell, _pie, _scale, _size, _theme, _ticks, _umber
 from umber._args import instance, integer, real
@@ -66,7 +66,8 @@ class Figure:
     ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
     theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
     reaches a panel, including one in a copy, with the scales used to create it as a type
-    witness. Figures cannot be pickled.
+    witness. ``twin_axes_at()`` reaches its right y axes with their own scales.
+    Figures cannot be pickled.
 
     Example:
         >>> import umber as ub
@@ -76,7 +77,8 @@ class Figure:
     """
 
     # Python state is stored only after the native call succeeds.
-    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows")
+    __slots__ = ("_axes", "_cols", "_native", "_pies", "_rows", "_twins")
+    _twins: dict[tuple[int, int], Axes[Any, float]]
     _pies: dict[tuple[int, int], PieAxes]
     _native: _umber.Figure
     _axes: dict[tuple[int, int], Axes[Any, Any]]
@@ -148,6 +150,7 @@ class Figure:
             self._rows = row_count
             self._cols = col_count
             self._axes = {}
+            self._twins = {}
             self._pies = {}
 
     def colorbar(
@@ -467,6 +470,52 @@ class Figure:
             )
             return self._axes[position]
 
+    def twin_axes_at(
+        self,
+        *,
+        row: int | Auto = AUTO,
+        col: int | Auto = AUTO,
+        x: Scale[X] | Scale[float] = Scale.linear(),
+        y: Scale[float] = Scale.linear(),
+    ) -> Axes[X, float]:
+        """Return a panel's existing right y axes, including those of a copied figure.
+
+        Args:
+            row: The zero-based top row; ``AUTO`` means 0 only on a one-row figure.
+            col: The zero-based left column; ``AUTO`` means 0 only on a one-column figure.
+            x: The panel's shared x scale, including its log base; a type witness for x values.
+            y: The right y scale used at creation, including its log base.
+
+        Returns:
+            The right axes at this top-left cell, with numeric y values.
+
+        Raises:
+            TypeError: If an index or scale has the wrong type.
+            UsageError: If the position is missing, not a panel's top-left cell, has no twin,
+                or either scale differs from the one used at creation.
+
+        Example:
+            >>> import copy
+            >>> import umber as ub
+            >>> fig = ub.Figure()
+            >>> right = fig.add_axes().twin_y(scale=ub.Scale.log())
+            >>> fig.twin_axes_at(y=ub.Scale.log()) is right
+            True
+            >>> copied = copy.copy(fig)
+            >>> copied.twin_axes_at(y=ub.Scale.log()).ylabel("Rate").figure is copied
+            True
+        """
+        with api_call():
+            context = "Figure.twin_axes_at()"
+            row_index = _index(context, "row", row)
+            col_index = _index(context, "col", col)
+            instance(context, "x", x, Scale, _SCALE_HINT)
+            instance(context, "y", y, Scale, "pass Scale.linear() or Scale.log().")
+            target = self._native.twin_axes_at(
+                *row_index, *col_index, *_scale.native(cast(Scale[Any], x)), *_scale.native(y)
+            )
+            return self._twins[target.row, target.col]
+
     def cells(self, count: int | Auto = AUTO, /) -> Iterator[Cell]:
         """Iterate over grid cells in row-major order, whether occupied or empty.
 
@@ -616,6 +665,15 @@ class Figure:
         for (row, col), axes in self._axes.items():
             x, y = _axes.scales(axes)
             clone._axes[row, col] = _axes.attach(clone, clone._native, x, y, row, col)
+        clone._twins = {}
+        for (row, col), axes in self._twins.items():
+            x, y = _axes.scales(axes)
+            target = clone._native.twin_axes_at(
+                1, row, 1, col, *_scale.native(x), *_scale.native(y)
+            )
+            twin = _axes.attach(clone, clone._native, x, y, row, col)
+            object.__setattr__(twin, "_target", target)
+            clone._twins[row, col] = twin
         return clone
 
     def __reduce__(self) -> Never:

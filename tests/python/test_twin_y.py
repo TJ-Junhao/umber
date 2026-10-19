@@ -83,10 +83,13 @@ def test_one_legend_for_both(style: ub.LegendStyle, position: ub.LegendPosition)
 def test_twin_of_twin_rejected() -> None:
     fig, left, right = pair()
     before = fig.to_svg()
-    for axes in (right, left):
+    for axes, hint in (
+        (right, HINT),
+        (left, "use the twin returned by the first twin_y(), or Figure.twin_axes_at()."),
+    ):
         with pytest.raises(ub.UsageError) as caught:
             axes.twin_y()
-        assert details(caught.value) == (None, HINT)
+        assert details(caught.value) == (None, hint)
         assert "twin_y()" in str(caught.value)
         assert fig.to_svg() == before
 
@@ -106,7 +109,11 @@ def test_twin_on_pie_rejected() -> None:
     axes: Any = ub.Figure().add_pie_axes()
     with pytest.raises(ub.UsageError) as caught:
         axes.twin_y()
-    assert details(caught.value) == (None, HINT)
+    assert "this panel has no Cartesian axes" in str(caught.value)
+    assert details(caught.value) == (
+        None,
+        "use Figure.add_axes() for Cartesian marks and axis settings.",
+    )
 
 
 @pytest.mark.parametrize("scale", [ub.Scale.category(), ub.Scale.time(), None, "linear"])
@@ -280,3 +287,117 @@ def test_left_y_sharing_excludes_twin() -> None:
         named(fig, label).attrib["y"] for label in ("left middle", "other middle", "right middle")
     ]
     assert len(set(points)) == 1
+
+
+@pytest.mark.parametrize("cols", [1, 2])
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+def test_overlapping_y_titles_raise(cols: int, theme: ub.Theme) -> None:
+    fig = ub.Figure(3 * cols, 3, cols=cols, theme=theme)
+    left = fig.add_axes(col=0).line([0, 1], [1, 2])
+    left.ylabel("Left axis title with many units")
+    left.twin_y().line([0, 1], [100, 200]).ylabel("Right axis title with many units")
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert "Left axis title with many units" in str(caught.value)
+    assert "Right axis title with many units" in str(caught.value)
+    assert details(caught.value) == (None, "shorten a y axis title or widen the figure.")
+    if cols > 1:
+        assert "row 0, col 0" in str(caught.value)
+
+
+@pytest.mark.parametrize("clone", [copy.copy, copy.deepcopy])
+def test_twin_axes_at_reaches_copied_spanning_panel(clone: Any) -> None:
+    fig = ub.Figure(12, 8, rows=2, cols=3)
+    left = fig.add_axes(row=1, col=1, col_span=2, x=ub.Scale.category())
+    left.bar(["A", "B"], [1, 2])
+    right = left.twin_y(scale=ub.Scale.log(base=2)).line(["A", "B"], [8, 32])
+    assert fig.twin_axes_at(row=1, col=1, x=ub.Scale.category(), y=ub.Scale.log(base=2)) is right
+    before = fig.to_svg()
+    copied = clone(fig)
+    twin = copied.twin_axes_at(row=1, col=1, x=ub.Scale.category(), y=ub.Scale.log(base=2))
+    assert twin.figure is copied
+    assert copied.to_svg() == before
+    twin.ylim(1, 64).ylabel("Changed")
+    assert copied.to_svg() != before
+    assert fig.to_svg() == before
+    with pytest.raises(ub.UsageError):
+        copied.twin_axes_at(row=1, col=2, x=ub.Scale.category(), y=ub.Scale.log(base=2))
+
+
+def test_twin_axes_at_checks_scales_and_presence() -> None:
+    fig = ub.Figure()
+    left = fig.add_axes()
+    with pytest.raises(ub.UsageError, match="no right-hand y axis"):
+        fig.twin_axes_at()
+    right = left.twin_y(scale=ub.Scale.log(base=2))
+    assert fig.twin_axes_at(y=ub.Scale.log(base=2)) is right
+    cases: list[tuple[ub.Scale[Any], ub.Scale[float], str]] = [
+        (ub.Scale.category(), ub.Scale.log(base=2), "x"),
+        (ub.Scale.linear(), ub.Scale.log(), "y"),
+    ]
+    for x, y, parameter in cases:
+        with pytest.raises(ub.UsageError) as caught:
+            fig.twin_axes_at(x=x, y=y)
+        assert "Figure.twin_axes_at()" in str(caught.value)
+        detail = details(caught.value)
+        assert detail is not None and detail[0] == parameter
+    with pytest.raises(ub.UsageError) as caught:
+        fig.axes_at(y=ub.Scale.log(base=2))
+    detail = details(caught.value)
+    assert detail is not None and detail[1] is not None and "twin_axes_at" in detail[1]
+
+
+@pytest.mark.parametrize("parameter", ["x", "y", "row", "col"])
+@pytest.mark.parametrize("value", [None, "linear", True])
+def test_twin_axes_at_rejects_invalid_arguments(parameter: str, value: Any) -> None:
+    fig, _, _ = pair()
+    before = fig.to_svg()
+    call: Any = fig.twin_axes_at
+    with pytest.raises(TypeError) as caught:
+        call(**{parameter: value})
+    detail = details(caught.value)
+    assert detail is not None and detail[0] == parameter
+    assert fig.to_svg() == before
+
+
+def test_native_twin_handle_identifies_its_column() -> None:
+    fig: Any = ub.Figure(12, 5, cols=2)
+    left = fig.add_axes(col=0).line([0, 1], [1, 2])
+    right = left.twin_y().line([0, 1], [100, 200])
+    fig.add_axes(col=1).line([0, 1], [3, 4]).twin_y().line([0, 1], [30, 40])
+    handle = right._target
+    fig._native.ylim(handle, 1, 0, 400)
+    expected = fig.to_svg()
+    right.ylim(0, 400)
+    assert fig.to_svg() == expected
+    assert (handle.row, handle.col) == (0, 0)
+
+
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+def test_right_colorbars_precede_right_legend(theme: ub.Theme) -> None:
+    fig = ub.Figure(12, 6, theme=theme)
+    left = fig.add_axes().scatter([0, 1], [1, 2], color=ub.ColorBy([0, 10]))
+    left.line([0, 1], [1, 2], label="Left series")
+    right = left.twin_y().scatter([0, 1], [100, 200], color=ub.ColorBy([100, 200]))
+    right.line([0, 1], [100, 200], label="Right series")
+    left.colorbar("Left colors", position=ub.ColorbarPosition.RIGHT)
+    right.colorbar("Right colors", position=ub.ColorbarPosition.RIGHT)
+    right.yticks_labeled([100, 200], ["R100", "R200"])
+    left.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
+    xs = [
+        float(named(fig, label).attrib["x"])
+        for label in ("R100", "Left colors", "Right colors", "Left series")
+    ]
+    assert xs == sorted(xs)
+
+
+@pytest.mark.parametrize("theme", [ub.Theme.PIGMENT, ub.Theme.GRAPHITE, ub.Theme.MIDNIGHT])
+def test_twin_never_draws_a_second_baseline(theme: ub.Theme) -> None:
+    fig = ub.Figure(8, 5, theme=theme)
+    left = fig.add_axes(x=ub.Scale.category()).bar(["A", "B"], [2, 3])
+    right = left.twin_y(scale=ub.Scale.log()).bar(["A", "B"], [10, 100])
+    before = fig.to_svg()
+    right.baseline(shown=False)
+    assert fig.to_svg() == before
+    right.baseline(shown=True)
+    assert fig.to_svg() == before

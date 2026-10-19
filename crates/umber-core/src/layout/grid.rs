@@ -884,12 +884,8 @@ impl Rows {
         let mut above = vec![0.0_f64; rows];
         let mut below = vec![0.0_f64; rows];
         let mut legends = vec![0.0_f64; rows];
-        for (i, (((cells, band), panel), &(left, right))) in cells
-            .iter()
-            .zip(bands)
-            .zip(input.panels)
-            .zip(spans)
-            .enumerate()
+        for (((cells, band), panel), &(left, right)) in
+            cells.iter().zip(bands).zip(input.panels).zip(spans)
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
@@ -897,12 +893,8 @@ impl Rows {
             above[first] = above[first].max(band.above_with_row(&row));
             below[last] = below[last]
                 .max(band.below() - band.bottom_legend - band.bottom_colorbar - band.bottom_offset);
-            let offset = if i > 0 && panel.axes.cartesian().is_some_and(crate::Axes::is_twin) {
-                input.panels[i - 1].legend.bottom_reserve(left, right)
-                    + bands[i - 1].bottom_colorbar
-            } else {
-                0.0
-            };
+            let offset =
+                super::twin::bottom_offset(panel.axes, input.panels, bands, Some((left, right)));
             legends[last] = legends[last]
                 .max(panel.legend.bottom_reserve(left, right) + band.bottom_colorbar + offset);
         }
@@ -1468,6 +1460,22 @@ fn grid_too_short(context: &'static str, height: f64, needed: f64, rows: usize) 
 ///
 /// Both legend errors have the hint `shorten the label or widen the figure.`
 pub(crate) fn check_panel_contents(input: &GridInput<'_>, layouts: &[Layout]) -> Result<()> {
+    for (panel, layout) in input.panels.iter().zip(layouts) {
+        match panel.axes {
+            crate::model::Layer::Primary(_) => {}
+            crate::model::Layer::Twin { parent, .. } => {
+                super::twin::check_titles(&layouts[parent], layout, input.context).map_err(
+                    |error| {
+                        if input.is_single() {
+                            error
+                        } else {
+                            in_panel(panel.axes.cells(), error)
+                        }
+                    },
+                )?;
+            }
+        }
+    }
     for (panel, layout) in input.panels.iter().zip(layouts) {
         if let Some(colorbar) = &layout.colorbar {
             let cells = panel.axes.cells();

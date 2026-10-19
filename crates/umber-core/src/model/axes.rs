@@ -75,8 +75,10 @@ pub struct Axes {
 pub(super) enum TwinLink {
     #[default]
     None,
-    Right(usize),
-    Left(usize),
+    /// Stored on the primary axes; points to their right-hand twin.
+    Primary(usize),
+    /// Stored on the twin; points to its primary axes.
+    Twin(usize),
 }
 
 impl Axes {
@@ -192,10 +194,24 @@ impl Axes {
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn check_scales(&self, x: ScaleKind, y: ScaleKind) -> Result<()> {
+        let (context, hint) = match self.twin {
+            TwinLink::None => (
+                "Figure.axes_at()",
+                "pass the scales the axes was created with.",
+            ),
+            TwinLink::Primary(_) => (
+                "Figure.axes_at()",
+                "pass the scales the axes was created with, or use Figure.twin_axes_at() for the right y axes.",
+            ),
+            TwinLink::Twin(_) => (
+                "Figure.twin_axes_at()",
+                "pass the scales the axes was created with.",
+            ),
+        };
         for (name, given, actual) in [("x", x, self.x), ("y", y, self.y)] {
             if given != actual {
                 return Err(Error::usage(
-                    "Figure.axes_at()",
+                    context,
                     format!(
                         "{name} is {}; the axes at row {}, col {} has {name} {}.",
                         scale_name(given),
@@ -205,7 +221,7 @@ impl Axes {
                     ),
                 )
                 .with_parameter(name)
-                .with_hint("pass the scales the axes was created with."));
+                .with_hint(hint));
             }
         }
         Ok(())
@@ -589,11 +605,6 @@ impl Axes {
     #[must_use]
     pub fn annotations(&self) -> &[Annotation] {
         &self.annotations
-    }
-
-    /// Whether this axes supplies the right-hand y scale of its panel.
-    pub(crate) fn is_twin(&self) -> bool {
-        matches!(self.twin, TwinLink::Left(_))
     }
 }
 

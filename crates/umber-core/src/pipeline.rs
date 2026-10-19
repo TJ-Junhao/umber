@@ -13,6 +13,7 @@ use crate::layout::{
     TickSpacing,
 };
 use crate::legend::Legend;
+use crate::model::Layer;
 use crate::model::{Axes, Figure, ShareGroups, label_visibility};
 use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
@@ -26,7 +27,7 @@ use crate::{Error, FontLibrary, Result, Theme, draw};
 /// theme, and its legend, measured. They are made once, before layout.
 struct Panel<'a> {
     /// The axes.
-    axes: crate::Panel<'a>,
+    axes: Layer<'a>,
     /// The axes' marks, resolved.
     marks: Vec<ResolvedMark<'a>>,
     /// The axes' legend, measured.
@@ -54,7 +55,7 @@ fn panels<'a>(
         .zip(resolve::resolve_figure_marks(figure))
         .map(|(axes, marks)| {
             let legend = match axes {
-                crate::Panel::Pie(panel) => {
+                Layer::Primary(crate::Panel::Pie(panel)) => {
                     let mut measured = MeasuredLegend::measure(
                         theme,
                         &Legend::pie(panel.legend, panel.pie.as_ref()),
@@ -67,7 +68,7 @@ fn panels<'a>(
                     }
                     measured
                 }
-                crate::Panel::Cartesian(axes, _) => {
+                Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => {
                     if figure.has_merged_legend() {
                         let style = axes.legend_style().unwrap_or(theme.legend_style());
                         MeasuredLegend::measure(
@@ -82,8 +83,10 @@ fn panels<'a>(
                 }
             };
             let labels = match axes {
-                crate::Panel::Cartesian(axes, _) => BarLabels::measure(theme, lib, axes, &marks)?,
-                crate::Panel::Pie(_) => BarLabels::default(),
+                Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => {
+                    BarLabels::measure(theme, lib, axes, &marks)?
+                }
+                Layer::Primary(crate::Panel::Pie(_)) => BarLabels::default(),
             };
             Ok(Panel {
                 axes,
@@ -94,10 +97,13 @@ fn panels<'a>(
             })
         })
         .collect::<Result<_>>()?;
-    for i in 1..panels.len() {
-        if panels[i].axes.cartesian().is_some_and(Axes::is_twin) {
-            let (left, right) = panels.split_at_mut(i);
-            left[i - 1].legend.join_row(&mut right[0].legend);
+    for i in 0..panels.len() {
+        match panels[i].axes {
+            Layer::Primary(_) => {}
+            Layer::Twin { parent, .. } => {
+                let (before, after) = panels.split_at_mut(i);
+                before[parent].legend.join_row(&mut after[0].legend);
+            }
         }
     }
     resolve_colors(figure, &mut panels, groups);
@@ -694,19 +700,18 @@ fn plan(
     let ends: Vec<_> = panels
         .iter()
         .map(|panel| match panel.axes {
-            crate::Panel::Cartesian(_, _) => panel.labels.end_reaches(),
-            crate::Panel::Pie(_) => Vec::new(),
+            Layer::Primary(crate::Panel::Cartesian { .. }) | Layer::Twin { .. } => {
+                panel.labels.end_reaches()
+            }
+            Layer::Primary(crate::Panel::Pie(_)) => Vec::new(),
         })
         .collect();
     let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
     let show_labels: Vec<_> = panels
         .iter()
-        .map(|panel| {
-            if panel.axes.cartesian().is_some_and(Axes::is_twin) {
-                [false, true]
-            } else {
-                label_visibility(figure, panel.axes.cells())
-            }
+        .map(|panel| match panel.axes {
+            Layer::Primary(axes) => label_visibility(figure, axes.cells()),
+            Layer::Twin { .. } => [false, true],
         })
         .collect();
     let has_shared_colorbar = shared
@@ -1274,9 +1279,12 @@ fn plan(
             continue;
         }
         let twin = panels
-            .get(i + 1)
-            .filter(|panel| panel.axes.cartesian().is_some_and(Axes::is_twin))
-            .map(|_| i + 1);
+            .iter()
+            .enumerate()
+            .find_map(|(j, panel)| match panel.axes {
+                Layer::Primary(_) => None,
+                Layer::Twin { parent, .. } => (parent == i).then_some(j),
+            });
         let marks = std::iter::once(i)
             .chain(twin)
             .flat_map(|j| {
@@ -1734,11 +1742,11 @@ fn scene_with_labels(
     }
     let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
     let mut annotations = Vec::new();
-    let mut paired_legend = None;
+    let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
         let axes = match panel.axes {
-            crate::Panel::Cartesian(axes, _) => axes,
-            crate::Panel::Pie(pie_panel) => {
+            Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => axes,
+            Layer::Primary(crate::Panel::Pie(pie_panel)) => {
                 scene.push(draw::chrome(theme, layout));
                 if let Some(pie) = &pie_panel.pie {
                     let placed =
@@ -1788,21 +1796,31 @@ fn scene_with_labels(
             scene.push(values);
         }
         let legend = draw::legend::legend(theme, layout);
-        if panels
-            .get(i + 1)
-            .is_some_and(|panel| panel.axes.cartesian().is_some_and(Axes::is_twin))
-        {
-            paired_legend = legend;
-        } else {
-            if let Some(legend) = paired_legend.take() {
-                scene.push(legend);
+        match panel.axes {
+            Layer::Primary(crate::Panel::Cartesian { twin: Some(_), .. }) => {
+                paired_legends[i] = legend;
             }
-            if let Some(legend) = legend {
-                scene.push(legend);
+            Layer::Primary(crate::Panel::Cartesian { twin: None, .. } | crate::Panel::Pie(_)) => {
+                if let Some(legend) = legend {
+                    scene.push(legend);
+                }
+            }
+            Layer::Twin { parent, .. } => {
+                if let Some(legend) = paired_legends[parent].take() {
+                    scene.push(legend);
+                }
+                if let Some(legend) = legend {
+                    scene.push(legend);
+                }
             }
         }
-        if resolved.draws_baseline(axes.marks(), axes.baseline_visibility()) {
-            scene.push(draw::baseline(theme, layout));
+        match panel.axes {
+            Layer::Primary(_) => {
+                if resolved.draws_baseline(axes.marks(), axes.baseline_visibility()) {
+                    scene.push(draw::baseline(theme, layout));
+                }
+            }
+            Layer::Twin { .. } => {}
         }
         if let (Some(color), Some(bar)) = (&resolved.color, &layout.colorbar) {
             scene.push(draw::colorbar::draw(theme, color, bar));
@@ -1836,7 +1854,7 @@ fn scene_with_labels(
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a
 /// grid of more than one cell, as layout errors do.
-fn in_cell<'a>(figure: &Figure, panel: impl Into<crate::Panel<'a>>, err: Error) -> Error {
+fn in_cell<'a>(figure: &Figure, panel: impl Into<Layer<'a>>, err: Error) -> Error {
     let grid = figure.grid();
     if grid.rows() * grid.cols() == 1 {
         return err;

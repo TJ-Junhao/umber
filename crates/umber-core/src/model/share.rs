@@ -288,7 +288,7 @@ pub(super) fn check_add(
     for (axis, given) in [(SharedAxis::X, x), (SharedAxis::Y, y)] {
         let mode = axis.mode(grid);
         let key = group_key(grid, mode, cells.row(), cells.col());
-        if let Some(other) = figure.cartesian_panels().find(|axes| {
+        if let Some(other) = figure.primary_cartesian_axes().find(|axes| {
             let c = axes.cells();
             group_key(grid, mode, c.row(), c.col()) == key && axis.kind(axes) != given
         }) {
@@ -375,13 +375,19 @@ impl ShareGroups {
             figure
                 .layers()
                 .enumerate()
-                .map(|(i, axes)| {
-                    let Some(axes) = axes.cartesian() else {
-                        return i;
+                .map(|(i, layer)| {
+                    let axes = match layer {
+                        super::Layer::Primary(panel) => match panel.cartesian() {
+                            Some(axes) => axes,
+                            None => return i,
+                        },
+                        super::Layer::Twin { parent, .. } => {
+                            return match axis {
+                                SharedAxis::X => parent,
+                                SharedAxis::Y => i,
+                            };
+                        }
                     };
-                    if matches!(axis, SharedAxis::Y) && axes.is_twin() {
-                        return i;
-                    }
                     let c = axes.cells();
                     let key = match axis {
                         SharedAxis::X => figure.x_group_of(c.row(), c.col()),
@@ -461,14 +467,14 @@ impl ShareGroups {
 /// exactly the same rows. Matching columns/rows also put the panels in the same shared group.
 pub(crate) fn label_visibility(figure: &Figure, cells: CellRange) -> [bool; 2] {
     let show_x = !matches!(figure.grid().share_x(), Share::Col | Share::All)
-        || !figure.cartesian_panels().any(|a| {
+        || !figure.primary_cartesian_axes().any(|a| {
             let c = a.cells();
             c.col() == cells.col()
                 && c.col_span() == cells.col_span()
                 && c.row() >= cells.row() + cells.row_span()
         });
     let show_y = !matches!(figure.grid().share_y(), Share::Row | Share::All)
-        || !figure.cartesian_panels().any(|a| {
+        || !figure.primary_cartesian_axes().any(|a| {
             let c = a.cells();
             c.row() == cells.row()
                 && c.row_span() == cells.row_span()

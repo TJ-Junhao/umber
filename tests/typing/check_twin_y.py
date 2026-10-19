@@ -8,6 +8,11 @@ import umber as ub
 numeric = ub.Figure().add_axes()
 category = ub.Figure().add_axes(x=ub.Scale.category())
 timed = ub.Figure().add_axes(x=ub.Scale.time())
+figure = ub.Figure()
+assert_type(figure.twin_axes_at(), ub.Axes[float, float])
+assert_type(figure.twin_axes_at(x=ub.Scale.category()), ub.Axes[str, float])
+assert_type(figure.twin_axes_at(x=ub.Scale.time(), y=ub.Scale.log()), ub.Axes[ub.Time, float])
+figure.twin_axes_at(y=ub.Scale.category())  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 assert_type(numeric.twin_y(), ub.Axes[float, float])
 assert_type(category.twin_y(), ub.Axes[str, float])
 assert_type(timed.twin_y(scale=ub.Scale.log()), ub.Axes[ub.Time, float])

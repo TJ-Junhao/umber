@@ -174,8 +174,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         """Add a numeric y axis on the right, sharing this panel's x axis.
 
         The two axes have independent y scales, limits, ticks and labels. Their x settings
-        are shared in both directions. Marks use one palette and legend; grid lines come
-        from the left axis. Keep the returned axes to add marks or change its settings.
+        are shared in both directions. Marks use one palette and legend; grid lines and the
+        baseline come from the left axis. Retrieve the right axes again with
+        ``Figure.twin_axes_at()``.
 
         Args:
             scale: The right y scale, ``Scale.linear()`` or ``Scale.log()``.
@@ -204,6 +205,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             target = self._native.twin_y(self._target, self._col, *_scale.native(scale))
             axes = attach(self._figure, self._native, self._x, scale, self._row, self._col)
             object.__setattr__(axes, "_target", target)
+            twins = cast(dict[tuple[int, int], Axes[Any, float]], _TWINS(self._figure))
+            twins[self._row, self._col] = axes
             return axes
 
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
@@ -631,7 +634,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         inherit it. Copies of the figure keep the setting. Only drawing changes: the baseline
         stays at zero on the value axis, or at its lower edge when zero is out of range. Limits,
         padding, bar bases, area fills and reference-line clipping stay unchanged. A gridline
-        at the baseline tick is kept when the baseline is hidden.
+        at the baseline tick is kept when the baseline is hidden. In a panel with a twin y
+        axis, only the left axes draw a baseline, regardless of the twin's setting.
 
         Args:
             shown: ``True`` draws the baseline; ``False`` hides it. ``AUTO`` restores the
@@ -3792,6 +3796,7 @@ def attach(
 
 
 _CELL: Final = attrgetter("_row", "_col")
+_TWINS: Final = attrgetter("_twins")
 
 
 def cell(axes: Axes[Any, Any]) -> tuple[int, int]:

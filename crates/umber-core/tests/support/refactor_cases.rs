@@ -2119,7 +2119,7 @@ mod record {
                 );
             }
             match a {
-                umber_core::Panel::Cartesian(a, twin) => {
+                umber_core::Panel::Cartesian { axes: a, twin } => {
                     out.push_str(&axes(a));
                     if let Some(twin) = twin {
                         out.push_str("  twin y\n");

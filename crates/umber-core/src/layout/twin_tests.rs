@@ -63,6 +63,35 @@ fn twin_uses_one_resolved_x_and_one_plot() {
 }
 
 #[test]
+fn twin_title_gap_and_room_error_rounding() {
+    let f = figure(Theme::pigment());
+    let planned = plan_panel_marks(&f, FontLibrary::global());
+    let left = &planned[0].1;
+    let mut right = planned[1].1.clone();
+    let left_title = left.ylabel.as_ref().unwrap();
+    let right_title = right.ylabel.as_mut().unwrap();
+    right_title.x = left_title.x + left_title.width() + super::super::AXIS_LABEL_GAP - 0.25;
+    let width = left_title.width() + super::super::AXIS_LABEL_GAP + right_title.width();
+    let room = right_title.x + right_title.width() - left_title.x;
+    let (width, room) = super::super::widths(width, room);
+    let err = super::check_titles(left, &right, "Figure.to_scene()").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Figure.to_scene(): the y axis titles \"Left units\" and \"Right units\" are {width} pt wide with a gap; the panel has {room} pt."
+        )
+    );
+    assert_eq!(
+        err.hint(),
+        Some("shorten a y axis title or widen the figure.")
+    );
+    right.ylabel.as_mut().unwrap().x += 0.5;
+    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+    right.ylabel = None;
+    super::check_titles(left, &right, "Figure.to_scene()").unwrap();
+}
+
+#[test]
 fn unlabelled_palette_continues_and_labels_share_slots() {
     let mut f = figure(Theme::pigment());
     let check = |f: &Figure, expected: &[usize]| {

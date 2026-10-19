@@ -14,6 +14,7 @@ use super::{
     PADDING, PlacedBaseline, StyleSizes, Styles, TITLE_GAP, TITLE_LINE, TextRole, X_LABEL_GAP,
     Y_LABEL_CENTER, Y_LABEL_GAP, baseline_in_line, figure_height_hint, measure, metrics,
 };
+use crate::model::Layer;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::text::SceneFonts;
 use crate::{Align, Figure, Result};
@@ -372,6 +373,8 @@ pub(crate) struct PanelBands {
     pub(super) right_axis: f64,
     /// Space occupied by the other y axis before this axis's right-hand decorations.
     pub(super) right_offset: f64,
+    /// The twin's decorations before the panel's right legend.
+    pub(super) right_legend_offset: f64,
     /// Space occupied by the other y axis's bottom decorations.
     pub(super) bottom_offset: f64,
     /// The right colorbar and its gap.
@@ -517,7 +520,7 @@ impl PanelBands {
 
     /// The widest reserve beside the plot: direct labels or the column legend.
     pub(super) fn right(&self) -> f64 {
-        self.right_offset + self.beside_axis()
+        self.right_offset + self.beside_axis() + self.right_legend_offset
     }
 
     /// Legends and colorbars outside this axis's tick column.
@@ -580,14 +583,8 @@ pub(crate) fn measure_panel(
             .map_or(crate::SizeSpec::Auto, crate::Axes::ylabel_size),
     );
 
-    let twin = axes.cartesian().is_some_and(crate::Axes::is_twin);
     let row = legend.header_within(span.row_left, span.row_right);
-    let (title, subtitle) = if twin {
-        ("", "")
-    } else {
-        (axes.title_text(), axes.subtitle_text())
-    };
-    let heading = Header::measure(title, subtitle, &styles, &row, lib)?;
+    let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib)?;
 
     // Tick labels.
     let y_tick_size = f64::from(ytick.size);
@@ -620,11 +617,11 @@ pub(crate) fn measure_panel(
     };
 
     let (xtext, ytext) = match axes {
-        crate::Panel::Cartesian(axes, _) => (
-            if twin { "" } else { axes.xlabel_text() },
-            axes.ylabel_text(),
-        ),
-        crate::Panel::Pie(_) => ("", ""),
+        Layer::Primary(crate::Panel::Cartesian { axes, .. }) => {
+            (axes.xlabel_text(), axes.ylabel_text())
+        }
+        Layer::Twin { axes, .. } => ("", axes.ylabel_text()),
+        Layer::Primary(crate::Panel::Pie(_)) => ("", ""),
     };
     let xlabel = (!xtext.is_empty())
         .then(|| measure(lib, xtext, xaxis))
@@ -666,10 +663,10 @@ pub(crate) fn measure_panel(
     };
 
     let colorbar = match axes {
-        crate::Panel::Cartesian(axes, _) => {
+        Layer::Primary(crate::Panel::Cartesian { axes, .. }) | Layer::Twin { axes, .. } => {
             super::colorbar::MeasuredColorbar::measure(axes, resolved.color.as_ref(), theme, lib)?
         }
-        crate::Panel::Pie(_) => None,
+        Layer::Primary(crate::Panel::Pie(_)) => None,
     };
     let (mut right_colorbar, mut bottom_colorbar, mut colorbar_tick_width) = (0.0, 0.0, 0.0);
     if let Some(bar) = &colorbar {
@@ -689,9 +686,16 @@ pub(crate) fn measure_panel(
         y_label_band,
         y_label_gap,
         label_rise,
-        y_tick_column: if twin { 0.0 } else { y_tick_column },
-        right_axis: if twin { y_tick_column } else { 0.0 },
+        y_tick_column: match axes {
+            Layer::Primary(_) => y_tick_column,
+            Layer::Twin { .. } => 0.0,
+        },
+        right_axis: match axes {
+            Layer::Primary(_) => 0.0,
+            Layer::Twin { .. } => y_tick_column,
+        },
         right_offset: 0.0,
+        right_legend_offset: 0.0,
         bottom_offset: 0.0,
         direct_reserve: legend.direct.reserve(if right_colorbar > 0.0 {
             f64::INFINITY
@@ -741,7 +745,6 @@ pub(crate) fn place_panel(
         xlabel_baseline,
         frame,
     } = *slot;
-    let twin = input.axes.cartesian().is_some_and(crate::Axes::is_twin);
     let axis_below = bands.axis_below();
     let label_rise = bands.top_label_rise();
     let PanelBands {
@@ -775,6 +778,7 @@ pub(crate) fn place_panel(
             .column(
                 plot.right()
                     + bands.right_offset
+                    + bands.right_legend_offset
                     + super::placement::RIGHT_GAP
                     + bands.right_colorbar
                     + if bands.right_colorbar > 0.0 {
@@ -803,10 +807,9 @@ pub(crate) fn place_panel(
     };
 
     for (pos, label) in &mut y_labels {
-        label.x = if twin {
-            plot.right() + Y_LABEL_GAP
-        } else {
-            plot.x - Y_LABEL_GAP - label.width()
+        label.x = match input.axes {
+            Layer::Primary(_) => plot.x - Y_LABEL_GAP - label.width(),
+            Layer::Twin { .. } => plot.right() + Y_LABEL_GAP,
         };
         label.y = plot.y_at(*pos) + Y_LABEL_CENTER * y_tick_size;
     }
@@ -820,12 +823,15 @@ pub(crate) fn place_panel(
     }
     if let Some(label) = &mut ylabel {
         // Left-aligned with the left edge of the y tick label column.
-        label.x = if twin {
-            plot.right() - label.width()
-        } else if y_labels.is_empty() {
-            plot.x
-        } else {
-            plot.x - Y_LABEL_GAP - y_label_width
+        label.x = match input.axes {
+            Layer::Primary(_) => {
+                if y_labels.is_empty() {
+                    plot.x
+                } else {
+                    plot.x - Y_LABEL_GAP - y_label_width
+                }
+            }
+            Layer::Twin { .. } => plot.right() - label.width(),
         };
         label.y = plot.y - label_rise - bands.y_label_gap;
     }
@@ -856,10 +862,10 @@ pub(crate) fn place_panel(
     }
     let baseline = resolved.baseline;
     let draws_baseline = match input.axes {
-        crate::Panel::Cartesian(axes, _) => {
+        Layer::Primary(crate::Panel::Cartesian { axes, .. }) => {
             resolved.draws_baseline(axes.marks(), axes.baseline_visibility())
         }
-        crate::Panel::Pie(_) => false,
+        Layer::Primary(crate::Panel::Pie(_)) | Layer::Twin { .. } => false,
     };
     // A drawn baseline replaces the gridline it coincides with.
     let off_baseline = |axis: ValueAxis| {
@@ -868,27 +874,33 @@ pub(crate) fn place_panel(
         }
     };
     // A category axis has no gridlines, along y as along x.
-    let y_grid = if twin || resolved.y.is_category() {
-        Vec::new()
-    } else {
-        resolved
-            .y
-            .ticks
-            .iter()
-            .filter(off_baseline(ValueAxis::Y))
-            .map(|tick| plot.y_at(tick.pos))
-            .collect()
-    };
-    let x_grid = if twin || resolved.x.is_category() {
-        Vec::new()
-    } else {
-        resolved
-            .x
-            .ticks
-            .iter()
-            .filter(off_baseline(ValueAxis::X))
-            .map(|tick| plot.x_at(tick.pos))
-            .collect()
+    let (x_grid, y_grid) = match input.axes {
+        Layer::Primary(_) => {
+            let y_grid = if resolved.y.is_category() {
+                Vec::new()
+            } else {
+                resolved
+                    .y
+                    .ticks
+                    .iter()
+                    .filter(off_baseline(ValueAxis::Y))
+                    .map(|tick| plot.y_at(tick.pos))
+                    .collect()
+            };
+            let x_grid = if resolved.x.is_category() {
+                Vec::new()
+            } else {
+                resolved
+                    .x
+                    .ticks
+                    .iter()
+                    .filter(off_baseline(ValueAxis::X))
+                    .map(|tick| plot.x_at(tick.pos))
+                    .collect()
+            };
+            (x_grid, y_grid)
+        }
+        Layer::Twin { .. } => (Vec::new(), Vec::new()),
     };
 
     Layout {

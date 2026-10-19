@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 30fead00eab3c0565c082f4f3b66eb21146cb69a
+# revision: 30b7dd49092573013d0f4c94ffa3743f8bb0c67f
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt
@@ -1772,12 +1772,12 @@ b933379e9b7919a28db4586f60304ba14a40c7e8a0bd131f557cded76a06b603  png/time-mesh.
 30918ff244ba9c1e20b068df88f220cf8c93d71ae4139d8dd12ef80da01c6db0  png/twin-y-grid-midnight.dpi72.png
 b875d27eefb5b7df489f5936282917f9a6036466169dc46b60e82a048d61e406  png/twin-y-grid-pigment.dpi200.png
 82efa7406bfa2c9dd3653b4d7057d99e25872b56ee9089a8ab5f752bf84cbf33  png/twin-y-grid-pigment.dpi72.png
-f3b590316a2b40e7d898c0f7d53bba23741650139e58e4bc1f30a84b01ee8ac5  png/twin-y-log-bars-graphite.dpi200.png
-0a1b7bf559bf6f8036f356400d4a67fb2af92c1e50dba3209e0dec9a78fdc776  png/twin-y-log-bars-graphite.dpi72.png
-b14ed50b12786b11a692309e37107cca50f50a541cf1590defba3efeb4db68c2  png/twin-y-log-bars-midnight.dpi200.png
-6f9e9f566b7781018cc73dbc46bb06c2326f44dc083a8472ba15ef73eafa14bf  png/twin-y-log-bars-midnight.dpi72.png
-037c191391cbc0d77b37293a02bc7ab9e6ab3d842595b1e3a6c9a547bf8f2930  png/twin-y-log-bars-pigment.dpi200.png
-c5fb36878b384b2b690a5a03f10415cecd393808693d5111449390a101e0dbbd  png/twin-y-log-bars-pigment.dpi72.png
+8523b137b3b9239598752ceadecc6768c303728ad259354052c2bac16461186d  png/twin-y-log-bars-graphite.dpi200.png
+ed5e27b0635993d8b1bc1d926725cd6dacb508d3f691b2b2935f10bd91ac5918  png/twin-y-log-bars-graphite.dpi72.png
+dfefc32a75ff1e3cca6a8057662a8993c24b3ea4a12686068d1a5c7ead37ed22  png/twin-y-log-bars-midnight.dpi200.png
+63d4a2ee90b8beb84e53ab95176ad180513a8b28eafdd82cc66c7fd1a9c3c8f0  png/twin-y-log-bars-midnight.dpi72.png
+c89dddb905d62dfa86bb1132c41874956a1ac723bdc30ff56ab6806d7bff3614  png/twin-y-log-bars-pigment.dpi200.png
+bfc4ac97f4bf91ec7e500ab572aa34d06c22662f2770f22b8ae9ed777e6ed389  png/twin-y-log-bars-pigment.dpi72.png
 682bdfbe71c86917f598a3868df84f41f8ed463b420a8cf0270a34a907ce31f4  png/twin-y-weather-graphite.dpi200.png
 68def5b081ccc37a0930ae2a4453c27983689812a9ef4cf684760a0e24836f72  png/twin-y-weather-graphite.dpi72.png
 dff315ca331b8a6f850db676edb34265322476fb52fb40f14ceaa1be6635923d  png/twin-y-weather-midnight.dpi200.png
@@ -2671,9 +2671,9 @@ d5d41703871a0f216b7e15b4e462d1497a8afc3985c3ec44a0fa98d9f0b71a06  scene/time-80y
 670f01c4de074dd1134329ea709169fda172dfff521b3e84f9bf1b2b85b0b60b  scene/twin-y-grid-graphite.txt
 c9efe178985705018f1f2b1aba82e20cd419b34c23df896fe9c65402117a6626  scene/twin-y-grid-midnight.txt
 a99b1baf3f0356889c2d1a04b0362c25e5dd7c75730fff500004d02f0f2625f7  scene/twin-y-grid-pigment.txt
-75b43396334e0f08c74f112c6266efe7dc04b9f275a67143b8f5cc5844ae9f60  scene/twin-y-log-bars-graphite.txt
-940492434bd22b6f1120d3ece476f6646dc1b850cebcad184f809592c0648b85  scene/twin-y-log-bars-midnight.txt
-376195cf471e3a603d63f77253adb23865e35299584015903fd63a09bf92f888  scene/twin-y-log-bars-pigment.txt
+95de459bab0134c9978af8a00a0fc4ef860da5d4066cf2277672fb50b2b3d9eb  scene/twin-y-log-bars-graphite.txt
+32f58272856121b0e7c5e9b0472d412efe05b08187b51ca253cb71955a25343d  scene/twin-y-log-bars-midnight.txt
+ba2d982c7ca82677ae9543fa206132ae6b6e59699d6d85e23efbfa80ecb4e976  scene/twin-y-log-bars-pigment.txt
 9e179b29b6017f391924bb637b4098fa27b7ed25346ff54dc627547a806d239f  scene/twin-y-weather-graphite.txt
 4d7a5653e7ede8561685e52a04eb03ae424a9d94699554442a3a9337bfebacb3  scene/twin-y-weather-midnight.txt
 27c5354ca1cd5e2745b56e97586d3d2c5e60a9ad3bc5cadbcc98ca50483f3c2b  scene/twin-y-weather-pigment.txt
@@ -4412,12 +4412,12 @@ e4ec3082fbd9e8b2901ca9a869226bd38e307717555bad29ada8940b6c61bfec  svg/twin-y-gri
 8ea2aab0bc6e00232c28a933f789d0d70c6f74b9ca65c2d3589c2ebcf93e8389  svg/twin-y-grid-midnight.outlines.svg
 977bd5a4ca1e898795bd43e71c5388ba345af8a84c76fe99315c87e20b477320  svg/twin-y-grid-pigment.editable.svg
 6ca1ce8178249a113b7f4a69b34f1234e9de134d5cb6d7e5c8019e30449d1c0d  svg/twin-y-grid-pigment.outlines.svg
-d025b830d943f1cfcdd6ba27ffcb4b1d0d46d81de1a86cb1c3d43ebe9e5c83e6  svg/twin-y-log-bars-graphite.editable.svg
-3695984f55361a18fd761bf43c5137e5460599961e22df801914d72b6a76b962  svg/twin-y-log-bars-graphite.outlines.svg
-a6053aa6220eb5de46c17e60bafc4bfc5ecb6fe6d64832d52ac45a33c802e621  svg/twin-y-log-bars-midnight.editable.svg
-ed43c066dfdd727c62b35b336680fb77c3b45438897ae35d8b242ede27764b5c  svg/twin-y-log-bars-midnight.outlines.svg
-bda9324be8961f7b024ab9b0d0814d4cb0f5511fccffb3c8c8b7bc26e38b104d  svg/twin-y-log-bars-pigment.editable.svg
-e86bd817a5e88a4c64e6cbcaaae4b03c30e8dd424eaf1da73c3215045231c2bb  svg/twin-y-log-bars-pigment.outlines.svg
+1816a37406cfc4619d69981dbe337e9119bb483939d1f1eb086046bf5ae73da1  svg/twin-y-log-bars-graphite.editable.svg
+685b27afa4c75ac697eca8d2d191c04463786887bc04ee8caf9dd93bd318a506  svg/twin-y-log-bars-graphite.outlines.svg
+f8b91f88aafd0160acb4df88b3aa39989fbdc79325e7eb481208ecdbc55d5996  svg/twin-y-log-bars-midnight.editable.svg
+50f54cad1ff80c060f661ffc8a0bc49e4fe6bc70099dd5e57820a249c5b96f94  svg/twin-y-log-bars-midnight.outlines.svg
+e0c900b1817211107a77c28e9b27cb305f6c71f060038a9c7e821b7408931489  svg/twin-y-log-bars-pigment.editable.svg
+ab2196c462dec628b49f428ae424abcda44a2a0112be274794299bea9becf618  svg/twin-y-log-bars-pigment.outlines.svg
 b1b5e5f87e9985612d027cee6976ba291012c254afdd90de37e23709b34ddc5d  svg/twin-y-weather-graphite.editable.svg
 9bd65d9eb9804052761a1c432632c502691b8eff37fdd9b481cac77b07217575  svg/twin-y-weather-graphite.outlines.svg
 d7b05c9e1c0092127f55cd56d22f1318761c1a1533c08e3d6bec83402bbc13fd  svg/twin-y-weather-midnight.editable.svg

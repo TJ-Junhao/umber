@@ -165,11 +165,14 @@ pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usiz
     Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
 }
 
-/// An explicit handle to the right-hand y axis at a grid row.
+/// An explicit handle to the right-hand y axis at a panel's top-left cell.
 #[derive(Clone, Copy)]
 #[pyclass(frozen, from_py_object, module = "umber._umber")]
 pub(crate) struct TwinAxes {
+    #[pyo3(get)]
     row: i64,
+    #[pyo3(get)]
+    col: i64,
 }
 
 /// The original axes' row or an explicit right-hand axes handle.
@@ -191,7 +194,7 @@ impl Figure {
             AxesRow::Original(row) => self.0.axes_at_mut(GridIndex::At(row), GridIndex::At(col)),
             AxesRow::Twin(twin) => self
                 .0
-                .twin_axes_at_mut(GridIndex::At(twin.row), GridIndex::At(col)),
+                .twin_axes_at_mut(GridIndex::At(twin.row), GridIndex::At(twin.col)),
         }
         .map_err(core_error)
     }
@@ -361,6 +364,29 @@ impl Figure {
         Ok((axes.cells().row(), axes.cells().col()))
     }
 
+    /// Finds the right-hand axes and checks both scale witnesses in core.
+    fn twin_axes_at(
+        &self,
+        row_kind: i64,
+        row: i64,
+        col_kind: i64,
+        col: i64,
+        x_kind: i64,
+        x_base: f64,
+        y_kind: i64,
+        y_base: f64,
+    ) -> PyResult<TwinAxes> {
+        let (row, col) = (grid_index(row_kind, row)?, grid_index(col_kind, col)?);
+        let x = scale_kind(x_kind, x_base)?;
+        let y = scale_kind(y_kind, y_base)?;
+        let axes = self.0.twin_axes_at(row, col).map_err(core_error)?;
+        axes.check_scales(x, y).map_err(core_error)?;
+        Ok(TwinAxes {
+            row: axes.cells().row() as i64,
+            col: axes.cells().col() as i64,
+        })
+    }
+
     /// Adds a circular panel without Cartesian axes.
     fn add_pie_axes(
         &mut self,
@@ -476,15 +502,12 @@ impl Figure {
     /// Adds the numeric right-hand y axes without occupying another grid cell.
     fn twin_y(&mut self, row: AxesRow, col: i64, kind: i64, base: f64) -> PyResult<TwinAxes> {
         let scale = scale_kind(kind, base)?;
-        self.axes(row, col)?
-            .twin_y(scale)
-            .map(drop)
-            .map_err(core_error)?;
-        let row = match row {
-            AxesRow::Original(row) => row,
-            AxesRow::Twin(twin) => twin.row,
-        };
-        Ok(TwinAxes { row })
+        let mut axes = self.axes(row, col)?;
+        let twin = axes.twin_y(scale).map_err(core_error)?;
+        Ok(TwinAxes {
+            row: twin.cells().row() as i64,
+            col: twin.cells().col() as i64,
+        })
     }
 
     /// Sets the title.
