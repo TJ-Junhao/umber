@@ -15,7 +15,7 @@ use std::path::{Path as FsPath, PathBuf};
 use std::process::Command;
 
 #[path = "../../src/test_support/image.rs"]
-mod image;
+pub(super) mod image;
 
 // --- Reading the PDF ---------------------------------------------------------------------------
 

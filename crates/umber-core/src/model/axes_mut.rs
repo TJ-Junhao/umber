@@ -839,8 +839,8 @@ impl<'a> AxesMut<'a> {
     /// scatter outline: 0.5 pt for mapped colors, contrasting when the fill is close to the
     /// background in Oklab and fading to the background color otherwise; 0.8 pt in the
     /// background color for uniform colors. Mapped fills stay opaque; uniform fills keep
-    /// the theme's marker alpha. Up to three true-size reference circles appear once, after the first
-    /// labelled bubble entry, using the axes' y tick format. Repeated labels keep the larger
+    /// the theme's marker alpha. Up to three true-size reference circles appear once, after the
+    /// first labelled bubble entry, using the axes' y tick format. Repeated labels keep the larger
     /// circle; labels that round to zero are omitted. If all labels round to zero, only the
     /// largest reference circle remains, with an automatic label for its size, without the y
     /// format or its affixes. An all-zero or empty scale has only label entries.

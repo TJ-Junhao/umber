@@ -1,5 +1,7 @@
 //! Scatter marks: one batch of markers, culled in axis space by the marker's true extent.
 
+use std::collections::HashMap;
+
 use super::MarkContext;
 use super::clip::Bounds;
 use super::fill::marker_alpha;
@@ -49,19 +51,55 @@ pub(super) fn scatter_item(
     size: f32,
 ) -> Option<Item> {
     let fill = color.scale_alpha(marker_alpha(context.theme));
-    markers_item(context, (xs, ys), fill, shape, size, false)
+    markers_item(context, (xs, ys), fill, shape, size, Outline::Background)
 }
 
-/// The opaque outline color for a mapped point, computed from its fill before marker alpha.
+/// The outline of a uniform or color-mapped marker batch.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum Outline {
+    /// The theme background, with the uniform marker width.
+    Background,
+    /// A mapped outline color, with the mapped marker width.
+    Contrasting(Rgba),
+}
+
+/// Mapped outline colors shared within one mark, with one background conversion to Oklab.
+pub(super) struct MappedOutlines {
+    background: Rgba,
+    background_lab: [f64; 3],
+    colors: HashMap<Rgba, Rgba>,
+}
+
+impl MappedOutlines {
+    pub(super) fn new(theme: &Theme) -> Self {
+        let background = theme.background();
+        Self {
+            background,
+            background_lab: crate::cmap::to_oklab(background),
+            colors: HashMap::new(),
+        }
+    }
+
+    pub(super) fn color(&mut self, fill: Rgba) -> Rgba {
+        *self
+            .colors
+            .entry(fill)
+            .or_insert_with(|| mapped_outline_color(self.background, self.background_lab, fill))
+    }
+}
+
+/// The outline color for a mapped point, computed from its fill before marker alpha.
 /// In Oklab, let `d` be the Euclidean distance from `fill` to the background `bg`, and
 /// `w = clamp(1 - d / T, 0, 1)`, where `T = MAPPED_OUTLINE_DISTANCE = 0.25`. Move the fill's
 /// L by `MAPPED_OUTLINE_LIGHTNESS = 0.25`, down when the background's L is at least 0.5 and
 /// up otherwise, leaving a and b unchanged, to get `ring`. Mix `(1 - w) * bg + w * ring`
-/// in Oklab, then clamp to the sRGB gamut as colormaps do. Far fills use exactly `bg`.
+/// in Oklab, then clamp to the sRGB gamut as colormaps do. Distance uses only color channels,
+/// not alpha. The outline alpha is `(1 - w) * background.a + w * 255`, rounded to 8 bits;
+/// at `w = 0` it is exactly the theme background, including alpha, and at `w = 1` it is opaque.
+/// `bg` is the background's Oklab conversion, shared by all points in the mark.
 /// Scatter and bubbles use this color with `MAPPED_MARKER_OUTLINE = 0.5` pt; their fills
 /// and the colorbar are unchanged.
-pub(super) fn mapped_outline_color(theme: &Theme, fill: Rgba) -> Rgba {
-    let bg = crate::cmap::to_oklab(theme.background());
+fn mapped_outline_color(background: Rgba, bg: [f64; 3], fill: Rgba) -> Rgba {
     let mut ring = crate::cmap::to_oklab(fill);
     let distance = ring
         .iter()
@@ -71,19 +109,19 @@ pub(super) fn mapped_outline_color(theme: &Theme, fill: Rgba) -> Rgba {
         .sqrt();
     let weight = (1.0 - distance / MAPPED_OUTLINE_DISTANCE).clamp(0.0, 1.0);
     if weight == 0.0 {
-        return Rgba {
-            a: 255,
-            ..theme.background()
-        };
+        return background;
     }
     ring[0] += if bg[0] >= 0.5 {
         -MAPPED_OUTLINE_LIGHTNESS
     } else {
         MAPPED_OUTLINE_LIGHTNESS
     };
-    crate::cmap::from_oklab(std::array::from_fn(|i| {
-        (1.0 - weight) * bg[i] + weight * ring[i]
-    }))
+    Rgba {
+        a: ((1.0 - weight) * f64::from(background.a) + weight * 255.0).round() as u8,
+        ..crate::cmap::from_oklab(std::array::from_fn(|i| {
+            (1.0 - weight) * bg[i] + weight * ring[i]
+        }))
+    }
 }
 
 /// The scene item of one batch of `shape` markers of diameter `size`, filled with `fill` as
@@ -95,13 +133,12 @@ pub(super) fn markers_item(
     fill: Rgba,
     shape: Marker,
     size: f32,
-    mapped: bool,
+    outline: Outline,
 ) -> Option<Item> {
     let MarkContext { theme, maps, .. } = *context;
-    let outline = if mapped {
-        MAPPED_MARKER_OUTLINE
-    } else {
-        MARKER_OUTLINE
+    let (color, width) = match outline {
+        Outline::Background => (theme.background(), MARKER_OUTLINE),
+        Outline::Contrasting(color) => (color, MAPPED_MARKER_OUTLINE),
     };
     let shape_path = marker_shape(shape, size);
     // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
@@ -109,7 +146,7 @@ pub(super) fn markers_item(
     // may be in the frame of horizontal marks, as for the outliers of horizontal boxes, whose
     // first axis is the plot's y axis.
     let (half_w, half_h) = extent(&shape_path);
-    let reach = f64::from(outline) + MARKER_SLACK;
+    let reach = f64::from(width) + MARKER_SLACK;
     let (half_first, half_second) = maps.in_frame((half_w, half_h));
     let ((left, right), (top, bottom)) = (
         maps.x.expanded(half_first + reach),
@@ -135,12 +172,8 @@ pub(super) fn markers_item(
         shape: shape_path,
         fill: Some(fill),
         stroke: Some(StrokeStyle {
-            color: if mapped {
-                mapped_outline_color(theme, fill)
-            } else {
-                theme.background()
-            },
-            width: outline,
+            color,
+            width,
             dash: Vec::new(),
             cap: LineCap::Butt,
             join: LineJoin::Miter,
@@ -195,6 +228,7 @@ pub(super) fn scatter_items(
         items.extend(scatter_item(context, xs, ys, color, shape, size));
         return;
     }
+    let mut outlines = MappedOutlines::new(context.theme);
     let mut run: Option<(Rgba, Vec<f64>, Vec<f64>)> = None;
     for (index, (&x, &y)) in xs.iter().zip(ys).enumerate() {
         let Some(color) = fill.at(context.theme, index) else {
@@ -213,7 +247,7 @@ pub(super) fn scatter_items(
                         color,
                         shape,
                         size,
-                        true,
+                        Outline::Contrasting(outlines.color(color)),
                     ));
                 }
                 run = Some((color, vec![x], vec![y]));
@@ -227,7 +261,7 @@ pub(super) fn scatter_items(
             color,
             shape,
             size,
-            true,
+            Outline::Contrasting(outlines.color(color)),
         ));
     }
 }

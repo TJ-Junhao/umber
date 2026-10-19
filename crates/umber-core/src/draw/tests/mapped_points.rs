@@ -1,12 +1,16 @@
 //! Color-mapped point outlines: Oklab contrast, batching and unchanged uniform marks.
 
-use super::super::scatter::{MAPPED_MARKER_OUTLINE, mapped_outline_color};
+use super::super::scatter::{MAPPED_MARKER_OUTLINE, MappedOutlines};
 use super::{Pixels, mark_group, near, nums};
 use crate::cmap::{from_oklab, to_oklab};
 use crate::{
     BubbleOptions, ColorBy, ColorSpec, Figure, FontLibrary, Item, LegendStyle, Marker, Paint,
     PointColor, Rgba, ScaleKind, ScatterOptions, SizeSpec, Theme,
 };
+
+fn mapped_outline_color(theme: &Theme, fill: Rgba) -> Rgba {
+    MappedOutlines::new(theme).color(fill)
+}
 
 #[test]
 fn mapped_outline_colors_at_centers_ends_and_mid_values() {
@@ -61,7 +65,7 @@ fn mapped_outline_colors_at_centers_ends_and_mid_values() {
 }
 
 #[test]
-fn mapped_outline_moves_lightness_away_from_background_and_ignores_alpha() {
+fn mapped_outline_moves_lightness_away_from_background_and_ignores_fill_alpha() {
     for bg in [
         Rgba::BLACK,
         Rgba::opaque(97, 97, 97),
@@ -84,7 +88,112 @@ fn mapped_outline_moves_lightness_away_from_background_and_ignores_alpha() {
         } else {
             Rgba::WHITE
         };
-        assert_eq!(mapped_outline_color(&translucent, far), bg);
+        assert_eq!(
+            mapped_outline_color(&translucent, far),
+            translucent.background()
+        );
+    }
+}
+
+#[test]
+fn mapped_outline_alpha_follows_weight_on_transparent_backgrounds() {
+    for bg in [Rgba::WHITE, Rgba::opaque(0, 0, 0)] {
+        let opaque = Theme::pigment().with_background(bg).unwrap();
+        let [lightness, a, b] = to_oklab(bg);
+        let near = from_oklab([lightness + if lightness >= 0.5 { -0.1 } else { 0.1 }, a, b]);
+        let far = if lightness >= 0.5 {
+            Rgba::BLACK
+        } else {
+            Rgba::WHITE
+        };
+        for alpha in [0, 128] {
+            let theme = opaque.with_background(Rgba { a: alpha, ..bg }).unwrap();
+            let mut outlines = MappedOutlines::new(&theme);
+            assert_eq!(outlines.color(far), theme.background());
+            assert_eq!(outlines.color(bg), mapped_outline_color(&opaque, bg));
+            assert_eq!(outlines.color(bg).a, 255);
+            let distance = to_oklab(near)
+                .iter()
+                .zip(to_oklab(bg))
+                .map(|(fill, background)| (fill - background).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            let weight = (1.0 - distance / 0.25).clamp(0.0, 1.0);
+            assert!(weight > 0.0 && weight < 1.0);
+            let expected = Rgba {
+                a: ((1.0 - weight) * f64::from(alpha) + weight * 255.0).round() as u8,
+                ..mapped_outline_color(&opaque, near)
+            };
+            assert!(expected.a > alpha && expected.a < 255);
+            assert_eq!(outlines.color(near), expected);
+            assert_eq!(outlines.color(far), theme.background());
+            assert_eq!(outlines.color(near), expected);
+        }
+    }
+}
+
+#[test]
+fn mapped_translucent_outlines_reach_scatter_and_bubbles() {
+    for alpha in [0, 128] {
+        let theme = Theme::pigment()
+            .with_background(Rgba {
+                a: alpha,
+                ..Rgba::WHITE
+            })
+            .unwrap();
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        let color = PointColor::By(ColorBy {
+            center: Some(0.0),
+            ..ColorBy::new(vec![-1.0, -0.2, 0.0, -1.0])
+        });
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .scatter(
+                nums(&[1.0, 2.0, 3.0, 4.0]),
+                &[1.0; 4],
+                ScatterOptions {
+                    color: color.clone(),
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap()
+            .bubbles(
+                &[1.0, 2.0, 3.0, 4.0],
+                &[2.0; 4],
+                &[1.0; 4],
+                BubbleOptions {
+                    color,
+                    ..BubbleOptions::default()
+                },
+            )
+            .unwrap();
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let strokes: Vec<_> = mark_group(&scene)
+            .1
+            .iter()
+            .filter_map(|item| match item {
+                Item::Markers {
+                    stroke: Some(style),
+                    ..
+                }
+                | Item::Stroke { style, .. } => Some(style),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(strokes.len(), 8);
+        for batch in strokes.chunks_exact(4) {
+            for (style, t) in batch.iter().zip([0.0, 0.4, 0.5, 0.0]) {
+                assert_eq!(style.width, 0.5);
+                assert_eq!(
+                    style.color,
+                    mapped_outline_color(&theme, theme.diverging_cmap().at(t))
+                );
+            }
+            assert_eq!(batch[0].color, theme.background());
+            assert!(batch[1].color.a > alpha && batch[1].color.a < 255);
+            assert!(batch[2].color.a > batch[1].color.a);
+            assert_eq!(batch[0].color, batch[3].color);
+        }
     }
 }
 
@@ -209,7 +318,14 @@ fn mapped_bubbles_use_the_same_outline_and_keep_neutral_swatches() {
 
 #[test]
 fn uniform_scatter_and_bubbles_keep_background_outlines_even_for_near_fills() {
-    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()]
+        .into_iter()
+        .chain([0, 128].map(|a| {
+            Theme::pigment()
+                .with_background(Rgba { a, ..Rgba::WHITE })
+                .unwrap()
+        }))
+    {
         let color = theme.diverging_cmap().at(0.5);
         let uniform = PointColor::Uniform(ColorSpec::Fixed(color));
         let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();

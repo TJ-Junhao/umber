@@ -18,9 +18,9 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use umber_core::figure::{AxisData, HistOptions, LineOptions, ScatterOptions};
 use umber_core::render::{SvgText, render_png, render_svg};
 use umber_core::{
-    AreaOptions, BandOptions, Figure, FontLibrary, Grid, GridIndex, HeatmapOptions, HexbinOptions,
-    Hist2dOptions, Instant, LegendPosition, LegendStyle, Placement, ScaleKind, Series, Share,
-    Theme,
+    AreaOptions, BandOptions, ColorBy, Figure, FontLibrary, Grid, GridIndex, HeatmapOptions,
+    HexbinOptions, Hist2dOptions, Instant, LegendPosition, LegendStyle, Placement, PointColor,
+    ScaleKind, Series, Share, Theme,
 };
 
 const DPI: u32 = 200;
@@ -89,6 +89,29 @@ fn scatter_figure(n: usize) -> Figure {
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .scatter(AxisData::Numbers(x), &y, ScatterOptions::default())
+        .unwrap();
+    figure
+}
+
+fn mapped_scatter_figure(n: usize) -> Figure {
+    let x: Vec<f64> = (0..n).map(|i| unit(2 * i) * 100.0).collect();
+    let y: Vec<f64> = (0..n).map(|i| unit(2 * i + 1) * 50.0).collect();
+    let values: Vec<f64> = (0..n).map(|i| unit(2 * n + i) * 2.0 - 1.0).collect();
+    let mut figure = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .scatter(
+            AxisData::Numbers(x),
+            &y,
+            ScatterOptions {
+                color: PointColor::By(ColorBy {
+                    center: Some(0.0),
+                    ..ColorBy::new(values)
+                }),
+                ..ScatterOptions::default()
+            },
+        )
         .unwrap();
     figure
 }
@@ -284,6 +307,10 @@ fn benches(c: &mut Criterion) {
     let scatter = scatter_figure(100_000);
     group.bench_function("scatter_100k_png", |b| {
         b.iter(|| black_box(scatter.to_png(i64::from(DPI)).unwrap()));
+    });
+    let mapped_scatter = mapped_scatter_figure(100_000);
+    group.bench_function("scatter_100k_mapped_png", |b| {
+        b.iter(|| black_box(mapped_scatter.to_png(i64::from(DPI)).unwrap()));
     });
 
     // The v0.2 grid target, including the shared-axes resolve/layout repair path.

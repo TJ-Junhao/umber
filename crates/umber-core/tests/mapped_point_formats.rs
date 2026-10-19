@@ -7,9 +7,17 @@ use umber_core::{
 
 #[path = "support/pdf_check.rs"]
 mod pdf_check;
+use pdf_check::image;
 
 #[test]
 fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
+    let poppler = pdf_check::have("pdftoppm");
+    if !poppler {
+        eprintln!(
+            "skipped mapped-point PDF/PNG raster comparison: pdftoppm is not installed; \
+             PNG pixels, SVG strokes and PDF color operators are still checked"
+        );
+    }
     for (name, theme) in [
         ("pigment", Theme::pigment()),
         ("graphite", Theme::graphite()),
@@ -82,8 +90,36 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                     )));
                 }
             }
-            let png = f.to_png(144).unwrap();
-            assert_eq!(png, umber_core::render::render_png(&scene, 144).unwrap());
+            let center = items
+                .iter()
+                .filter(|item| matches!(item, Item::Markers { .. } | Item::Stroke { .. }))
+                .nth(2)
+                .unwrap();
+            let (ring_x, ring_y) = match center {
+                Item::Markers {
+                    shape, positions, ..
+                } => {
+                    let (lo, hi) = shape.bounds().unwrap();
+                    (positions[0].x + lo.x, positions[0].y + (lo.y + hi.y) / 2.0)
+                }
+                Item::Stroke { path, .. } => {
+                    let (lo, hi) = path.bounds().unwrap();
+                    (lo.x, (lo.y + hi.y) / 2.0)
+                }
+                _ => unreachable!(),
+            };
+            // At 360 dpi the 0.5 pt ring covers a full pixel at the path's left midpoint.
+            let dpi = 360;
+            let png = f.to_png(dpi).unwrap();
+            let pixels = image::decode_rgba8(&png).unwrap();
+            let scale = dpi as f32 / 72.0;
+            let actual = pixels.at((ring_x * scale) as u32, (ring_y * scale) as u32);
+            let color = strokes[2].color;
+            let expected = [color.r, color.g, color.b, color.a];
+            assert!(
+                actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2),
+                "{name}, bubbles={bubbles}: ring pixel {actual:?}, expected {expected:?}"
+            );
             let pdf = f.to_pdf().unwrap();
             assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
             let content = pdf_check::page_content(&pdf);
@@ -110,10 +146,10 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                     "missing {rgb:?} in PDF: {pdf_colors:?}"
                 );
             }
-            if pdf_check::have("pdftoppm") {
+            if poppler {
                 let dir = pdf_check::scratch(&format!("mapped-points-{name}-{bubbles}"));
                 let path = pdf_check::write(&dir, "points.pdf", &pdf);
-                pdf_check::assert_matches_png(&path, &png, 144);
+                pdf_check::assert_matches_png(&path, &png, dpi as u32);
             }
         }
     }
