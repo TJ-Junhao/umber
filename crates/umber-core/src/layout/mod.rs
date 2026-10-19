@@ -569,6 +569,39 @@ pub(crate) fn centered_tick_label(
     Ok(label)
 }
 
+/// What text drawn at data positions is set as: the body text of annotations, or the values
+/// written on bars, in the tick label style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlotText {
+    /// The text of [`AxesMut::text`](crate::AxesMut::text) and
+    /// [`AxesMut::annotate`](crate::AxesMut::annotate).
+    Annotation,
+    /// A value written on a bar.
+    Value,
+}
+
+/// `text` shaped as `kind` in `theme` at the per-call `size` (resolved as [`text_size`]
+/// resolves it), unplaced: text that the layout measures but reserves no room for, since it is
+/// drawn at data positions over the plot.
+///
+/// # Errors
+///
+/// As [`measure`].
+pub(crate) fn plot_text(
+    lib: &SceneFonts<'_>,
+    theme: &Theme,
+    text: &str,
+    kind: PlotText,
+    size: SizeSpec,
+) -> Result<Label> {
+    let role = match kind {
+        PlotText::Annotation => TextRole::Body,
+        PlotText::Value => TextRole::Tick,
+    };
+    let style = Styles::new(theme, TextRole::Title, StyleSizes::default()).sized(theme, role, size);
+    measure(lib, text, style)
+}
+
 /// The baseline of text with `ascent` and `descent` in a line box of `height` whose top is
 /// `top`: the leading is split evenly above and below.
 fn baseline_in_line(top: f64, height: f64, ascent: f64, descent: f64) -> f64 {

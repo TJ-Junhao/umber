@@ -198,6 +198,9 @@ def bar(
     *,
     label: str = "",
     color: Color = Color.AUTO,
+    annotate: bool = False,
+    format: TickFormat | Auto = AUTO,
+    size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
     by: Values[str] | Auto = AUTO,
 ) -> Axes[str, float]:
@@ -213,6 +216,9 @@ def bar(
         heights: The bar heights, one per category.
         label: The name shown in the legend; an empty string leaves the bars out of it.
         color: The bar color. ``Color.AUTO`` takes the first color of the theme palette.
+        annotate: Whether each bar shows its value just beyond its end, as in ``Axes.bar()``.
+        format: The format of the values shown by ``annotate``, as in ``Axes.bar()``.
+        size: The size of the values shown by ``annotate``, as in ``Axes.bar()``.
         theme: The theme of the new figure.
         by: One group name per data row; ``AUTO`` draws one series. Groups follow first
             appearance, supplying their labels and palette colors. Do not pass an explicit
@@ -227,20 +233,31 @@ def bar(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a category repeats, or a
             height is infinite.
-        StyleError: If ``label`` or a category name is too long.
-
-        UsageError: If ``by`` comes with an explicit color or a non-empty label.
+        StyleError: If ``label`` or a category name is too long, or ``format`` is
+            ``TickFormat.iso()``.
+        UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes
+            with an explicit color or a non-empty label.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.bar(["North", "South", "East"], [3, 5, 2], theme=ub.Theme.GRAPHITE)
         >>> ax.figure.save_svg("regions.svg")
+        >>> labelled = ub.bar(["North", "South"], [3.5, 5.25], annotate=True)
         >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
     """
     with api_call():
         instance("bar()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes(x=Scale.category())
-        return axes.bar(categories, heights, by=by, label=label, color=color)
+        return axes.bar(
+            categories,
+            heights,
+            by=by,
+            label=label,
+            color=color,
+            annotate=annotate,
+            format=format,
+            size=size,
+        )
 
 
 def hist(

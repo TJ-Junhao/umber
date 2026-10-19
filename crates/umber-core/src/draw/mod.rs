@@ -31,9 +31,11 @@
 //! on a category y axis are horizontal: they are drawn by the same code as on a category x axis,
 //! in a context whose axis maps are in their frame ([`MarkContext::oriented`]).
 
+mod annotation;
 mod area;
 mod band;
 mod bar;
+pub(crate) mod bar_labels;
 mod bar_shape;
 mod box_plot;
 mod bubbles;
@@ -69,6 +71,7 @@ mod tests;
 mod violin;
 pub(crate) use strip::check as check_points;
 
+pub(crate) use annotation::items as annotations;
 pub(crate) use chrome::{baseline, chrome, figure_header};
 pub(crate) use heatmap::annotations as heatmap_annotations;
 
@@ -112,6 +115,25 @@ impl MarkContext<'_> {
     }
 }
 
+/// The context that `marks`, resolved as `resolved` on `layout`, are drawn in, in the plot's own
+/// frame.
+fn mark_context<'a>(
+    theme: &'a Theme,
+    resolved: &Resolved,
+    layout: &Layout,
+    marks: &[ResolvedMark<'_>],
+) -> MarkContext<'a> {
+    let plot = layout.plot;
+    MarkContext {
+        theme,
+        maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
+        plot,
+        baseline: resolved.baseline,
+        baseline_at: layout.baseline.at,
+        widest_line: widest_line_width(marks),
+    }
+}
+
 /// The `marks` as one group clipped to [`marks_clip`], in the given order, each in its resolved
 /// color, with the text they carry (the level labels of contours) shaped with the scene's
 /// `fonts`. `Ok(None)` when nothing is visible.
@@ -126,15 +148,7 @@ pub(crate) fn marks(
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
 ) -> crate::Result<Option<Item>> {
-    let plot = layout.plot;
-    let context = MarkContext {
-        theme,
-        maps: AxisMaps::new(&resolved.x, &resolved.y, plot),
-        plot,
-        baseline: resolved.baseline,
-        baseline_at: layout.baseline.at,
-        widest_line: widest_line_width(marks),
-    };
+    let context = mark_context(theme, resolved, layout, marks);
     let mut items = Vec::new();
     // Reference spans lie under the data marks and reference lines over them, whatever the order
     // of the calls; the data marks keep theirs.

@@ -33,6 +33,8 @@ AUTO = (0, 0, 1.0)
 ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
+# Bars without value labels: annotate, format and size.
+NO_LABELS = (False, None, NO_SIZE)
 RED = (2, 0xD64933FF, 1.0)
 BLUE = (2, 0x3366B8FF, 1.0)
 LINEAR, LOG, CATEGORY = 0, 1, 2
@@ -360,9 +362,9 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "bubbles": lambda f, r, c: f.bubbles(r, c, floats(1), floats(1), floats(1), "", AUTO, 0),
-    "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO),
-    "grouped_bar": lambda f, r, c: f.grouped_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
-    "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)]),
+    "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO, *NO_LABELS),
+    "grouped_bar": lambda f, r, c: f.grouped_bar(r, c, ["a"], [("s", floats(1), AUTO)], *NO_LABELS),
+    "stacked_bar": lambda f, r, c: f.stacked_bar(r, c, ["a"], [("s", floats(1), AUTO)], *NO_LABELS),
     "stacked_area": lambda f, r, c: f.stacked_area(r, c, floats(1), [("s", floats(1), AUTO)]),
     "hist": lambda f, r, c: f.hist(r, c, floats(1), 3, 0, False, 0, "", AUTO),
     "step": lambda f, r, c: f.step(r, c, floats(1), floats(1), 0, "", AUTO, 0, NO_SIZE),
@@ -464,7 +466,7 @@ def test_native_grid_places_and_finds_axes() -> None:
     assert fig.axes_at(1, 0, 1, 0, CATEGORY, 0.0, LINEAR, 10.0) == (0, 0)
     assert fig.axes_at(1, 1, 1, 2, LOG, 2.0, LOG, 10.0) == (1, 2)
     fig.title(1, 2, "Corner", NO_SIZE)
-    fig.bar(0, 0, ["a", "b"], floats(1, 2), "", AUTO)
+    fig.bar(0, 0, ["a", "b"], floats(1, 2), "", AUTO, *NO_LABELS)
     assert ">Corner</text>" in fig.to_svg(EDITABLE)
     assert_reported(
         lambda: fig.axes_at(1, 1, 1, 2, LOG, 10.0, LOG, 10.0),
@@ -757,9 +759,9 @@ def test_marks_draw() -> None:
     assert fig.to_svg(OUTLINES) != with_line
 
     bars = figure(x=CATEGORY)
-    bars.bar(0, 0, ["a", "b"], floats(1, 2), "c", RED)
-    bars.grouped_bar(0, 0, ["c"], [("s", floats(1), AUTO), ("t", floats(2), BLUE)])
-    bars.stacked_bar(0, 0, ["d"], [("s", floats(1), AUTO), ("t", floats(-2), BLUE)])
+    bars.bar(0, 0, ["a", "b"], floats(1, 2), "c", RED, *NO_LABELS)
+    bars.grouped_bar(0, 0, ["c"], [("s", floats(1), AUTO), ("t", floats(2), BLUE)], *NO_LABELS)
+    bars.stacked_bar(0, 0, ["d"], [("s", floats(1), AUTO), ("t", floats(-2), BLUE)], *NO_LABELS)
     assert bars.to_svg(OUTLINES) != figure(x=CATEGORY).to_svg(OUTLINES)
 
     categories = figure(x=CATEGORY)
@@ -908,7 +910,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar length",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(0, 0, ["a", "b"], floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "b"], floats(1), "", AUTO, *NO_LABELS),
         ub.DataError,
         "Axes.bar(): categories has 2 values but heights has 1; categories and heights must "
         "have the same length.",
@@ -918,7 +920,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar linear x",
         figure,
-        lambda f: f.bar(0, 0, ["a"], floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, ["a"], floats(1), "", AUTO, *NO_LABELS),
         ub.DataError,
         "Axes.bar(): categories holds names but the x axis is not a category axis; "
         "use a category x axis.",
@@ -928,7 +930,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar repeated category",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(0, 0, ["a", "a"], floats(1, 2), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "a"], floats(1, 2), "", AUTO, *NO_LABELS),
         ub.DataError,
         'Axes.bar(): categories[1] repeats "a" from categories[0]; each category must appear once.',
         "categories",
@@ -937,7 +939,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "bar infinite",
         lambda: figure(x=CATEGORY),
-        lambda f: f.bar(0, 0, ["a", "b"], floats(1, np.inf), "", AUTO),
+        lambda f: f.bar(0, 0, ["a", "b"], floats(1, np.inf), "", AUTO, *NO_LABELS),
         ub.DataError,
         f"Axes.bar(): heights[1] is inf; {FINITE}",
         "heights",
@@ -947,7 +949,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped no series",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(0, 0, ["a"], []),
+        lambda f: f.grouped_bar(0, 0, ["a"], [], *NO_LABELS),
         ub.DataError,
         "Axes.grouped_bar(): series is empty; pass at least one series.",
         "series",
@@ -956,7 +958,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped series length",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(0, 0, ["a"], [series(1), series()]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [series(1), series()], *NO_LABELS),
         ub.DataError,
         "Axes.grouped_bar(): categories has 1 values but series[1].values has 0; each series "
         "must have one value per category.",
@@ -966,7 +968,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped repeated category",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(0, 0, ["a", "a"], [series(1, 2)]),
+        lambda f: f.grouped_bar(0, 0, ["a", "a"], [series(1, 2)], *NO_LABELS),
         ub.DataError,
         'Axes.grouped_bar(): categories[1] repeats "a" from categories[0]; each category must '
         "appear once.",
@@ -976,7 +978,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped infinite",
         lambda: figure(x=CATEGORY),
-        lambda f: f.grouped_bar(0, 0, ["a", "b"], [series(1, 2), series(1, np.inf)]),
+        lambda f: f.grouped_bar(0, 0, ["a", "b"], [series(1, 2), series(1, np.inf)], *NO_LABELS),
         ub.DataError,
         f"Axes.grouped_bar(): series[1].values[1] is inf; {FINITE}",
         "series",
@@ -985,7 +987,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "grouped linear x",
         figure,
-        lambda f: f.grouped_bar(0, 0, ["a"], [series(1)]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [series(1)], *NO_LABELS),
         ub.DataError,
         "Axes.grouped_bar(): categories holds names but the x axis is not a category axis; "
         "use a category x axis.",
@@ -995,7 +997,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked no series",
         lambda: figure(x=CATEGORY),
-        lambda f: f.stacked_bar(0, 0, ["a"], []),
+        lambda f: f.stacked_bar(0, 0, ["a"], [], *NO_LABELS),
         ub.DataError,
         "Axes.stacked_bar(): series is empty; pass at least one series.",
         "series",
@@ -1004,7 +1006,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked log not positive",
         lambda: figure(x=CATEGORY, y=LOG),
-        lambda f: f.stacked_bar(0, 0, ["a"], [series(-1)]),
+        lambda f: f.stacked_bar(0, 0, ["a"], [series(-1)], *NO_LABELS),
         ub.DataError,
         "Axes.stacked_bar(): series[0].values[0] is -1 on a log axis; values must be positive.",
         "series",
@@ -1013,7 +1015,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "stacked total",
         lambda: figure(x=CATEGORY),
-        lambda f: f.stacked_bar(0, 0, ["a"], [series(1e300), series(1e300)]),
+        lambda f: f.stacked_bar(0, 0, ["a"], [series(1e300), series(1e300)], *NO_LABELS),
         ub.DataError,
         'Axes.stacked_bar(): the values of categories[0] ("a") stack to 2e300; each stack '
         "must stay within 1e300 on both sides of 0.",
@@ -1123,13 +1125,13 @@ INTERNAL_MARK_ERRORS: list[
     ),
     (
         "series values",
-        lambda f: f.grouped_bar(0, 0, ["a"], [("s", untyped((1.0,)), AUTO)]),
+        lambda f: f.grouped_bar(0, 0, ["a"], [("s", untyped((1.0,)), AUTO)], *NO_LABELS),
         TypeError,
         "expected a one-dimensional float64 buffer, got tuple",
     ),
     (
         "tuple of names",
-        lambda f: f.bar(0, 0, untyped(("a",)), floats(1), "", AUTO),
+        lambda f: f.bar(0, 0, untyped(("a",)), floats(1), "", AUTO, *NO_LABELS),
         TypeError,
         "expected a list of str, got tuple",
     ),

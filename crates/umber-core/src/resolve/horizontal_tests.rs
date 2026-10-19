@@ -82,8 +82,8 @@ fn figure(
         Mark::Violin => a.violin(names(), groups.to_vec(), ViolinOptions::default()),
         Mark::GroupedViolin => a.grouped_violin(names(), distributions()),
         Mark::Bar => a.bar(names(), &high, BarOptions::default()),
-        Mark::StackedBar => a.stacked_bar(names(), series()),
-        Mark::GroupedBar => a.grouped_bar(names(), series()),
+        Mark::StackedBar => a.stacked_bar(names(), series(), crate::ValueLabels::default()),
+        Mark::GroupedBar => a.grouped_bar(names(), series(), crate::ValueLabels::default()),
         Mark::ErrorBars if horizontal => a.x_error_bars_shared(
             AxisData::Categories(names()),
             Arc::from(low),

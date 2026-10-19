@@ -192,7 +192,12 @@ fn errors_carry_their_parameter_and_hint() {
         (
             "grouped bar, no series",
             on_axes(cat, linear, |a| {
-                a.grouped_bar(names(&["a"]), Vec::new()).map(|_| ())
+                a.grouped_bar(
+                    names(&["a"]),
+                    Vec::new(),
+                    umber_core::ValueLabels::default(),
+                )
+                .map(|_| ())
             }),
             Some("series"),
             None,
@@ -200,8 +205,12 @@ fn errors_carry_their_parameter_and_hint() {
         (
             "grouped bar, nested infinite height",
             on_axes(cat, linear, |a| {
-                a.grouped_bar(names(&["a"]), vec![series(&[1.0]), series(&[inf])])
-                    .map(|_| ())
+                a.grouped_bar(
+                    names(&["a"]),
+                    vec![series(&[1.0]), series(&[inf])],
+                    umber_core::ValueLabels::default(),
+                )
+                .map(|_| ())
             }),
             Some("series"),
             Some("use NaN to omit that height."),
@@ -209,8 +218,12 @@ fn errors_carry_their_parameter_and_hint() {
         (
             "stacked bar, infinite height",
             on_axes(cat, linear, |a| {
-                a.stacked_bar(names(&["a"]), vec![series(&[inf])])
-                    .map(|_| ())
+                a.stacked_bar(
+                    names(&["a"]),
+                    vec![series(&[inf])],
+                    umber_core::ValueLabels::default(),
+                )
+                .map(|_| ())
             }),
             Some("series"),
             Some("use NaN to omit that height."),
@@ -259,8 +272,12 @@ fn errors_carry_their_parameter_and_hint() {
         (
             "grouped bar, repeated category",
             on_axes(cat, linear, |a| {
-                a.grouped_bar(names(&["a", "a"]), vec![series(&[1.0, 2.0])])
-                    .map(|_| ())
+                a.grouped_bar(
+                    names(&["a", "a"]),
+                    vec![series(&[1.0, 2.0])],
+                    umber_core::ValueLabels::default(),
+                )
+                .map(|_| ())
             }),
             Some("categories"),
             Some("combine repeated categories and sum their heights within each series."),

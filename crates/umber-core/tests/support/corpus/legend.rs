@@ -303,7 +303,11 @@ fn figures() -> Vec<(&'static str, Figure)> {
     })
     .to_vec();
     axes(&mut stacked)
-        .stacked_bar(["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec(), series)
+        .stacked_bar(
+            ["Q1", "Q2", "Q3", "Q4"].map(String::from).to_vec(),
+            series,
+            umber_core::ValueLabels::default(),
+        )
         .unwrap();
     out.push(("fig-legend-stacked-bar", stacked));
 
@@ -385,14 +389,22 @@ fn bar_legend_figures() -> Vec<(&'static str, Figure)> {
         let mut grouped = category();
         labelled(&mut grouped, "Labelled grouped bar");
         axes(&mut grouped)
-            .grouped_bar(quarters.clone(), series())
+            .grouped_bar(
+                quarters.clone(),
+                series(),
+                umber_core::ValueLabels::default(),
+            )
             .unwrap();
         out.push((grouped_name, grouped));
 
         let mut stacked = category();
         labelled(&mut stacked, "Labelled stacked bar");
         axes(&mut stacked)
-            .stacked_bar(quarters.clone(), series())
+            .stacked_bar(
+                quarters.clone(),
+                series(),
+                umber_core::ValueLabels::default(),
+            )
             .unwrap();
         out.push((stacked_name, stacked));
 
@@ -499,7 +511,11 @@ fn chips_figures() -> Vec<(&'static str, Figure)> {
     let mut grouped = figure(6.0, 4.0, Theme::midnight(), ScaleKind::Category, linear());
     labelled(&mut grouped, "Grouped chips");
     axes(&mut grouped)
-        .grouped_bar(["Q1", "Q2", "Q3"].map(String::from).to_vec(), series)
+        .grouped_bar(
+            ["Q1", "Q2", "Q3"].map(String::from).to_vec(),
+            series,
+            umber_core::ValueLabels::default(),
+        )
         .unwrap();
     out.push(("fig-legend-chips-grouped-bar", grouped));
 

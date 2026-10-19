@@ -140,6 +140,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .grouped_bar(
                 countries(8),
                 vec![series("2015", &share_2015), series("2023", &share_2023)],
+                umber_core::ValueLabels::default(),
             )
             .unwrap();
         emit_scene(
@@ -160,6 +161,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                     series("Wind", &[425.0, 140.0, 100.0, 80.0, 5.0, 1.0, 10.0, 3.0]),
                     series("Solar", &[240.0, 60.0, 50.0, 140.0, 28.0, 1.0, 100.0, 1.0]),
                 ],
+                umber_core::ValueLabels::default(),
             )
             .unwrap();
         emit_scene(
@@ -281,6 +283,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                     series("Hydro", &[240.0, 25.0, 420.0]),
                     series("Wind", &[425.0, 140.0, 100.0]),
                 ],
+                umber_core::ValueLabels::default(),
             )
             .unwrap();
         emit_scene(

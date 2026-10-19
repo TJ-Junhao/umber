@@ -870,6 +870,27 @@ pub(crate) fn format_values(values: &[f64]) -> Vec<String> {
     values.iter().map(|&v| label(v, None)).collect()
 }
 
+/// Labels for finite `values` written one by one, such as the values on bars: each value on its
+/// own, rounded to `digits` significant digits and written in the shortest form that shows them,
+/// trailing zeros dropped (`42`, `28.4`, `0.12345`), as C's `%g` writes. A non-zero value whose
+/// rounded magnitude lies outside `1e-4 <= |v| < 1e6` is written in scientific form
+/// (`1.23457e6`). Zero is `0`, and negatives use U+2212.
+pub(crate) fn format_each(values: &[f64], digits: usize) -> Vec<String> {
+    values
+        .iter()
+        .map(|&v| {
+            let rounded = round_significant(v, digits);
+            if rounded == 0.0 {
+                "0".to_owned()
+            } else if (1e-4..1e6).contains(&rounded.abs()) {
+                fixed(rounded, None)
+            } else {
+                scientific(v, Some(digits))
+            }
+        })
+        .collect()
+}
+
 /// Labels for finite `values` that are not ticks, such as the values written on the cells of a
 /// heatmap, one label each. With a `step`, each value has the decimals that labels of ticks
 /// `step` apart have (the grid policy); without one, up to 12 significant digits (the value
@@ -895,6 +916,28 @@ pub(crate) fn format_annotations(values: &[f64], step: Option<f64>) -> Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn values_written_each_on_their_own_keep_six_significant_digits() {
+        let values = [
+            42.0, 28.4, -16.5, 0.12345, 0.9, 0.0, -0.0, 1234567.0, 0.00001234, 999_999.9,
+        ];
+        assert_eq!(
+            format_each(&values, 6),
+            [
+                "42",
+                "28.4",
+                "\u{2212}16.5",
+                "0.12345",
+                "0.9",
+                "0",
+                "0",
+                "1.23457e6",
+                "1.234e\u{2212}5",
+                "1e6"
+            ]
+        );
+    }
 
     fn close(a: &[f64], b: &[f64]) -> bool {
         a.len() == b.len()
