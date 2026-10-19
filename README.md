@@ -6,7 +6,7 @@ umber is a plotting library for Python with a rendering core written in Rust. It
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
-![A line chart of daily temperature at two stations, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
+![Twelve kinds of chart drawn by umber on one grid: lines and bands, grouped bars, points colored by value, a donut, a histogram with a density curve, violins with swarms, contours, a heatmap, a time series with an annotation, two y axes, a hexbin and grouped ECDFs](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/gallery.png)
 
 - **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 77 ms and to PDF in about 36 ms on a standard GitHub Actions runner, 2.7× and 4.5× faster than matplotlib (see [Performance](#performance)).
 - **Explicit.** Every option is a typed value (`Color`, `Size`, `Dash`, `TickFormat`, …). There are no format strings, no positional style arguments and no silent conversions.
@@ -58,7 +58,9 @@ fig.save_svg("temperature.svg")
 fig.save_pdf("temperature.pdf")
 ```
 
-This is the chart at the top of this page. Data can be a list, a tuple, a NumPy array, or a pandas or polars Series. Missing values (`NaN`, or nulls in nullable pandas and polars columns) leave a gap.
+![A line chart of daily temperature at two stations, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/lines-graphite.png)
+
+Data can be a list, a tuple, a NumPy array, or a pandas or polars Series. Missing values (`NaN`, or nulls in nullable pandas and polars columns) leave a gap.
 
 | Chart | Method |
 | --- | --- |
