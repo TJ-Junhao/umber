@@ -46,7 +46,13 @@ impl Refs {
 /// `data` compressed for a `FlateDecode` stream (zlib format), at a fixed level, so the same
 /// data always gives the same bytes.
 pub(super) fn compress(data: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
+    compress_at(data, 6)
+}
+
+/// `data` compressed for a `FlateDecode` stream at deflate `level` (0 to 10); the same data and
+/// level always give the same bytes.
+pub(super) fn compress_at(data: &[u8], level: u8) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(data, level)
 }
 
 /// The 64-bit FNV-1a hash of `data`, starting from `basis`.
