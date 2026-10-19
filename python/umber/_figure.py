@@ -62,6 +62,7 @@ class Figure:
     Create a figure, add panels with ``add_axes()``, draw on their axes, then render with
     ``to_png()`` or ``to_svg()``, or write with ``save_png()`` or ``save_svg()``. Empty cells
     show the background. Positions count from zero; an axes may span several cells.
+    ``to_pdf()`` and ``save_pdf()`` produce a vector PDF with embedded fonts.
 
     ``copy.copy()`` and ``copy.deepcopy()`` return an independent figure with the same size,
     theme, grid, axes and marks; changing one leaves the other unchanged. ``axes_at()``
@@ -546,6 +547,28 @@ class Figure:
             mode = instance("Figure.to_svg()", "text", text, SvgText, _SVG_TEXT_HINT)
             return self._native.to_svg(mode.value)
 
+    def to_pdf(self) -> bytes:
+        """Render the figure as a single-page PDF with embedded fonts.
+
+        The page has the figure's size in points (72 points per inch). Lines, fills and text
+        stay vector; raster cell grids remain images. Text can be selected and searched.
+
+        Returns:
+            The PDF file contents.
+
+        Raises:
+            StyleError: If the plot area or its x tick labels cannot fit the figure, or a
+                font cannot render the requested text.
+
+        Example:
+            >>> import umber as ub
+            >>> pdf = ub.line([0, 1, 2], [1, 3, 2]).figure.to_pdf()
+            >>> pdf.startswith(b"%PDF-")
+            True
+        """
+        with api_call():
+            return self._native.to_pdf()
+
     def save_png(self, path: str | os.PathLike[str], *, dpi: int = 200) -> None:
         """Render the figure as a PNG image and write it to ``path``.
 
@@ -595,6 +618,29 @@ class Figure:
             # ``newline=""`` writes the document's line ends as they are, on every platform.
             Path(target).write_text(svg, encoding="utf-8", newline="")
 
+    def save_pdf(self, path: str | os.PathLike[str]) -> None:
+        """Render the figure as a PDF document and write it to ``path``.
+
+        Args:
+            path: The file to write; an existing file is replaced.
+
+        Raises:
+            TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
+            StyleError: If the plot area or its x tick labels cannot fit the figure, or a
+                font cannot render the requested text.
+            OSError: If the file cannot be written.
+
+        Example:
+            >>> from pathlib import Path
+            >>> import umber as ub
+            >>> fig = ub.line([0, 1, 2], [1, 3, 2]).figure
+            >>> fig.save_pdf(Path("signal.pdf"))
+        """
+        with api_call():
+            _args.require_path("Figure.save_pdf()", "path", path)
+            target = _args.path("Figure.save_pdf()", "path", path)
+            Path(target).write_bytes(self._native.pdf_for_file())
+
     def __copy__(self) -> Self:
         with api_call():
             return self._clone()
@@ -625,5 +671,5 @@ class Figure:
                 "Figure",
                 "a Figure cannot be pickled.",
                 parameter=None,
-                hint="save it with save_png() or save_svg(), or build it again.",
+                hint="save it with save_png(), save_svg() or save_pdf(), or build it again.",
             )

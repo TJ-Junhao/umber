@@ -3,6 +3,7 @@
 Each script is self-contained and writes its chart as a PNG next to itself. Run one with `python line.py`.
 
 - `line.py`: two lines with labels, a title, a subtitle and axis labels.
+- `pdf.py`: a vector PDF with embedded fonts, alongside a PNG of the same figure.
 - `subplots.py`: a 2 × 2 grid with a centered figure title and subtitle, x scales shared by column, a comparison panel spanning both rows and a merged legend.
 - `scatter.py`: two point clouds with different markers and sizes.
 - `bubbles.py`: cities with population encoded by marker area and reference circles showing the size scale.

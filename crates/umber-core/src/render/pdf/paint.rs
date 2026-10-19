@@ -20,7 +20,7 @@ use super::super::normalize::{
 use super::Clip;
 use super::image::{side, write_image};
 use super::text::{Fonts, written};
-use super::write::{Refs, rounded, unit};
+use super::write::{Refs, limited, rounded, unit};
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
 use crate::scene::{
@@ -176,7 +176,7 @@ impl<'f, 's> Page<'f, 's> {
                 let colors = stops
                     .iter()
                     .map(|s| ShadingStop {
-                        offset: s.offset,
+                        offset: limited(s.offset),
                         components: vec![unit(s.color.r), unit(s.color.g), unit(s.color.b)],
                     })
                     .collect();
@@ -204,7 +204,7 @@ impl<'f, 's> Page<'f, 's> {
         let alphas = stops
             .iter()
             .map(|s| ShadingStop {
-                offset: s.offset,
+                offset: limited(s.offset),
                 components: vec![unit(s.color.a)],
             })
             .collect();

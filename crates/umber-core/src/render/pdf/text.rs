@@ -36,7 +36,7 @@ use skrifa::string::StringId;
 use subsetter::GlyphRemapper;
 
 use super::super::normalize::text_is_visible;
-use super::write::{Refs, compress, rounded, subset_tag};
+use super::write::{Refs, compress, limited, rounded, subset_tag};
 use crate::scene::TextItem;
 use crate::text::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
 
@@ -485,7 +485,7 @@ impl Fonts {
     /// Shows the glyphs of `item` whose fonts were embedded in one text object, in a coordinate
     /// system whose origin is the left end of the baseline and whose y axis points up.
     pub(super) fn show(&self, content: &mut Content, item: &TextItem) {
-        let size = item.glyphs.size();
+        let size = limited(item.glyphs.size());
         content.begin_text();
         let mut current = None;
         for run in item.glyphs.runs() {

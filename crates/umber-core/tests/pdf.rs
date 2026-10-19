@@ -471,6 +471,24 @@ fn one_line(path: &FsPath) -> String {
         .to_owned()
 }
 
+/// Whether the installed MuPDF is 1.27 or later, the first release these tests found to use
+/// `/ActualText` when it extracts text.
+fn mupdf_reads_actual_text() -> bool {
+    let out = Command::new("mutool").arg("-v").output().unwrap();
+    let text =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    let Some(version) = text
+        .split_whitespace()
+        .find(|word| word.starts_with(|c: char| c.is_ascii_digit()))
+    else {
+        return false;
+    };
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    (parts.next().unwrap_or(0), parts.next().unwrap_or(0)) >= (1, 27)
+}
+
 /// MuPDF's text of a one-line page, without the line ends it adds.
 fn mupdf_line(path: &FsPath) -> String {
     let out = Command::new("mutool")
@@ -553,16 +571,25 @@ fn pdf_text_extracts_each_occurrence() {
         if have("qpdf") {
             assert_qpdf_clean(&path);
         }
+        // Readers differ in how many spaces they infer between words (older MuPDF adds one after
+        // a combining mark), so the characters and their order are compared, not the spacing.
         if have("pdftotext") {
-            assert_eq!(one_line(&path), text, "{name}");
+            assert_eq!(words(&one_line(&path)), words(text), "{name}");
         }
-        if have("mutool") {
-            assert_eq!(mupdf_line(&path), text, "{name} (MuPDF)");
+        // MuPDF before 1.27 does not read /ActualText, as pdf.js does not; the marked cases are
+        // checked only where the reader honours it.
+        if have("mutool") && (!marked || mupdf_reads_actual_text()) {
+            assert_eq!(words(&mupdf_line(&path)), words(text), "{name} (MuPDF)");
         }
         if pdfjs && let Some(extracted) = pdfjs_text(&path) {
-            assert_eq!(extracted, text, "{name} (pdf.js)");
+            assert_eq!(words(&extracted), words(text), "{name} (pdf.js)");
         }
     }
+}
+
+/// `text` with every run of whitespace written as one space and none at either end.
+fn words(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[test]

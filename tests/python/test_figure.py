@@ -527,7 +527,7 @@ def test_pickling_is_refused(protocol: int) -> None:
     with pytest.raises(TypeError) as caught:
         pickle.dumps(fig, protocol)
     assert str(caught.value) == "Figure: a Figure cannot be pickled."
-    hint = "save it with save_png() or save_svg(), or build it again."
+    hint = "save it with save_png(), save_svg() or save_pdf(), or build it again."
     assert details(caught.value) == (None, hint)
     assert _notes(caught.value) == [f"hint: {hint}"]
     assert _frames(caught.value) == ["test_pickling_is_refused"]
