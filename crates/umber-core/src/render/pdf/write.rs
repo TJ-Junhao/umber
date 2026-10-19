@@ -3,10 +3,21 @@
 
 use pdf_writer::Ref;
 
-/// `v` rounded to three decimals, which is the precision the document writes, with `-0` as
-/// `0`. Callers pass finite values; the result of a non-finite value is not written.
+/// Limits a PDF scalar to the reader range, without rounding its fractional part.
+///
+/// A whole-valued float is written as an integer. Keeping its magnitude at most 1e9 puts it
+/// inside Annex C's signed 32-bit integer range, as well as the real-number range. Subnormal
+/// reals become zero. Geometry is already normalized and clipped; this also bounds widths,
+/// dash lengths and derived bounds, which can be much larger than their path coordinates.
+pub(super) fn limited(v: f32) -> f32 {
+    let v = v.clamp(-1.0e9, 1.0e9);
+    if v.abs() < f32::MIN_POSITIVE { 0.0 } else { v }
+}
+
+/// `v` limited to the reader range and rounded to three decimals, with `-0` as `0`.
+/// Callers discard non-finite scene values before writing; derived overflow saturates here.
 pub(super) fn rounded(v: f32) -> f32 {
-    let r = ((f64::from(v) * 1000.0).round() / 1000.0) as f32;
+    let r = ((f64::from(limited(v)) * 1000.0).round() / 1000.0) as f32;
     if r == 0.0 { 0.0 } else { r }
 }
 
@@ -35,7 +46,13 @@ impl Refs {
 /// `data` compressed for a `FlateDecode` stream (zlib format), at a fixed level, so the same
 /// data always gives the same bytes.
 pub(super) fn compress(data: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec_zlib(data, 6)
+    compress_at(data, 6)
+}
+
+/// `data` compressed for a `FlateDecode` stream at deflate `level` (0 to 10); the same data and
+/// level always give the same bytes.
+pub(super) fn compress_at(data: &[u8], level: u8) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(data, level)
 }
 
 /// The 64-bit FNV-1a hash of `data`, starting from `basis`.
@@ -82,6 +99,26 @@ mod tests {
         assert_eq!(unit(255), 1.0);
         assert_eq!(unit(0), 0.0);
         assert_eq!(unit(128), 0.502);
+    }
+
+    #[test]
+    fn numbers_stay_within_reader_limits() {
+        for value in [f32::MIN, -1.0e30, -1.0e9, 1.0e9, 1.0e30, f32::MAX] {
+            let number = rounded(value);
+            assert!(
+                number.is_finite() && number.abs() <= 1.0e9,
+                "{value}: {number}"
+            );
+            assert_eq!(number.is_sign_negative(), value.is_sign_negative());
+        }
+        assert_eq!(rounded(f32::MIN_POSITIVE), 0.0);
+        assert_eq!(rounded(f32::from_bits(1)), 0.0);
+        assert_eq!(limited(f32::MIN_POSITIVE), f32::MIN_POSITIVE);
+        assert_eq!(limited(-f32::from_bits(1)), 0.0);
+        assert!(limited(-f32::from_bits(1)).is_sign_positive());
+        assert_eq!(limited(0.123_456), 0.123_456);
+        assert_eq!(rounded(f32::INFINITY), 1.0e9);
+        assert_eq!(rounded(f32::NEG_INFINITY), -1.0e9);
     }
 
     #[test]

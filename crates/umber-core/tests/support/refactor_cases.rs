@@ -217,6 +217,18 @@ pub fn generate(mut sink: impl FnMut(Output)) {
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
+    #[cfg(test)]
+    if PDF_OUTPUT.get() {
+        let bytes = match umber_core::render::render_pdf(scene) {
+            Ok(bytes) => bytes,
+            Err(error) => format!("{}\n", record::error(&error)).into_bytes(),
+        };
+        sink(Output {
+            kind: "pdf",
+            file: format!("{name}.pdf"),
+            bytes,
+        });
+    }
     sink(Output {
         kind: "scene",
         file: format!("{name}.txt"),
@@ -244,6 +256,28 @@ fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
             bytes,
         });
     }
+}
+
+// PDF output is opt-in and test-only: the ordinary generator and its manifest stay unchanged.
+// A thread-local switch lets every corpus module keep using the same scene emission path.
+#[cfg(test)]
+std::thread_local! {
+    static PDF_OUTPUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Generates the usual corpus outputs, plus a PDF immediately before each scene's outputs.
+#[cfg(test)]
+#[allow(dead_code)] // The output example's unit tests also include this module.
+pub fn generate_pdf(sink: impl FnMut(Output)) {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            PDF_OUTPUT.set(false);
+        }
+    }
+    assert!(!PDF_OUTPUT.replace(true), "nested PDF generation");
+    let _reset = Reset;
+    generate(sink);
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Rgba {

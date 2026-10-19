@@ -520,6 +520,96 @@ mod tests {
     }
 
     #[test]
+    fn extreme_geometry_writes_only_reader_safe_numbers() {
+        let mut scene = Scene::new(120.0, 80.0, WHITE);
+        let mut path = Path::new();
+        path.move_to(p(-1.0e6, 0.0));
+        path.quad_to(p(1.0e6, -1.0e6), p(1.0e6, 1.0e6));
+        path.line_to(p(1.0e30, -1.0e30));
+        let style = StrokeStyle {
+            color: RED,
+            width: f32::MAX,
+            dash: vec![1.0e30, 1.0e30],
+            cap: LineCap::Round,
+            join: LineJoin::Miter,
+        };
+        scene.push(Item::Stroke {
+            path: path.clone(),
+            style: style.clone(),
+        });
+        scene.push(Item::Markers {
+            shape: path,
+            fill: Some(RED),
+            stroke: Some(style),
+            positions: vec![p(-1.0e6, 1.0e6), p(f32::MAX, f32::MIN)],
+        });
+        scene.push(Item::Fill {
+            path: square(0.0, 0.0, 50.0),
+            paint: Paint::Linear(LinearGradient {
+                start: p(-1.0e6, 0.0),
+                end: p(1.0e6, 0.0),
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: RED,
+                    },
+                    GradientStop {
+                        offset: f32::from_bits(1),
+                        color: WHITE,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: RED,
+                    },
+                ],
+            }),
+            rule: FillRule::NonZero,
+        });
+        let fonts = fonts_of(&scene, (120.0, 80.0));
+        let (stream, resources) = page_content(&scene, &fonts, (120.0, 80.0));
+        let mut chunk = Chunk::new();
+        resources.write(&mut chunk, &mut Refs::new(), &fonts);
+        for bytes in [stream.as_slice(), chunk.as_bytes()] {
+            let text = String::from_utf8_lossy(bytes);
+            for token in text.split(|c: char| c.is_whitespace() || c == '[' || c == ']') {
+                if let Ok(number) = token.parse::<f64>() {
+                    assert!(number.is_finite() && number.abs() <= 1.0e9, "{token}");
+                    assert!(number == 0.0 || number.abs() >= 1.175e-38, "{token}");
+                }
+            }
+        }
+        // Text origins use the same numeric boundary as paths and marker transforms.
+        let mut text = shaped(FontLibrary::global(), "edge");
+        text.origin = p(-1.0e6, 1.0e6);
+        scene.push(Item::RotatedText { text, angle: 45.0 });
+        assert!(!content(&scene).contains("NaN"));
+    }
+
+    #[test]
+    fn overflowing_text_positions_write_only_finite_numbers() {
+        let fonts = FontLibrary::global()
+            .with_figure_fonts(&[Font::INTER])
+            .unwrap();
+        let mut scene = Scene::new(120.0, 80.0, WHITE);
+        let style = TextStyle {
+            face: FaceId::new(0),
+            weight: Weight::Regular,
+            size: f32::MAX,
+            tabular_figures: false,
+        };
+        scene
+            .push_text(&fonts, "WWWWW", style, p(0.0, 0.0), RED)
+            .unwrap();
+        let stream = content(&scene);
+        assert!(stream.contains("Tf"), "{stream}");
+        for token in stream.split(|c: char| c.is_whitespace() || c == '[' || c == ']') {
+            if let Ok(number) = token.parse::<f64>() {
+                assert!(number.is_finite() && number.abs() <= 1.0e9, "{stream}");
+            }
+        }
+    }
+
+    #[test]
     fn hand_built_text_is_filled_from_its_outline() {
         let mut scene = Scene::new(60.0, 30.0, WHITE);
         scene.push(Item::Text(TextItem {

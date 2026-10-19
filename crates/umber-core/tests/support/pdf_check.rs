@@ -5,6 +5,7 @@
 //! looked up at `UMBER_PDFJS_DIST`, else at `~/.local/share/pdfjs/node_modules/pdfjs-dist`).
 //! Where a tool is not installed a test skips its use of it with a note on stderr, unless the
 //! environment variable `UMBER_REQUIRE_PDF_TOOLS` is set, which makes a missing tool a failure.
+//! pdf.js is an optional extra reader, including when the native tools are required.
 
 // clippy's allow-in-tests settings cover only `#[test]` functions, not the helpers here; each
 // includer uses a different part of this module.
@@ -194,6 +195,45 @@ pub fn poppler_raster(path: &FsPath, dpi: u32) -> Raster {
     Raster { width, height, rgb }
 }
 
+/// Rasterizes at the PNG's DPI and crops only Poppler's extra right/bottom edge pixel.
+pub fn poppler_raster_for_png(path: &FsPath, dpi: u32, png: &Raster) -> Raster {
+    crop_for_png(poppler_raster(path, dpi), png, path, dpi)
+}
+
+/// Rasterizes with MuPDF at the PNG's DPI, without rescaling or aligning the content.
+pub fn mupdf_raster_for_png(path: &FsPath, dpi: u32, png: &Raster) -> Raster {
+    let output = path.with_extension(format!("mupdf-{dpi}.png"));
+    draw_mupdf(path, dpi, &output);
+    let raster = png_raster(&std::fs::read(output).unwrap());
+    crop_for_png(raster, png, path, dpi)
+}
+
+/// PDF readers round page dimensions up; PNG rounds to nearest. Remove at most the extra
+/// right/bottom edge pixel, never rescale or shift the image.
+fn crop_for_png(mut raster: Raster, png: &Raster, path: &FsPath, dpi: u32) -> Raster {
+    assert!(
+        (png.width..=png.width + 1).contains(&raster.width)
+            && (png.height..=png.height + 1).contains(&raster.height),
+        "{} at {dpi} dpi: PDF {} x {}, PNG {} x {}",
+        path.display(),
+        raster.width,
+        raster.height,
+        png.width,
+        png.height
+    );
+    if (raster.width, raster.height) != (png.width, png.height) {
+        raster.rgb = raster
+            .rgb
+            .chunks_exact(raster.width * 3)
+            .take(png.height)
+            .flat_map(|row| row[..png.width * 3].iter().copied())
+            .collect();
+        raster.width = png.width;
+        raster.height = png.height;
+    }
+    raster
+}
+
 /// The PNG rendered at `dpi`, composited over white and reduced to RGB.
 pub fn png_raster(png: &[u8]) -> Raster {
     let decoded = image::decode_rgba8(png).unwrap();
@@ -234,12 +274,26 @@ pub fn raster_difference(a: &Raster, b: &Raster) -> (f64, f64) {
 
 /// The largest mean absolute channel difference between the Poppler raster of a PDF and the PNG
 /// of the same scene; antialiasing and glyph rasterization differ between the two rasterizers.
+/// These focused tests use 144 dpi. The corpus includes smaller canvases and denser edges at
+/// 72/200 dpi, so pdf_corpus uses 4.5 / 2.5% instead of these tighter 2.0 / 1% defaults.
 pub const MAX_MEAN_DIFFERENCE: f64 = 2.0;
 /// The largest share of pixels with a channel more than 64 apart.
 pub const MAX_FAR_SHARE: f64 = 0.01;
 
+/// Compares the rasters, then removes the case's scratch directory only on success.
 pub fn assert_matches_png(pdf_path: &FsPath, png: &[u8], dpi: u32) {
-    let (mean, far) = raster_difference(&poppler_raster(pdf_path, dpi), &png_raster(png));
+    let dir = pdf_path.parent().unwrap();
+    write(dir, "reference.png", png);
+    let (mean, far) = std::panic::catch_unwind(|| {
+        raster_difference(&poppler_raster(pdf_path, dpi), &png_raster(png))
+    })
+    .unwrap_or_else(|_| {
+        panic!(
+            "{}: raster comparison failed; scratch files retained at {}",
+            pdf_path.display(),
+            dir.display()
+        )
+    });
     eprintln!(
         "{}: mean difference {mean:.4}, far share {far:.5}",
         pdf_path.display()
@@ -247,9 +301,11 @@ pub fn assert_matches_png(pdf_path: &FsPath, png: &[u8], dpi: u32) {
     assert!(
         mean <= MAX_MEAN_DIFFERENCE && far <= MAX_FAR_SHARE,
         "{}: mean difference {mean:.4} (at most {MAX_MEAN_DIFFERENCE}), far share {far:.5} \
-         (at most {MAX_FAR_SHARE})",
-        pdf_path.display()
+         (at most {MAX_FAR_SHARE}); scratch files retained at {}",
+        pdf_path.display(),
+        dir.display()
     );
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// The page content stream, object 4 of every document the backend writes, as text.
@@ -277,24 +333,33 @@ pub fn assert_readers_parse(path: &FsPath) {
         );
     }
     if have("mutool") {
-        let out = Command::new("mutool")
-            .args(["draw", "-q", "-r", "36", "-o"])
-            .arg(path.with_extension("mupdf.png"))
-            .arg(path)
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let messages: Vec<&str> = stderr
-            .lines()
-            .filter(|line| !line.trim().is_empty() && !line.contains("ICC support"))
-            .collect();
-        assert!(
-            out.status.success() && messages.is_empty(),
-            "mutool draw {}: {}\n{stderr}",
-            path.display(),
-            out.status
-        );
+        assert_mupdf_clean(path);
     }
+}
+
+/// Draws the page with MuPDF, rejecting errors and document warnings.
+pub fn assert_mupdf_clean(path: &FsPath) {
+    draw_mupdf(path, 36, &path.with_extension("mupdf.png"));
+}
+
+fn draw_mupdf(path: &FsPath, dpi: u32, output: &FsPath) {
+    let out = Command::new("mutool")
+        .args(["draw", "-q", "-c", "rgba", "-r", &dpi.to_string(), "-o"])
+        .arg(output)
+        .arg(path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let messages: Vec<&str> = stderr
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.contains("ICC support"))
+        .collect();
+    assert!(
+        out.status.success() && messages.is_empty(),
+        "mutool draw {}: {}\n{stderr}",
+        path.display(),
+        out.status
+    );
 }
 
 /// The script that prints the text pdf.js extracts from page 1: its arguments are the path of
@@ -310,8 +375,8 @@ const content = await page.getTextContent({ disableNormalization: true });
 process.stdout.write(content.items.filter((item) => 'str' in item).map((item) => item.str).join(''));
 "#;
 
-/// The text pdf.js extracts from page 1 of `path`, or `None` (with a note, or a failure when
-/// the tools are required) when node or pdf.js is not installed.
+/// The text pdf.js extracts from page 1 of `path`, or `None` with a note when node or pdf.js
+/// is not installed. This extra reader is optional even when the native tools are required.
 pub fn pdfjs_text(path: &FsPath) -> Option<String> {
     let dist = std::env::var_os("UMBER_PDFJS_DIST")
         .map(PathBuf::from)
@@ -322,12 +387,9 @@ pub fn pdfjs_text(path: &FsPath) -> Option<String> {
     let module = dist
         .map(|dist| dist.join("legacy/build/pdf.mjs"))
         .filter(|module| module.is_file());
-    let Some(module) = module.filter(|_| have("node")) else {
-        assert!(
-            std::env::var_os("UMBER_REQUIRE_PDF_TOOLS").is_none(),
-            "pdf.js is required but not installed"
-        );
-        eprintln!("skipped: pdf.js is not installed");
+    let Some(module) = module.filter(|_| Command::new("node").arg("--version").output().is_ok())
+    else {
+        eprintln!("skipped: pdf.js or node is not installed (optional reader)");
         return None;
     };
     let script = path.with_extension("pdfjs.mjs");

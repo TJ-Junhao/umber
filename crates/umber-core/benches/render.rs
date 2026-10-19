@@ -359,6 +359,9 @@ fn benches(c: &mut Criterion) {
     group.bench_function("line_1m_svg_from_scene", |b| {
         b.iter(|| black_box(render_svg(&line_scene, SvgText::Outlines)));
     });
+    group.bench_function("line_1m_pdf", |b| {
+        b.iter(|| black_box(line.to_pdf().unwrap()));
+    });
 
     let hist = hist_figure(1_000_000);
     group.bench_function("hist_1m_png", |b| {
@@ -375,6 +378,9 @@ fn benches(c: &mut Criterion) {
     });
     group.bench_function("heatmap_1000x1000_svg", |b| {
         b.iter(|| black_box(heatmap.to_svg(SvgText::Outlines).unwrap()));
+    });
+    group.bench_function("heatmap_1000x1000_pdf", |b| {
+        b.iter(|| black_box(heatmap.to_pdf().unwrap()));
     });
     let categories = category_figure();
     group.bench_function("category_200_png", |b| {
