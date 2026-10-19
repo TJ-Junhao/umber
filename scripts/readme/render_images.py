@@ -55,9 +55,7 @@ def gallery() -> None:
 
     # Donut.
     ax = fig.add_pie_axes(row=0, col=3).title("Donut")
-    ax.pie(["Web", "App", "Shop"], [52.0, 30.0, 18.0], hole=0.45, annotate=True).legend(
-        ub.LegendStyle.CHIPS
-    )
+    ax.pie(["Web", "App", "Shop"], [52.0, 30.0, 18.0], hole=0.55, annotate=True)
 
     # Histogram and KDE.
     v = np.concatenate([rng.normal(40, 8, 3000), rng.normal(70, 6, 1500)])

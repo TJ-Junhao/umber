@@ -145,7 +145,9 @@ class PieAxes:
         Slices start at twelve o'clock, clockwise in input order. Names fit inside their
         slices or move outside with leader lines. Outside labels keep their vertical order.
         The default legend style is ``DIRECT``, regardless of the theme. ``HEADER`` and
-        ``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names.
+        ``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names. Direct
+        labels need room around the circle; in small panels, ``legend(LegendStyle.CHIPS)``
+        or ``HEADER`` moves the names into a legend and keeps the shares annotated.
 
         Args:
             categories: Unique slice names, one per value.

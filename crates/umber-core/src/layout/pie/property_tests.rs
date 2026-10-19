@@ -60,8 +60,9 @@ fn crosses_box(a: Point, b: Point, rect: [f64; 4]) -> bool {
     inside(a) || inside(b) || (0..4).any(|i| segments_touch(a, b, points[i], points[(i + 1) % 4]))
 }
 
-pub(super) fn assert_disjoint(layout: &PieLayout, area: Area) {
-    assert!(layout.circle.radius + 1e-4 >= area.width.min(area.height) / 4.0);
+pub(super) fn assert_disjoint(layout: &PieLayout, room: PieRoom) {
+    let area = room.area;
+    assert!(layout.circle.radius + 1e-4 >= room.least_radius);
     let rects: Vec<_> = layout.labels.iter().map(|l| rectangle(&l.text)).collect();
     let cx = layout.circle.x;
     let cy = layout.circle.y;
@@ -200,8 +201,8 @@ fn pareto_shares_in_roomy_panels_always_fit() {
                                     ..Default::default()
                                 },
                             };
-                            let layout = place(&pie, LegendStyle::Direct, area, &theme, &fonts).unwrap_or_else(|error| panic!("sample={sample} order={order} hole={hole} annotate={annotate} shares={shares:?}: {error}"));
-                            assert_disjoint(&layout, area);
+                            let layout = place(&pie, LegendStyle::Direct, PieRoom::new(area, area), &theme, &fonts).unwrap_or_else(|error| panic!("sample={sample} order={order} hole={hole} annotate={annotate} shares={shares:?}: {error}"));
+                            assert_disjoint(&layout, PieRoom::new(area, area));
                             rendered += 1;
                         }
                     }
@@ -271,7 +272,13 @@ fn random_labels_and_leaders_are_disjoint_or_fail_with_slice_names() {
                             width,
                             height,
                         };
-                        let result = place(&pie, LegendStyle::Direct, area, &theme, &fonts);
+                        let result = place(
+                            &pie,
+                            LegendStyle::Direct,
+                            PieRoom::new(area, area),
+                            &theme,
+                            &fonts,
+                        );
                         let layout = match result {
                             Ok(layout) => {
                                 successes += 1;
@@ -289,7 +296,7 @@ fn random_labels_and_leaders_are_disjoint_or_fail_with_slice_names() {
                                 continue;
                             }
                         };
-                        assert_disjoint(&layout, area);
+                        assert_disjoint(&layout, PieRoom::new(area, area));
                     }
                 }
             }
@@ -299,4 +306,92 @@ fn random_labels_and_leaders_are_disjoint_or_fail_with_slice_names() {
         successes > 30 && failures > 30,
         "{successes} successful, {failures} rejected"
     );
+}
+
+#[test]
+fn more_room_never_turns_a_fitting_pie_into_an_error() {
+    let library = FontLibrary::bundled();
+    let theme = Theme::pigment();
+    let fonts = super::super::figure_fonts(&library, &theme).unwrap();
+    let sets: [(&[&str], &[f64]); 6] = [
+        (&["Web", "App", "Shop"], &[52.0, 30.0, 18.0]),
+        (&["Web", "App", "Shop", "Other"], &[80.0, 15.0, 3.0, 2.0]),
+        (&["Large", "Small"], &[99.0, 1.0]),
+        (
+            &["North", "South", "East", "West", "Other"],
+            &[60.0, 20.0, 10.0, 5.0, 5.0],
+        ),
+        (
+            &["Web", "App", "Shop", "API", "Ads", "Labs", "Tools", "Misc"],
+            &[50.0, 20.0, 12.0, 8.0, 4.0, 3.0, 2.0, 1.0],
+        ),
+        (&["A rather long slice name", "B"], &[70.0, 30.0]),
+    ];
+    let (mut fitting, mut enlarged) = (0, 0);
+    for (names, values) in sets {
+        let total: f64 = values.iter().sum();
+        for hole in [0.0, 0.55, 0.8] {
+            for annotate in [false, true] {
+                for (size, style) in [8.0, 10.0, 14.0].into_iter().flat_map(|size| {
+                    [LegendStyle::Direct, LegendStyle::Chips].map(|style| (size, style))
+                }) {
+                    let pie = Pie {
+                        slices: names
+                            .iter()
+                            .zip(values)
+                            .enumerate()
+                            .map(|(i, (name, value))| Slice {
+                                name: (*name).into(),
+                                share: value / total,
+                                color: theme.palette()[i % theme.palette().len()],
+                            })
+                            .collect::<Vec<_>>()
+                            .into(),
+                        options: PieOptions {
+                            hole,
+                            annotate,
+                            size: crate::SizeSpec::pt(size).unwrap(),
+                            ..Default::default()
+                        },
+                    };
+                    for width in [40.0, 70.0, 100.0, 140.0, 190.0, 260.0] {
+                        for height in [30.0, 60.0, 90.0, 130.0, 200.0] {
+                            let area = |w: f64, h: f64| Area {
+                                x: 12.0,
+                                y: 12.0,
+                                width: w,
+                                height: h,
+                            };
+                            let base = PieRoom::new(area(width, height), area(width, height));
+                            if place(&pie, style, base, &theme, &fonts).is_err() {
+                                continue;
+                            }
+                            fitting += 1;
+                            for grow in [0.5, 3.0, 17.0, 60.0, 150.0, 250.0, 400.0] {
+                                for (dw, dh) in [(grow, 0.0), (0.0, grow), (grow, grow)] {
+                                    let room = PieRoom {
+                                        area: area(width + dw, height + dh),
+                                        ..base
+                                    };
+                                    let layout = place(&pie, style, room, &theme, &fonts)
+                                        .unwrap_or_else(|error| {
+                                            panic!(
+                                                "{names:?} hole={hole} annotate={annotate} size={size} {style:?}: \
+                                                 fits {width} x {height} but not {} x {}: {error}",
+                                                width + dw,
+                                                height + dh
+                                            )
+                                        });
+                                    assert_disjoint(&layout, room);
+                                    enlarged += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(fitting > 300, "{fitting} fitting pies");
+    eprintln!("{fitting} fitting pies, {enlarged} enlarged areas fit");
 }

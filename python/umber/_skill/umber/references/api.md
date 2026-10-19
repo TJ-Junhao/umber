@@ -4513,7 +4513,9 @@ Draw this panel's pie, or a donut when ``hole`` is positive.
 Slices start at twelve o'clock, clockwise in input order. Names fit inside their
 slices or move outside with leader lines. Outside labels keep their vertical order.
 The default legend style is ``DIRECT``, regardless of the theme. ``HEADER`` and
-``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names.
+``CHIPS`` replace direct names with a panel legend; ``NONE`` hides names. Direct
+labels need room around the circle; in small panels, ``legend(LegendStyle.CHIPS)``
+or ``HEADER`` moves the names into a legend and keeps the shares annotated.
 
 Args:
     categories: Unique slice names, one per value.
@@ -6247,7 +6249,9 @@ pie(categories: Values[str], values: Values[float], *, hole: float=0.0, annotate
 Draw a pie or donut on a new figure and return its circular panel.
 
 The same as ``Figure(theme=theme).add_pie_axes().pie(categories, values, ...)``.
-Slices run clockwise from twelve o'clock in input order.
+Slices run clockwise from twelve o'clock in input order. Direct labels need room around
+the circle; in small panels, ``legend(LegendStyle.CHIPS)`` or ``HEADER`` moves the names
+into a legend and keeps the shares annotated.
 
 Args:
     categories: Unique slice names, one per value.

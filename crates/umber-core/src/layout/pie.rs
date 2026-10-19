@@ -23,6 +23,33 @@ const LABEL_GAP: f64 = 3.0;
 const FIT_GAP: f64 = 2.0;
 const ROOM_HINT: &str = "merge small slices into Other, use a larger figure or smaller text, or replace direct labels with legend(HEADER) or legend(CHIPS).";
 
+/// Where a pie goes: its plot area, and the least radius its outside labels may shrink its
+/// circle to.
+///
+/// The least radius is half the radius of the largest circle in the plot area the panel's
+/// cells have where the grid lines up the plots of its panels: in a figure of one panel, its
+/// plot area itself. A pie panel on a grid lays out in its whole cell, which holds that aligned
+/// plot area, and the extra room of the cell never raises the least radius. Placement is
+/// monotonic in the area for a given least radius: a pie that fits an area also fits every
+/// area that contains it, so a pie that fits its aligned plot area also fits its cell.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PieRoom {
+    /// The plot area.
+    pub area: Area,
+    /// The least radius of the circle.
+    pub least_radius: f64,
+}
+
+impl PieRoom {
+    /// The room of a pie in `area`, for the aligned plot area `aligned` (see [`PieRoom`]).
+    pub fn new(area: Area, aligned: Area) -> PieRoom {
+        PieRoom {
+            area,
+            least_radius: aligned.width.min(aligned.height) / 2.0 / 2.0,
+        }
+    }
+}
+
 /// A circle in panel coordinates.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Circle {
@@ -166,15 +193,18 @@ impl MeasuredSlice {
     }
 }
 
-/// Measures and places a pie within the grid's available plot rectangle. Room for outside
-/// text is reserved before choosing the final circular plot; the radius only decreases.
+/// Measures and places a pie within its plot area `room.area`: below its header, the canvas
+/// inside the padding in a figure of one panel and its cell on a grid, less a legend beside or
+/// below it. Room for outside text is reserved before choosing the final circular plot; the
+/// radius only decreases, and never below `room.least_radius`.
 pub(crate) fn place(
     pie: &Pie,
     style: LegendStyle,
-    area: Area,
+    room: PieRoom,
     theme: &Theme,
     fonts: &SceneFonts<'_>,
 ) -> Result<PieLayout> {
+    let PieRoom { area, least_radius } = room;
     let text_style = Styles::new(
         theme,
         TextRole::Title,
@@ -239,7 +269,6 @@ pub(crate) fn place(
         y: area.y + area.height / 2.0,
         radius: area.width.min(area.height) / 2.0,
     };
-    let minimum_radius = circle.radius / 2.0;
     let mut outside = vec![false; slices.len()];
     loop {
         let mut changed = false;
@@ -260,7 +289,7 @@ pub(crate) fn place(
         }
         let mut radius = ((area.width - room[0] - room[1]) / 2.0).min(circle.radius);
         let vertical = |r| vertical_extents(&slices, &outside, r, line, ascent + descent);
-        if radius >= minimum_radius {
+        if radius >= least_radius {
             let (top, bottom) = vertical(radius);
             if top + bottom > area.height {
                 let mut low = 0.0;
@@ -277,7 +306,7 @@ pub(crate) fn place(
                 radius = low;
             }
         }
-        if radius < minimum_radius {
+        if radius < least_radius {
             return Err(outside_error(&slices, &outside));
         }
         let shrunk = radius < circle.radius;
