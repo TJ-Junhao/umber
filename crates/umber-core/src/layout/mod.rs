@@ -1300,11 +1300,12 @@ fn solve_single(
             };
         let plain_height = frame.bottom() - plain_below - plain_top;
         let colorbar_band = (plot_top - plain_top) + (below - plain_below);
-        if colorbar_band > 0.0 && plain_height >= MIN_PLOT {
+        // The colorbar is the cause only when the plot without it leaves its legend room.
+        if colorbar_band > 0.0 && plain_height >= least {
             return Err(colorbar::room_error(
                 context,
                 colorbar_band,
-                plain_height - MIN_PLOT,
+                plain_height - least,
                 true,
             ));
         }

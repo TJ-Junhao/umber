@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: b57bcec0cb28eb573776b70c8075f678eaa7467c
+# revision: 5e6f3031e4ff68bc1a6e1121c955fef640730a17
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 af10b9e8d0c96cc7d716f99ca46cde4e34a86ef0adaf415e43c55ff3a0fb1800  api/cmaps.txt

@@ -912,3 +912,183 @@ fn the_height_named_for_a_short_figure_leaves_room_for_a_right_or_inside_legend(
         }
     }
 }
+
+/// The height `err` asks the figure of height `height` pt to grow to: the named height of a
+/// short figure, or the height plus the shortfall of a colorbar room error.
+fn remedy(err: &Error, height: f64) -> f64 {
+    let message = err.to_string();
+    if let Some((_, rest)) = message.split_once("the colorbar needs ") {
+        let numbers: Vec<f64> = rest
+            .split(|c: char| !c.is_ascii_digit() && c != '.')
+            .filter_map(|n| n.parse().ok())
+            .collect();
+        assert_eq!(err.hint(), Some("increase the figure height."), "{message}");
+        return height + numbers[0] - numbers[1];
+    }
+    named_height(err)
+}
+
+#[test]
+fn the_height_a_colorbar_error_asks_for_leaves_room_for_the_legend() {
+    use crate::{
+        ColorBy, ColorbarOptions, ColorbarPosition, LegendPosition, LegendStyle, PointColor,
+        ScatterOptions, SizeSpec,
+    };
+    fn add(a: &mut crate::AxesMut<'_>, legend: LegendPosition, colorbar: ColorbarPosition) {
+        a.title("One\nTwo")
+            .legend_at(LegendStyle::Header, legend, SizeSpec::Auto)
+            .unwrap();
+        for label in ["North", "South", "East"] {
+            a.line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[0.0, 1.0],
+                LineOptions {
+                    label: label.into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        a.scatter(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            ScatterOptions {
+                color: PointColor::By(ColorBy::new(vec![0.0, 1.0])),
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap()
+        .colorbar(ColorbarOptions {
+            label: "C".into(),
+            position: Some(colorbar),
+            ..ColorbarOptions::default()
+        })
+        .unwrap();
+    }
+    let single = |legend, colorbar, height: f64| {
+        let mut f = Figure::new(8.0, height / 72.0, Theme::pigment()).unwrap();
+        add(
+            &mut f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap(),
+            legend,
+            colorbar,
+        );
+        f
+    };
+    let grid = |legend, colorbar, height: f64| {
+        let mut f = Figure::with_grid(
+            8.0,
+            height / 72.0,
+            Theme::pigment(),
+            Grid::new(2, 1).unwrap(),
+        )
+        .unwrap();
+        for row in 0..2 {
+            add(
+                &mut f
+                    .add_axes_at(
+                        Placement {
+                            row: GridIndex::At(row),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Linear,
+                        ScaleKind::Linear,
+                    )
+                    .unwrap(),
+                legend,
+                colorbar,
+            );
+        }
+        f
+    };
+    type Build<'a> = &'a dyn Fn(LegendPosition, ColorbarPosition, f64) -> Figure;
+    let builds: [(&str, Build<'_>); 2] = [("single", &single), ("grid", &grid)];
+    let mut colorbar_errors = 0;
+    for (kind, build) in builds {
+        for legend in [LegendPosition::Right, LegendPosition::Best] {
+            for colorbar in [ColorbarPosition::Bottom, ColorbarPosition::Right] {
+                // Every height whose error names a height or a shortfall gets one that renders.
+                for height in (40..=480).step_by(7) {
+                    let height = f64::from(height);
+                    let Err(err) = build(legend, colorbar, height).to_scene(&lib()) else {
+                        continue;
+                    };
+                    let message = err.to_string();
+                    if message.contains("the colorbar needs") {
+                        colorbar_errors += 1;
+                    } else if !message.contains(" pt tall; at least ") {
+                        continue;
+                    }
+                    let enough = remedy(&err, height);
+                    build(legend, colorbar, enough)
+                        .to_scene(&lib())
+                        .unwrap_or_else(|again| {
+                            panic!(
+                                "{kind} {legend:?} {colorbar:?} at {height} pt: {err}; at \
+                                 {enough} pt: {again}"
+                            )
+                        });
+                }
+            }
+        }
+    }
+    assert!(colorbar_errors > 0, "no case reached the colorbar error");
+}
+
+#[test]
+fn grouped_label_errors_name_their_group() {
+    use crate::{Distribution, Series, SizeSpec, ValueLabels};
+    let group = |err: &Error| match err {
+        Error::Style { message, .. } => message.group(),
+        other => panic!("{other}"),
+    };
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    let x = || AxisData::Numbers(vec![0.0, 1.0]);
+    let err = a
+        .grouped_line(
+            vec![("North".into(), x(), x()), ("bad\n".into(), x(), x())],
+            crate::Dash::Solid,
+            SizeSpec::Auto,
+        )
+        .unwrap_err();
+    assert_eq!(group(&err), Some(1), "{err}");
+    let err = a
+        .line(
+            x(),
+            &[1.0, 2.0],
+            LineOptions {
+                label: "bad\n".into(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert_eq!(group(&err), None, "{err}");
+
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+    let series = vec![
+        Series {
+            label: "North".into(),
+            values: vec![1.0],
+            ..Series::default()
+        },
+        Series {
+            label: "bad\t".into(),
+            values: vec![2.0],
+            ..Series::default()
+        },
+    ];
+    let err = a
+        .grouped_bar(vec!["A".into()], series, ValueLabels::default())
+        .unwrap_err();
+    assert_eq!(group(&err), Some(1), "{err}");
+    let distributions = vec![Distribution {
+        label: "bad\n".into(),
+        groups: vec![vec![1.0, 2.0]],
+        ..Distribution::default()
+    }];
+    let err = a
+        .grouped_box_plot(vec!["A".into()], distributions)
+        .unwrap_err();
+    assert_eq!(group(&err), None, "{err}");
+}

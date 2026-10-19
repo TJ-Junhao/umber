@@ -97,6 +97,15 @@ pub(super) enum LabelSource {
 }
 
 impl LabelSource {
+    /// `error` about the `i`-th label, marked with its group as the other errors about one of
+    /// several series or groups are; options and distributions are not groups.
+    fn locate(self, error: crate::Error, i: usize) -> crate::Error {
+        match self {
+            Self::Series | Self::Groups => error.in_group(i),
+            Self::Options | Self::Distributions => error,
+        }
+    }
+
     /// The parameter, and how a message names the `i`-th label.
     fn name(self, i: usize) -> (&'static str, String) {
         match self {
@@ -130,7 +139,7 @@ impl Axes {
             let (parameter, name) = source.name(i);
             LEGEND_LABELS
                 .check_style(context, &name, label)
-                .map_err(|error| error.with_parameter(parameter))?;
+                .map_err(|error| source.locate(error.with_parameter(parameter), i))?;
         }
         self.marks.extend(marks);
         Ok(())

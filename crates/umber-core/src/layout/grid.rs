@@ -1025,15 +1025,13 @@ impl Rows {
     /// plot room (see [`Rows::least_plot`]).
     fn place(self, input: &GridInput<'_>) -> Result<PlacedRows> {
         let rows = self.above.len();
-        let bands = self.above.iter().sum::<f64>() + self.below.iter().sum::<f64>();
-        let gaps = self.gap * (rows - 1) as f64;
-        let padding = input.top + PADDING;
-        let plot_height = |height: f64| (height - padding - bands - gaps) / rows as f64;
+        let plot_height = |height: f64| self.plot_height(input, height);
         if plot_height(input.height) < MIN_PLOT {
             // The least whole height that the check accepts and that leaves every legend
             // beside or inside its plot room.
             let least_plot = self.least_plot;
-            let needed = padding + bands + gaps + least_plot * rows as f64;
+            let needed =
+                input.top + PADDING + self.bands() + self.gaps() + least_plot * rows as f64;
             let least = input.height.floor() + 1.0;
             let mut whole = needed.ceil().max(least);
             while plot_height(whole) < least_plot {
@@ -1077,10 +1075,7 @@ fn rows_too_short(
             colorbars: &[],
             ..*input
         };
-        if Rows::measure(&plain, cells, bands, spans)
-            .place(&plain)
-            .is_ok()
-        {
+        if Rows::measure(&plain, cells, bands, spans).leave_legends_room(&plain) {
             return error.with_message_prefix("the shared colorbar leaves too little height: ");
         }
         return error;
@@ -1090,17 +1085,18 @@ fn rows_too_short(
         .zip(bands)
         .map(|(cell, band)| band.without_colorbar(input.span(*cell).reserve_cap))
         .collect();
+    // The colorbars are the cause only when the plots without them leave the legends room.
     let plain_rows = Rows::measure(input, cells, &plain, spans);
-    if plain_rows.clone().place(input).is_err() {
+    if !plain_rows.leave_legends_room(input) {
         return error;
     }
     let rows = Rows::measure(input, cells, bands, spans);
-    let reserved = rows.above.iter().sum::<f64>() + rows.below.iter().sum::<f64>();
+    let reserved = rows.bands();
     let available = input.height
         - input.top
         - PADDING
-        - rows.gap * (rows.above.len() - 1) as f64
-        - MIN_PLOT * rows.above.len() as f64;
+        - rows.gaps()
+        - rows.least_plot * rows.above.len() as f64;
     let deficit = reserved - available;
     for (i, (cell, band)) in cells.iter().zip(bands).enumerate() {
         if band.right_colorbar == 0.0 && band.bottom_colorbar == 0.0 {
@@ -1140,6 +1136,29 @@ fn rows_too_short(
         }
     }
     error
+}
+
+impl Rows {
+    /// The bands above and below the plots of every row.
+    fn bands(&self) -> f64 {
+        self.above.iter().sum::<f64>() + self.below.iter().sum::<f64>()
+    }
+
+    /// The gaps between the rows.
+    fn gaps(&self) -> f64 {
+        self.gap * (self.above.len() - 1) as f64
+    }
+
+    /// `Q` on a canvas of `input`'s grid `height` pt tall.
+    fn plot_height(&self, input: &GridInput<'_>, height: f64) -> f64 {
+        (height - (input.top + PADDING) - self.bands() - self.gaps()) / self.above.len() as f64
+    }
+
+    /// Whether the plots on `input`'s canvas leave every panel's legend beside or inside its
+    /// plot room ([`Rows::least_plot`]), which also keeps them at least [`MIN_PLOT`] tall.
+    fn leave_legends_room(&self, input: &GridInput<'_>) -> bool {
+        self.plot_height(input, input.height) >= self.least_plot
+    }
 }
 
 impl PlacedRows {
