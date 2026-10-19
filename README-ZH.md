@@ -330,6 +330,10 @@ fig = ub.Figure(theme=serif)
 
 `fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。
 
+### Jupyter 和 `show()`
+
+在 Jupyter cell 末尾放置 figure 或 axes，会以 PNG 显示整个 figure；也可以调用 `fig.show()` 或 `ax.show()` 显式显示。两种方式都以 144 dpi 渲染，按每英寸 72 CSS pixels 显示（6 × 4 英寸的 figure 显示为 432 × 288 CSS pixels）。在 Jupyter kernel 之外，包括 terminal IPython，`show()` 会用系统默认 viewer 打开 PNG，不等待 viewer 关闭；文件保留在新建的临时目录中。如果无法启动 viewer，`UsageError` 会指出已保存的文件。渲染错误会直接抛出，IPython 是可选依赖。
+
 ## 错误
 
 错误由引发它的那次调用抛出：数据非法时是 `umber.DataError`，选项值非法时是 `umber.StyleError`，当前状态下不允许的调用是 `umber.UsageError`，类型不对的值是 `TypeError`。三种 umber 错误都继承自 `umber.UmberError`。traceback 会指向出错的参数：
