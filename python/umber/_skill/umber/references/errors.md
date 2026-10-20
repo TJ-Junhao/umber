@@ -1,6 +1,6 @@
 # Errors
 
-umber checks every call when it is made and raises at once. Each error message reads `Context(): what is wrong; what is required.`; the hint and the highlighted argument are attached as exception notes, which Python and Jupyter print under the traceback. Errors are never silent and a failed call changes nothing, so the fix is always to change the call or the data, never to catch and ignore the error.
+umber checks every call when it is made and raises at once. Each error message reads `Context(): what is wrong; what is required.`; the hint and the highlighted argument are attached as exception notes, which Python and Jupyter print under the traceback. Errors are never silent and a failed call changes nothing, so the fix is to change the call or the data rather than to catch and ignore the error. The exception is plotting inside a long-running job, below.
 
 | Class | Meaning | Typical fix |
 |---|---|---|
@@ -46,3 +46,30 @@ Common cases:
 - **Pie slices.** More slices than palette colors need `colors=`; small slices whose labels cannot be placed should be merged into "Other" or shown with `legend(ub.LegendStyle.HEADER)`.
 - **Fonts without bold.** Titles and direct legend labels are bold. Pass `bold=` to `ub.Font.from_file`, choose a family with a bold face, or create the font with `bold_fallback=True`.
 - **`by=` with `color=` or `label=`.** Each group already takes the next palette color and its name as the label; drop those arguments.
+
+## Long-running jobs
+
+Errors that depend only on how a figure is set up (argument types, titles, sizes, legends) appear the first time the figure is drawn. A few depend on the data and can appear late in a long job: a value that becomes infinite (a diverging loss), a value of 0 or below on a log axis. In a training loop or a simulation, a plot must never end the job. Record the values while it runs and plot them afterwards, or catch `ub.UmberError` around the plotting code and log it:
+
+```python
+import logging
+import math
+
+import umber as ub
+
+log = logging.getLogger("train")
+
+
+def plot_loss(epochs: list[int], losses: list[float]) -> bytes:
+    ax = ub.Figure(6, 4).add_axes().line(epochs, losses, label="loss").title("Training loss")
+    return ax.figure.to_png()
+
+
+for losses in ([1.0, 0.5, 0.25], [1.0, math.inf, 0.2]):
+    try:
+        png = plot_loss([1, 2, 3], losses)
+    except ub.UmberError as err:
+        log.warning("loss plot skipped: %s", err)
+```
+
+`ub.UmberError` is the base of `UsageError`, `DataError` and `StyleError`; a `TypeError` from a wrong argument type is a bug in the plotting code and is not caught by it.

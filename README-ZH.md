@@ -356,6 +356,8 @@ TypeError: Axes.line(): color is str; color must be of type Color.
 hint: use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.
 ```
 
+只取决于图形设置的错误，在第一次绘制时就会出现；少数错误取决于数据，比如数值变成无穷大，或对数轴上出现 0，可能在长任务的后期才出现。在训练循环或模拟里，请先记录数据、结束后再画图，或者用 `try`/`except umber.UmberError` 包住画图代码并记录错误，避免一张画不出来的图让整个任务停下。
+
 在支持颜色的终端里，提示和高亮会以彩色显示；设置 `NO_COLOR` 可关闭颜色，设置 `FORCE_COLOR` 可强制开启。在 Jupyter 中同样会显示这些说明。
 
 ## 静态类型
@@ -421,6 +423,10 @@ figure
     .line(AxisData::Numbers(vec![0.0, 1.0, 2.0, 3.0]), &[1.0, 3.0, 2.0, 4.0], LineOptions::default())?;
 std::fs::write("signal.png", figure.to_png(144)?)?;
 ```
+
+## umber 是怎么做出来的
+
+umber 的代码、测试和文档由 Anthropic、OpenAI 和 Google 的 AI 模型编写，并由 Anthropic、OpenAI、Google 和智谱 AI 的模型审查。作者决定设计和每一项默认行为，并在测试、类型检查和逐字节的输出比对全部通过后验收每一次发版。[`DESIGN-ZH.md`](https://github.com/TJ-Junhao/umber/blob/main/DESIGN-ZH.md) 说明各项设计取舍、它们的代价，以及这个库是怎么做出来的。
 
 ## 状态
 

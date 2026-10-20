@@ -356,6 +356,8 @@ TypeError: Axes.line(): color is str; color must be of type Color.
 hint: use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.
 ```
 
+Errors that depend only on how a figure is set up appear the first time it is drawn; a few depend on the data, such as a value that becomes infinite or a value of 0 on a log axis, and can appear late in a long job. In a training loop or a simulation, record the values and plot them afterwards, or wrap the plotting code in `try`/`except umber.UmberError` and log the error, so that a figure that cannot be drawn does not end the job.
+
 In a terminal that supports it, the hint and the highlight are shown in color; set `NO_COLOR` to turn color off or `FORCE_COLOR` to force it. The same notes appear in Jupyter.
 
 ## Static typing
@@ -421,6 +423,10 @@ figure
     .line(AxisData::Numbers(vec![0.0, 1.0, 2.0, 3.0]), &[1.0, 3.0, 2.0, 4.0], LineOptions::default())?;
 std::fs::write("signal.png", figure.to_png(144)?)?;
 ```
+
+## How umber is built
+
+umber's code, tests and documentation are written by AI models from Anthropic, OpenAI and Google, and checked by models from Anthropic, OpenAI, Google and Zhipu AI. Its author decides the design and every default, and accepts each release after the tests, type checks and byte-for-byte output checks pass. [`DESIGN.md`](https://github.com/TJ-Junhao/umber/blob/main/DESIGN.md) explains the design choices, what they cost and how the library is built.
 
 ## Status
 
