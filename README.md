@@ -422,6 +422,10 @@ figure
 std::fs::write("signal.png", figure.to_png(144)?)?;
 ```
 
+## How umber is built
+
+umber's code, tests and documentation are written by AI models from Anthropic, OpenAI and Google, and checked by models from Anthropic, OpenAI, Google and Zhipu AI. Its author decides the design and every default, and accepts each release after the tests, type checks and byte-for-byte output checks pass. [`DESIGN.md`](https://github.com/TJ-Junhao/umber/blob/main/DESIGN.md) explains the design choices, what they cost and how the library is built.
+
 ## Status
 
 umber is at version 0.x. The API is not yet stable and may change or be removed without a deprecation period. More examples are in [`examples/`](https://github.com/TJ-Junhao/umber/tree/main/examples). Changes in each version are listed in the [release notes](https://github.com/TJ-Junhao/umber/releases).

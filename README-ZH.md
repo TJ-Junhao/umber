@@ -422,6 +422,10 @@ figure
 std::fs::write("signal.png", figure.to_png(144)?)?;
 ```
 
+## umber 是怎么做出来的
+
+umber 的代码、测试和文档由 Anthropic、OpenAI 和 Google 的 AI 模型编写，并由 Anthropic、OpenAI、Google 和智谱 AI 的模型审查。作者决定设计和每一项默认行为，并在测试、类型检查和逐字节的输出比对全部通过后验收每一次发版。[`DESIGN-ZH.md`](https://github.com/TJ-Junhao/umber/blob/main/DESIGN-ZH.md) 说明各项设计取舍、它们的代价，以及这个库是怎么做出来的。
+
 ## 状态
 
 umber 目前处于 0.x 版本。API 尚未稳定，可能变更或移除，且不保证提供弃用期。更多示例见 [`examples/`](https://github.com/TJ-Junhao/umber/tree/main/examples)。各版本的变更列在 [release notes](https://github.com/TJ-Junhao/umber/releases) 中。
