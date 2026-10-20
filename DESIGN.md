@@ -8,7 +8,7 @@ umber is a plotting library for scientific computing and for figures that go int
 
 **Explicit over implicit, simple over complex.** Every option is a typed value: a `Color`, a `Size`, a `Dash`, an enum member. There are no format strings, no positional style arguments and no silent conversions. New parameters are keyword-only and have defaults, so a call reads the same in a year as it does today.
 
-**Fail fast, and say how to fix it.** An invalid call raises where it is made, with a message, a hint and the offending argument highlighted in the traceback. When something does not fit (a title, an axis label, a legend, a pie label) umber raises instead of clipping it, and a size it names in the error is a size that works. A figure that silently loses a label is worse than an error.
+**Fail fast, and say how to fix it.** An invalid call raises where it is made, with a message, a hint and the offending argument highlighted in the traceback. When something does not fit (a title, an axis label, a legend, a pie label) umber raises instead of clipping it, and a size it names in the error is a size that works. A figure that silently loses a label is worse than an error. Errors that depend only on how a figure is set up appear the first time it is drawn; the few that depend on the data can appear late, so long-running jobs should catch `UmberError` around their plotting code or plot after the job, as the README describes.
 
 **One shape per call, no hidden state.** `add_axes()` always returns one axes, whatever the grid. There is no current figure, no `plt`, no global configuration. A figure is a value: `copy.copy` and `copy.deepcopy` both give an independent copy.
 
