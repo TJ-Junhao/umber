@@ -101,6 +101,10 @@ jobs:
         # Add it when they support Python 3.15 lazy imports; the subprocess test runs here.
         python: ["3.12", "3.13", "3.14", "3.15"]
     runs-on: ${{ matrix.os }}
+    env:
+      # Use uv's own CPython builds, as before the runner images shipped Python 3.15: with the
+      # image's 3.15.0 on Windows, the binding crate's test executable cannot load its DLLs.
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
@@ -169,6 +173,10 @@ jobs:
             skip-packages: --no-install-package ipython --no-install-package psutil
             skip-tests: --ignore=tests/python/test_jupyter.py
     runs-on: ${{ matrix.os }}
+    env:
+      # Use uv's own CPython builds, as before the runner images shipped Python 3.15: with the
+      # image's 3.15.0 on Windows, the binding crate's test executable cannot load its DLLs.
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
