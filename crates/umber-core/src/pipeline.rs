@@ -567,9 +567,10 @@ fn resolve_groups(
 /// the first time, every automatic axis holding bubbles widens its data extent to fit them on
 /// those plots, before padding (and log-axis rounding), and later whenever a bubble reaches past a
 /// plot edge, shared panels with hidden tick labels included. A changed extent resolves the
-/// axes and solves the grid again, with the same tick choices. A fit the grid cannot hold, or
-/// one still unsettled after the rounds, leaves its axis with the limits of the data positions,
-/// and the plot clips its bubbles; bubbles never make the layout fail.
+/// axes and solves the grid again, with the same tick choices. Bubbles that no extent holds
+/// fail the layout ([`BubbleFits::error`]), and so does a grid that cannot hold the fitted
+/// limits. Only a fit still unsettled after the rounds leaves its axis with the limits of the
+/// data positions, and the plot clips its bubbles.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -578,7 +579,8 @@ fn resolve_groups(
 /// # Errors
 ///
 /// As [`layout::solve_grid`], from either pass: the final pass needs the plot sizes of the
-/// first; then as [`layout::check_panel_contents`], for the final layout only.
+/// first; as [`BubbleFits::error`], in the panel it names; then as
+/// [`layout::check_panel_contents`], for the final layout only.
 fn plan(
     figure: &Figure,
     panels: &[Panel<'_>],
@@ -981,14 +983,9 @@ fn plan(
         })
         .sum();
     // Resolves the axes for the current tick choices and bubble fits and solves the grid
-    // again. When the grid cannot hold the fitted limits, every fit is clipped, and the axes
-    // are resolved and the grid solved with the limits of the data positions.
-    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 3]]| match solve_ticks(
-        resolve_choices(choices, fits),
-    ) {
-        Ok(planned) => Ok(planned),
-        Err(_) if fits.clip_all() => solve_ticks(resolve_choices(choices, fits)),
-        Err(error) => Err(error),
+    // again; a grid that cannot hold the fitted limits fails.
+    let refit = |fits: &BubbleFits, choices: &[[TickChoice; 3]]| {
+        solve_ticks(resolve_choices(choices, fits))
     };
     for _ in 0..rounds + fits.budget() {
         // The sides whose labels crowd on the solved plots, chosen again.
@@ -999,8 +996,12 @@ fn plan(
             .iter()
             .map(|slot| slot.plot.size())
             .collect();
-        if fits.update(&resolved, &plots) {
-            (resolved, bands, solution) = refit(&mut fits, &choices)?;
+        let refitted = fits.update(&resolved, &plots);
+        if let Some((panel, error)) = fits.error(&marks, context) {
+            return Err(in_cell(figure, panels[panel].axes, error));
+        }
+        if refitted {
+            (resolved, bands, solution) = refit(&fits, &choices)?;
             continue;
         }
         for (i, r) in resolved.iter().enumerate() {
@@ -1102,7 +1103,7 @@ fn plan(
         .map(|slot| slot.plot.size())
         .collect();
     if fits.clip_unsettled(&resolved, &plots) {
-        (resolved, bands, solution) = refit(&mut fits, &choices)?;
+        (resolved, bands, solution) = refit(&fits, &choices)?;
     }
 
     // A single label can release room that the previous crowded set needed. A crowded set

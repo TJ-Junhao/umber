@@ -1,12 +1,12 @@
-//! Automatic limits that fit whole bubble markers, and the data-position limits they fall back
-//! to when the bubbles cannot all fit.
+//! Automatic limits that fit whole bubble markers, the errors for bubbles that no limits hold,
+//! and the explicit limits that clip them.
 
 use crate::layout::Layout;
 use crate::pipeline::{plan_figure, try_plan_panels};
 use crate::resolve::{Resolved, ResolvedMark, resolve_marks};
 use crate::{
-    AxesMut, AxisData, BubbleOptions, Figure, FontLibrary, Grid, GridIndex, Instant, Item,
-    LegendStyle, LineOptions, LogBase, Marker, Placement, ScaleKind, ScatterOptions, Share, Theme,
+    AxisData, BubbleOptions, Error, Figure, FontLibrary, Grid, GridIndex, Instant, Item,
+    LegendStyle, LineOptions, LogBase, Marker, Placement, ScaleKind, Share, Theme,
 };
 
 const MARKERS: [Marker; 5] = [
@@ -306,57 +306,53 @@ fn only_the_axis_without_explicit_limits_is_fitted() {
     assert!(f.to_scene(FontLibrary::global()).is_ok());
 }
 
-/// How a test figure draws its points: as bubbles, or as a scatter of the same positions,
-/// whose axes have the limits of the data positions alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Draw {
-    Bubbles,
-    Scatter,
+/// The plot size the error for bubbles too large for their plot names, and the plot's own:
+/// `((W, H), (w, h))` from "need a plot at least W × H pt; the plot is w × h pt.".
+fn named_plots(message: &str) -> ((f64, f64), (f64, f64)) {
+    let pair = |text: &str| {
+        let (w, h) = text.split_once(" × ").unwrap();
+        (w.parse().unwrap(), h.parse().unwrap())
+    };
+    let (_, rest) = message.split_once("need a plot at least ").unwrap();
+    let (need, rest) = rest.split_once(" pt; the plot is ").unwrap();
+    let (plot, _) = rest.split_once(" pt.").unwrap();
+    (pair(need), pair(plot))
 }
 
-fn points(a: &mut AxesMut<'_>, draw: Draw, x: &[f64], y: &[f64], sizes: &[f64]) {
-    match draw {
-        Draw::Bubbles => a.bubbles(x, y, sizes, BubbleOptions::default()).map(|_| ()),
-        Draw::Scatter => a
-            .scatter(AxisData::Numbers(x.to_vec()), y, ScatterOptions::default())
-            .map(|_| ()),
+/// Asserts that the figure `make` draws on a `width` × `height` in canvas fails for bubbles
+/// too large for its `rows` × `cols` plots with `message`, and that the canvas grown by the
+/// plot size the error names, for every row and column, renders with every bubble inside its
+/// plot.
+fn assert_too_large_then_fits(
+    make: impl Fn(f64, f64) -> Figure,
+    (width, height): (f64, f64),
+    (rows, cols): (f64, f64),
+    message: &str,
+) {
+    let error = make(width, height)
+        .to_scene(FontLibrary::global())
+        .unwrap_err();
+    assert!(matches!(error, Error::Style { .. }));
+    assert_eq!(error.to_string(), message);
+    assert_eq!(
+        error.hint(),
+        Some("make the figure larger, or set explicit limits, which clip the bubbles.")
+    );
+    let ((need_w, need_h), (plot_w, plot_h)) = named_plots(message);
+    let grown = make(
+        width + cols * (need_w - plot_w) / 72.0,
+        height + rows * (need_h - plot_h) / 72.0,
+    );
+    assert_bubbles_inside(&grown, message);
+    for ((_, layout), _) in plans(&grown) {
+        assert!(layout.plot.width >= need_w && layout.plot.height >= need_h);
     }
-    .unwrap();
-}
-
-/// Asserts that every axis of the figure `make` draws with bubbles either holds all its
-/// bubbles or has the limits of its data positions, as the same figure drawn as a scatter has,
-/// and returns how many x and y axes have those limits.
-fn fitted_or_data_limits(make: impl Fn(Draw) -> Figure) -> (usize, usize) {
-    let f = make(Draw::Bubbles);
-    f.to_scene(FontLibrary::global()).unwrap();
-    let twin = try_plan_panels(&make(Draw::Scatter), FontLibrary::global()).unwrap();
-    let mut data_limits = (0, 0);
-    for (i, ((plan, marks), (twin, _))) in plans(&f).iter().zip(&twin).enumerate() {
-        let (x, y) = overshoot(&f, plan, marks);
-        let (resolved, _) = plan;
-        if x > 1e-4 {
-            assert_eq!(
-                resolved.x, twin.x,
-                "panel {i}: x neither fits nor has the data limits"
-            );
-            data_limits.0 += 1;
-        }
-        if y > 1e-4 {
-            assert_eq!(
-                resolved.y, twin.y,
-                "panel {i}: y neither fits nor has the data limits"
-            );
-            data_limits.1 += 1;
-        }
-    }
-    data_limits
 }
 
 #[test]
-fn bubbles_larger_than_the_plot_keep_the_data_limits_and_are_clipped() {
-    let make = |draw| {
-        let mut f = Figure::new(0.75, 0.75, Theme::pigment()).unwrap();
+fn bubbles_larger_than_the_plot_fail_with_a_plot_size_that_holds_them() {
+    let make = |width, height| {
+        let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.legend(LegendStyle::None, crate::SizeSpec::Auto)
             .unwrap()
@@ -364,43 +360,117 @@ fn bubbles_larger_than_the_plot_keep_the_data_limits_and_are_clipped() {
             .unwrap()
             .yticks(&[])
             .unwrap();
-        points(&mut a, draw, &[0.0, 1.0], &[0.0, 1.0], &[1.0, 1.0]);
+        a.bubbles(
+            &[0.0, 1.0],
+            &[0.0, 1.0],
+            &[1.0, 1.0],
+            BubbleOptions::default(),
+        )
+        .unwrap();
         f
     };
-    assert_eq!(fitted_or_data_limits(make), (1, 1));
+    assert_too_large_then_fits(
+        make,
+        (0.75, 0.75),
+        (1.0, 1.0),
+        "Figure.to_scene(): the bubbles need a plot at least 74 × 74 pt; the plot is 30 × 30 pt.",
+    );
 }
 
 #[test]
-fn a_grid_of_small_panels_renders_with_fitted_or_data_limits() {
-    let make = |draw| {
+fn bubbles_too_large_for_one_axis_name_their_label_and_both_lengths() {
+    // The plot is wide enough to hold the bubbles with room to spare, but too short.
+    let make = |width, height| {
+        let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap()
+            .bubbles(
+                &[0.0, 1.0],
+                &[0.0, 1.0],
+                &[1.0, 4.0],
+                BubbleOptions {
+                    label: "Cities".into(),
+                    marker: Marker::Square,
+                    ..BubbleOptions::default()
+                },
+            )
+            .unwrap();
+        f
+    };
+    assert_too_large_then_fits(
+        make,
+        (3.0, 0.75),
+        (1.0, 1.0),
+        "Figure.to_scene(): the bubbles \"Cities\" need a plot at least 192 × 67 pt; the plot is \
+         192 × 30 pt.",
+    );
+}
+
+#[test]
+fn a_grid_of_small_panels_fails_with_a_plot_size_that_holds_its_bubbles() {
+    let make = |width, height| {
         let grid = Grid::new(4, 4).unwrap();
-        let mut f = Figure::with_grid(6.0, 4.0, Theme::pigment(), grid).unwrap();
+        let mut f = Figure::with_grid(width, height, Theme::pigment(), grid).unwrap();
         for row in 0..4 {
             for col in 0..4 {
-                let mut a = f
-                    .add_axes_at(
-                        Placement {
-                            row: GridIndex::At(row),
-                            col: GridIndex::At(col),
-                            ..Placement::default()
-                        },
-                        ScaleKind::Linear,
-                        ScaleKind::Linear,
-                    )
-                    .unwrap();
-                points(
-                    &mut a,
-                    draw,
+                f.add_axes_at(
+                    Placement {
+                        row: GridIndex::At(row),
+                        col: GridIndex::At(col),
+                        ..Placement::default()
+                    },
+                    ScaleKind::Linear,
+                    ScaleKind::Linear,
+                )
+                .unwrap()
+                .bubbles(
                     &[1.0, 2.0, 3.0],
                     &[1.0, 3.0, 2.0],
                     &[1.0, 4.0, 9.0],
-                );
+                    BubbleOptions::default(),
+                )
+                .unwrap();
             }
         }
         f
     };
     // The plots are wide enough for the bubbles, but shorter than the largest one.
-    assert_eq!(fitted_or_data_limits(make), (0, 16));
+    assert_too_large_then_fits(
+        make,
+        (6.0, 4.0),
+        (4.0, 4.0),
+        "Figure.to_scene(): row 0, col 0: the bubbles need a plot at least 74 × 74 pt; the plot \
+         is 72 × 27 pt.",
+    );
+}
+
+#[test]
+fn bubbles_beyond_the_numeric_range_fail() {
+    let mut f = Figure::new(3.0, 2.5, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .bubbles(
+            &[0.0, crate::MAX_MAGNITUDE],
+            &[0.0, 1.0],
+            &[1.0, 1.0],
+            BubbleOptions {
+                label: "Far".into(),
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap();
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(matches!(error, Error::Style { .. }));
+    assert_eq!(
+        error.to_string(),
+        "Figure.to_scene(): the bubbles \"Far\" need x limits beyond the supported range."
+    );
 }
 
 #[test]

@@ -846,12 +846,14 @@ impl<'a> AxesMut<'a> {
     /// format or its affixes. An all-zero or empty scale has only label entries.
     /// Automatic limits fit each whole marker and its outline at the final plot size, along
     /// each axis by the marker shape's own extent, before padding and log-axis rounding, in log
-    /// space on log axes. Shared axes fit all their panels' bubbles. When the bubbles cannot
-    /// all fit on an automatic axis (a marker, outline included, at least as long as the plot
-    /// along it, limits beyond the supported numeric range, or limits that do not settle in
-    /// the final layout), that axis's limits come from the data positions alone, and the plot
-    /// clips the bubbles that overflow; rendering does not fail. Explicit limits still clip,
-    /// and scatter limits are unchanged. Legend swatches and size circles show the marker fill
+    /// space on log axes. Shared axes fit all their panels' bubbles. When no automatic limits
+    /// hold them, rendering fails with `Error::Style` (see
+    /// [`Figure::to_scene`](crate::Figure::to_scene)): a marker, outline included, at least as
+    /// long as the plot along an automatic axis names a plot size that holds the bubbles, and
+    /// limits beyond the supported numeric range name the axis. Only limits that do not settle in the final layout fall back: that axis's limits
+    /// come from the data positions alone, and the plot clips the bubbles that overflow.
+    /// Explicit limits are kept as given and clip the bubbles that reach past them, and
+    /// scatter limits are unchanged. Legend swatches and size circles show the marker fill
     /// composited over the plot background.
     ///
     /// A merged figure legend also shows only one set, after its first labelled bubble entry,

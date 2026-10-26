@@ -109,6 +109,8 @@ impl Figure {
     /// within the canvas padding above the grid. Their height joins the grid's height need.
     /// The x axis labels of a grid row share a baseline. An x tick label may reach halfway
     /// into the gap next to its axes; beyond that, the plots of the grid narrow so that it fits.
+    /// Beside a shared colorbar right of the plots, the plots narrow so that the x tick labels
+    /// stop short of the bar and its tick labels.
     ///
     /// Automatic colors share one palette slot per label, in first appearance order across
     /// row-major panels. Unlabelled automatic series take slots after all label slots, per
@@ -138,10 +140,16 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
-    /// Bubbles never make rendering fail: automatic limits fit whole bubble markers and their
-    /// outlines to the final plot size, across every panel sharing the scale, and when they
-    /// cannot (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)) the axis keeps the limits of
-    /// the data positions and the plot clips the bubbles.
+    /// Automatic limits fit whole bubble markers and their outlines to the final plot size,
+    /// across every panel sharing the scale. A marker, outline included, at least as long as
+    /// the plot along an automatic axis fails: the message names the bubbles (`the bubbles
+    /// "…" need a plot at least … × … pt; the plot is … × … pt.`, the label left out when the
+    /// mark has none), with a plot size that holds them with half of each length left to the
+    /// data positions, and the hint suggests making the figure larger or setting explicit
+    /// limits, which clip the bubbles. Limits that would leave the supported numeric range fail
+    /// too (`the bubbles "…" need x limits beyond the supported range.`). Limits that do not
+    /// settle in the final layout fall back to the data positions, and the plot clips the
+    /// bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
     ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs

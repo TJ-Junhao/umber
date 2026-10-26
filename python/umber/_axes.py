@@ -1119,13 +1119,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Automatic limits fit each whole marker and its outline on the final plot, along each
         axis by the marker shape's own extent, in log space on a log axis and in seconds on a
         time axis, before padding (and rounding on a log axis). Shared axes fit bubbles from
-        every panel sharing the scale. When the bubbles cannot all fit on an automatic axis
-        (a marker, outline included, at least
-        as long as the plot along it, limits beyond the supported numeric range, or limits
-        that do not settle), that axis's limits come from the data positions alone and the
-        plot clips the bubbles that overflow; rendering does not raise. Explicit limits still
-        clip; scatter limits are unchanged. Legend swatches and size circles show the marker
-        fill composited over the plot background.
+        every panel sharing the scale. A marker, outline included, at least as long as the
+        plot along an axis with automatic limits makes rendering raise ``StyleError``, naming
+        the bubbles and a plot size that holds them, for example ``the bubbles "Cities" need a
+        plot at least 120 × 80 pt; the plot is 300 × 40 pt.``; make the figure larger, or set
+        ``xlim()`` and ``ylim()``. Limits beyond the supported numeric range raise too. Only
+        limits that do not settle in the final layout fall back to the data positions, and the
+        plot clips the bubbles that overflow. Explicit limits are kept as given and clip the
+        bubbles that reach past them; scatter limits are unchanged. Legend swatches and size
+        circles show the marker fill composited over the plot background.
         Up to three reference circles at their true radius appear once, after the first labelled
         bubble entry, formatted like the y ticks. Repeated labels keep the larger circle; labels
         that round to zero are omitted. If all labels round to zero, only the largest reference
