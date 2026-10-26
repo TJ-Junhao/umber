@@ -4,6 +4,8 @@
 //! backend draws exactly what the SVG backend draws. If `tiny-skia` still refuses a shape the
 //! shared layer accepted, the item is skipped.
 
+mod colored_markers;
+
 use std::ops::Range;
 
 use tiny_skia as sk;
@@ -531,16 +533,30 @@ impl Canvas {
         true
     }
 
-    fn items(&mut self, items: &[Item], clip: Option<ClipRect>, depth: usize) {
-        for item in items {
+    fn items(&mut self, mut items: &[Item], clip: Option<ClipRect>, depth: usize) {
+        while let Some((item, rest)) = items.split_first() {
             match item {
                 Item::Group { clip: own, items } => self.group(own.as_ref(), items, clip, depth),
                 leaf => {
                     if self.use_clip(clip) {
+                        let consumed = colored_markers::draw(
+                            &mut Surface {
+                                pixmap: &mut self.pixmap,
+                                scale: self.scale,
+                                root: self.root,
+                                clip: self.mask.as_ref().map(|(rect, mask)| (mask, *rect)),
+                            },
+                            items,
+                        );
+                        if consumed > 0 {
+                            items = &items[consumed..];
+                            continue;
+                        }
                         self.leaf(leaf);
                     }
                 }
             }
+            items = rest;
         }
     }
 
@@ -957,7 +973,20 @@ impl Sprites {
         for placement in placements {
             visits += 1;
             if let Some(Some(sprite)) = self.phases.get(placement.phase) {
-                blit_over(&mut band, width, sprite, placement.left, placement.top);
+                if let Some((fill, stroke)) = placement.colors {
+                    blit_rows(
+                        &mut band,
+                        width,
+                        sprite,
+                        placement.left,
+                        placement.top,
+                        |dst, src| {
+                            colored_markers::blend_row(dst, src, fill, stroke);
+                        },
+                    );
+                } else {
+                    blit_over(&mut band, width, sprite, placement.left, placement.top);
+                }
             }
         }
         visits
@@ -1006,7 +1035,7 @@ struct Band<'a> {
 
 /// The most sprite placements queued before they are composited. Queuing separates finding
 /// positions from compositing, which keeps the compositing loop tight; the limit bounds the
-/// queue's memory for any number of markers (16 bytes a placement) and leaves enough sprites in
+/// queue's memory for any number of markers and leaves enough sprites in
 /// a full queue for [`MAX_THREADS`] threads.
 const QUEUE_LIMIT: usize = 32_768;
 
@@ -1019,6 +1048,8 @@ struct Placement {
     phase: usize,
     left: i32,
     top: i32,
+    /// Fill and outline for a coverage sprite; `None` for an already colored sprite.
+    colors: Option<(Rgba, Rgba)>,
 }
 
 impl Placement {
@@ -1035,7 +1066,12 @@ impl Placement {
         {
             return None;
         }
-        Some(Placement { phase, left, top })
+        Some(Placement {
+            phase,
+            left,
+            top,
+            colors: None,
+        })
     }
 }
 
@@ -1142,6 +1178,17 @@ fn div255(x: u32) -> u32 {
 /// hundreds of thousands of small sprites. Each row visits only its span of non-transparent
 /// pixels and copies opaque ones. All arithmetic is integer, so output is exact.
 fn blit_over(band: &mut Band<'_>, width: usize, sprite: &Sprite, left: i32, top: i32) {
+    blit_rows(band, width, sprite, left, top, blend_row);
+}
+
+fn blit_rows(
+    band: &mut Band<'_>,
+    width: usize,
+    sprite: &Sprite,
+    left: i32,
+    top: i32,
+    blend: impl Fn(&mut [u8], &[u8]),
+) {
     let (width, sw) = (width as i64, i64::from(sprite.pixmap.width()));
     let (left, top) = (i64::from(left), i64::from(top));
     let band_top = band.top as i64;
@@ -1167,7 +1214,7 @@ fn blit_over(band: &mut Band<'_>, width: usize, sprite: &Sprite, left: i32, top:
         else {
             continue;
         };
-        blend_row(dst_row, src_row);
+        blend(dst_row, src_row);
     }
 }
 
