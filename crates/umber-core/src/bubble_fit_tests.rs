@@ -5,8 +5,9 @@ use crate::layout::Layout;
 use crate::pipeline::{plan_figure, try_plan_panels};
 use crate::resolve::{Resolved, ResolvedMark, resolve_marks};
 use crate::{
-    AxisData, BubbleOptions, Error, Figure, FontLibrary, Grid, GridIndex, Instant, Item,
-    LegendStyle, LineOptions, LogBase, Marker, Placement, ScaleKind, Share, Theme,
+    AxisData, BubbleOptions, ColorBy, ColorbarOptions, ColorbarPosition, Error, Figure,
+    FontLibrary, Grid, GridIndex, Instant, Item, LegendStyle, LineOptions, LogBase, Marker,
+    Placement, PointColor, ScaleKind, Share, Theme,
 };
 
 const MARKERS: [Marker; 5] = [
@@ -70,6 +71,8 @@ fn overshoot(
             mark: data,
             maximum,
             radius,
+            color,
+            mapped,
             ..
         } = mark
         else {
@@ -94,6 +97,13 @@ fn overshoot(
                 !data.x_values().is_gap(*i)
                     && !data.y_values().is_gap(*i)
                     && crate::bubble_scale::radius(**size, *maximum, *radius) > 0.0
+                    && crate::draw::has_fill(
+                        f.theme(),
+                        resolved.color.as_ref(),
+                        *color,
+                        mapped.as_ref(),
+                        *i,
+                    )
             })
             .count();
         assert_eq!(items.len(), 2 * drawn, "no bubble may be culled");
@@ -709,4 +719,174 @@ fn missing_times_draw_no_bubble() {
         Marker::Circle,
     );
     assert_bubbles_inside(&f, "gaps");
+}
+
+/// A figure `width` × `height` in with one axes on `x` and a linear y axis, ticks, legend and
+/// colorbar hidden, holding the bubbles at `x` and `y` of `sizes` colored as `color`.
+fn bare_bubbles(
+    (width, height): (f64, f64),
+    x: ScaleKind,
+    (xs, ys, sizes): (&[f64], &[f64], &[f64]),
+    color: PointColor,
+) -> Figure {
+    let mapped = matches!(color, PointColor::By(_));
+    let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
+    let mut a = f.add_axes(x, ScaleKind::Linear).unwrap();
+    a.legend(LegendStyle::None, crate::SizeSpec::Auto)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .bubbles(
+            xs,
+            ys,
+            sizes,
+            BubbleOptions {
+                color,
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap();
+    if mapped {
+        a.colorbar(ColorbarOptions {
+            position: Some(ColorbarPosition::None),
+            ..ColorbarOptions::default()
+        })
+        .unwrap();
+    }
+    f
+}
+
+#[test]
+fn bubbles_without_a_color_are_not_fitted() {
+    // The large bubble's value maps to no color, so it is not drawn; the small one fits.
+    let f = bare_bubbles(
+        (0.75, 0.75),
+        ScaleKind::Linear,
+        (&[0.0, 0.0], &[0.0, 0.0], &[10000.0, 1.0]),
+        PointColor::By(ColorBy::new(vec![f64::NAN, 1.0])),
+    );
+    assert_bubbles_inside(&f, "uncolored");
+}
+
+#[test]
+fn mapped_outlines_fit_a_plot_the_widest_outline_would_not() {
+    // The plot is 36.6 pt wide; a mapped circle with its 0.5 pt outline is 36.5 pt, with the
+    // 0.8 pt outline of one color it would be 36.8 pt.
+    let f = bare_bubbles(
+        (60.6 / 72.0, 3.0),
+        ScaleKind::Linear,
+        (&[0.0], &[0.0], &[1.0]),
+        PointColor::By(ColorBy::new(vec![1.0])),
+    );
+    let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+    assert!(
+        (layout.plot.width - 36.6).abs() < 1e-9,
+        "{}",
+        layout.plot.width
+    );
+    assert_bubbles_inside(&f, "mapped outline");
+}
+
+#[test]
+fn every_size_an_error_names_holds_its_bubbles() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let cases: Vec<(ScaleKind, Vec<f64>)> = vec![
+        (ScaleKind::Linear, vec![0.0, 1.0]),
+        (ScaleKind::Linear, vec![-1e6, 3.0, 1e6]),
+        (ScaleKind::Linear, vec![-1e299, 1e299]),
+        (ScaleKind::Linear, vec![-9e299, 9e299]),
+        (ScaleKind::Linear, vec![0.0, 9.99e299]),
+        (ScaleKind::Linear, vec![0.5]),
+        (log, vec![1.0, 100.0]),
+        (log, vec![1e-200, 1e200]),
+        (log, vec![1e-290, 1e290]),
+        (log, vec![1e-299, 1e299]),
+        (log, vec![1e-300, 1.0]),
+        (log, vec![3e-300, 1e10]),
+        (log, vec![1.0, 9.99e299]),
+        (log, vec![7.0]),
+    ];
+    let (mut checked, mut ranged) = (0, 0);
+    for (x, xs) in cases {
+        for sizes in [
+            vec![1.0; xs.len()],
+            (1..=xs.len()).map(|i| i as f64).collect(),
+        ] {
+            let ys: Vec<f64> = (0..xs.len()).map(|i| i as f64).collect();
+            let make =
+                |side: (f64, f64)| bare_bubbles(side, x, (&xs, &ys, &sizes), PointColor::AUTO);
+            let small = (0.75, 3.0);
+            let case = format!("{x:?} {xs:?} {sizes:?}");
+            let Err(error) = make(small).to_scene(FontLibrary::global()) else {
+                panic!("{case}: the plot is narrower than a bubble")
+            };
+            let message = error.to_string();
+            if message.contains("beyond the supported range") {
+                // No plot a figure can have holds them: the widest figure fails the same way.
+                let widest = make((crate::model::MAX_FIGURE_IN, small.1))
+                    .to_scene(FontLibrary::global())
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    widest.contains("beyond the supported range"),
+                    "{case}: {widest}"
+                );
+                ranged += 1;
+                continue;
+            }
+            let ((need_w, need_h), (plot_w, plot_h)) = named_plots(&message);
+            let grown = make((
+                small.0 + (need_w - plot_w) / 72.0,
+                small.1 + (need_h - plot_h) / 72.0,
+            ));
+            assert_bubbles_inside(&grown, &format!("{case}: {message}"));
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 15 && ranged >= 4,
+        "{checked} sized, {ranged} out of range"
+    );
+}
+
+#[test]
+fn a_shared_axis_names_the_panel_and_bubbles_whose_bound_fails() {
+    let grid = Grid::new(1, 2).unwrap().with_share_x(Share::All);
+    let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), grid).unwrap();
+    for (col, label, far) in [(0, "Near", 1.0), (1, "Far", crate::MAX_MAGNITUDE)] {
+        f.add_axes_at(
+            Placement {
+                row: GridIndex::At(0),
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            ScaleKind::Linear,
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .legend(LegendStyle::None, crate::SizeSpec::Auto)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .bubbles(
+            &[0.0, far],
+            &[0.0, 1.0],
+            &[1.0, 1.0],
+            BubbleOptions {
+                label: label.into(),
+                ..BubbleOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Figure.to_scene(): row 0, col 1: the bubbles \"Far\" need x limits beyond the \
+         supported range."
+    );
 }

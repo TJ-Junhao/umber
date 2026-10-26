@@ -145,9 +145,12 @@ impl Figure {
     /// the plot along an automatic axis fails: the message names the bubbles (`the bubbles
     /// "…" need a plot at least … × … pt; the plot is … × … pt.`, the label left out when the
     /// mark has none), with a plot size that holds them with half of each length left to the
-    /// data positions, and the hint suggests making the figure larger or setting explicit
-    /// limits, which clip the bubbles. Limits that would leave the supported numeric range fail
-    /// too (`the bubbles "…" need x limits beyond the supported range.`). Limits that do not
+    /// data positions, or longer where the limits must stay within the supported numeric range,
+    /// and the hint suggests making the figure larger or setting explicit limits, which clip
+    /// the bubbles. Bubbles whose limits would leave that range on any plot a figure can have
+    /// fail naming the axis (`the bubbles "…" need x limits beyond the supported range.`). Only
+    /// drawn bubbles count: one whose value maps to no color is left out, and a color-mapped
+    /// marker counts with its thinner outline. Limits that do not
     /// settle in the final layout fall back to the data positions, and the plot clips the
     /// bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
     ///

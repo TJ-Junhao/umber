@@ -297,3 +297,22 @@ def test_bubbles_too_large_for_their_plot_raise_with_a_plot_size_that_holds_them
     assert axes_on(3, 0.75 + (74 - 30) / 72).figure.to_png().startswith(b"\x89PNG")
     clipped = axes_on(3, 0.75).xlim(-1, 2).ylim(-1, 2)
     assert clipped.figure.to_png().startswith(b"\x89PNG")
+
+
+def _bare(width: float, height: float) -> ub.Axes[float, float]:
+    return ub.Figure(width, height).add_axes().legend(ub.LegendStyle.NONE).xticks([]).yticks([])
+
+
+def test_bubbles_without_a_color_are_not_fitted() -> None:
+    # The large bubble's value maps to no color, so it is not drawn; the small one fits.
+    color = ub.ColorBy([float("nan"), 1])
+    ax = _bare(0.75, 0.75).bubbles([0, 0], [0, 0], [10000, 1], color=color)
+    ax.colorbar(position=ub.ColorbarPosition.NONE)
+    assert ax.figure.to_png().startswith(b"\x89PNG")
+
+
+def test_mapped_outlines_fit_a_plot_the_widest_outline_would_not() -> None:
+    # A 36.5 pt mapped circle with its 0.5 pt outline fits the 36.6 pt plot.
+    ax = _bare(60.6 / 72, 3).bubbles([0], [0], [1], color=ub.ColorBy([1]))
+    ax.colorbar(position=ub.ColorbarPosition.NONE)
+    assert ax.figure.to_png().startswith(b"\x89PNG")

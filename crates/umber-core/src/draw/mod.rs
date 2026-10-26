@@ -187,7 +187,7 @@ pub(crate) fn marks(
                 let xs = axis_values(&resolved.x, scatter_mark.x());
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
-                if let Some(fill) = point_fill(resolved, color, mapped.as_ref()) {
+                if let Some(fill) = point_fill(resolved.color.as_ref(), color, mapped.as_ref()) {
                     scatter::scatter_items(&context, (&xs, &ys), fill, marker, size, &mut items);
                 }
             }
@@ -322,7 +322,7 @@ pub(crate) fn marks(
                 ref mapped,
                 ..
             } => {
-                if let Some(fill) = point_fill(resolved, color, mapped.as_ref()) {
+                if let Some(fill) = point_fill(resolved.color.as_ref(), color, mapped.as_ref()) {
                     bubbles::bubble_items(
                         &context,
                         resolved,
@@ -501,21 +501,46 @@ pub(crate) fn check_images(
 }
 
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when
-/// the mark maps its colors from values (`mapped`), in the colors of the axes' color scale.
-/// `None` for a color-mapped mark without a color scale (no finite mapped value), which draws
-/// nothing.
+/// the mark maps its colors from values (`mapped`), in the colors of the axes' color scale
+/// `scale`. `None` for a color-mapped mark without a color scale (no finite mapped value),
+/// which draws nothing.
 fn point_fill<'a, 'm: 'a>(
-    resolved: &'a Resolved,
+    scale: Option<&'a crate::color_scale::ResolvedColorScale>,
     color: crate::Rgba,
     mapped: Option<&'a crate::color_scale::MappedColors<'m>>,
 ) -> Option<scatter::PointFill<'a>> {
-    match (mapped, &resolved.color) {
+    match (mapped, scale) {
         (None, _) => Some(scatter::PointFill::Uniform(color)),
         (Some(mapped), Some(scale)) => Some(scatter::PointFill::Mapped {
             scale,
             values: mapped.values,
         }),
         (Some(_), None) => None,
+    }
+}
+
+/// Whether the point at `index` of a scatter or bubble mark in `color`, its colors mapped from
+/// values when `mapped` is set, has a fill on the axes' color scale `scale`, as drawing it
+/// needs ([`point_fill`] and the fill of each point): every point of one color does, a mapped
+/// point only when its value maps to a color. Points without a fill are not drawn.
+pub(crate) fn has_fill(
+    theme: &Theme,
+    scale: Option<&crate::color_scale::ResolvedColorScale>,
+    color: crate::Rgba,
+    mapped: Option<&crate::color_scale::MappedColors<'_>>,
+    index: usize,
+) -> bool {
+    point_fill(scale, color, mapped).is_some_and(|fill| fill.at(theme, index).is_some())
+}
+
+/// The outline width, in points, of the markers of a scatter or bubble mark: the contrasting
+/// mapped outline when its colors are mapped from values (`mapped`), else the background
+/// outline of one color.
+pub(crate) fn marker_outline(mapped: bool) -> f32 {
+    if mapped {
+        scatter::MAPPED_MARKER_OUTLINE
+    } else {
+        MARKER_OUTLINE
     }
 }
 

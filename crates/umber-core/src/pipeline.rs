@@ -709,7 +709,12 @@ fn plan(
             Layer::Primary(crate::Panel::Pie(_)) => Vec::new(),
         })
         .collect();
-    let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
+    let scales: Vec<_> = panels.iter().map(|panel| panel.color.as_ref()).collect();
+    let fills = crate::bubble_fit::Fills {
+        theme,
+        scales: &scales,
+    };
+    let mut fits = BubbleFits::new(&marks, &ends, &limits, groups, fills);
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| match panel.axes {
