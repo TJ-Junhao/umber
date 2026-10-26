@@ -15,10 +15,10 @@ fn plan_of(f: &Figure) -> Result<FigurePlan> {
     let lib = lib();
     let groups = ShareGroups::new(f);
     let fonts = layout::figure_fonts(&lib, f.theme())?.in_context("Figure.to_scene()");
-    let panels = panels(f, &groups, &fonts)?;
-    plan(
+    let mut panels = panels(f, &groups, &fonts)?;
+    plan_cells(
         f,
-        &panels,
+        &mut panels,
         &groups,
         &fonts,
         "Figure.to_scene()",

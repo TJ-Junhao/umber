@@ -142,17 +142,17 @@ impl Figure {
     ///
     /// Automatic limits fit whole bubble markers and their outlines to the final plot size,
     /// across every panel sharing the scale. A marker, outline included, at least as long as
-    /// the plot along an automatic axis fails: the message names the bubbles (`the bubbles
-    /// "…" need a plot at least … × … pt; the plot is … × … pt.`, the label left out when the
-    /// mark has none), with a plot size that holds them with half of each length left to the
-    /// data positions, or longer where the limits must stay within the supported numeric range,
-    /// and the hint suggests making the figure larger or setting explicit limits, which clip
-    /// the bubbles. Bubbles whose limits would leave that range on any plot a figure can have
-    /// fail naming the axis (`the bubbles "…" need x limits beyond the supported range.`). Only
-    /// drawn bubbles count: one whose value maps to no color is left out, and a color-mapped
-    /// marker counts with its thinner outline. Limits that do not
-    /// settle in the final layout fall back to the data positions, and the plot clips the
-    /// bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
+    /// the plot along an automatic axis fails, and so do limits that would leave the supported
+    /// numeric range. The message names the bubbles and the smallest figure size, in whole
+    /// points, whose own layout holds every drawn bubble (`the bubbles "…" need a figure at
+    /// least … × … pt; the figure is … × … pt.`, the label left out when the mark has none),
+    /// found by laying the figure out at larger sizes (40 layouts at most); the hint suggests
+    /// making the figure larger or setting explicit limits, which clip the bubbles. When not
+    /// even the largest figure holds them, the message names the axis instead (`the bubbles
+    /// "…" need x limits beyond the supported range.`). Only drawn bubbles count: one whose
+    /// value maps to no color is left out, and a color-mapped marker counts with its thinner
+    /// outline. Limits that do not settle in the final layout fall back to the data positions,
+    /// and the plot clips the bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
     ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs

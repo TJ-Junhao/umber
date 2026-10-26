@@ -316,51 +316,49 @@ fn only_the_axis_without_explicit_limits_is_fitted() {
     assert!(f.to_scene(FontLibrary::global()).is_ok());
 }
 
-/// The plot size the error for bubbles too large for their plot names, and the plot's own:
-/// `((W, H), (w, h))` from "need a plot at least W × H pt; the plot is w × h pt.".
-fn named_plots(message: &str) -> ((f64, f64), (f64, f64)) {
+/// The figure size the error for bubbles too large for their plots names, and the figure's
+/// own, in points: `((W, H), (w, h))` from "need a figure at least W × H pt; the figure is w × h
+/// pt.".
+fn named_figure(message: &str) -> ((f64, f64), (f64, f64)) {
     let pair = |text: &str| {
         let (w, h) = text.split_once(" × ").unwrap();
         (w.parse().unwrap(), h.parse().unwrap())
     };
-    let (_, rest) = message.split_once("need a plot at least ").unwrap();
-    let (need, rest) = rest.split_once(" pt; the plot is ").unwrap();
-    let (plot, _) = rest.split_once(" pt.").unwrap();
-    (pair(need), pair(plot))
+    let (_, rest) = message.split_once("need a figure at least ").unwrap();
+    let (need, rest) = rest.split_once(" pt; the figure is ").unwrap();
+    let (own, _) = rest.split_once(" pt.").unwrap();
+    (pair(need), pair(own))
 }
 
 /// Asserts that the figure `make` draws on a `width` × `height` in canvas fails for bubbles
-/// too large for its `rows` × `cols` plots with `message`, and that the canvas grown by the
-/// plot size the error names, for every row and column, renders with every bubble inside its
-/// plot.
-fn assert_too_large_then_fits(
+/// too large for its plots, naming a larger figure size after at most the layouts the search
+/// may make, and that the figure at that size renders with every drawn bubble inside its plot.
+/// Returns the error's message.
+fn assert_named_figure_holds(
     make: impl Fn(f64, f64) -> Figure,
     (width, height): (f64, f64),
-    (rows, cols): (f64, f64),
-    message: &str,
-) {
+) -> String {
     let error = make(width, height)
         .to_scene(FontLibrary::global())
         .unwrap_err();
-    assert!(matches!(error, Error::Style { .. }));
-    assert_eq!(error.to_string(), message);
+    let message = error.to_string();
+    assert!(matches!(error, Error::Style { .. }), "{message}");
     assert_eq!(
         error.hint(),
-        Some("make the figure larger, or set explicit limits, which clip the bubbles.")
+        Some("make the figure larger, or set explicit limits, which clip the bubbles."),
+        "{message}"
     );
-    let ((need_w, need_h), (plot_w, plot_h)) = named_plots(message);
-    let grown = make(
-        width + cols * (need_w - plot_w) / 72.0,
-        height + rows * (need_h - plot_h) / 72.0,
-    );
-    assert_bubbles_inside(&grown, message);
-    for ((_, layout), _) in plans(&grown) {
-        assert!(layout.plot.width >= need_w && layout.plot.height >= need_h);
-    }
+    let probes = crate::pipeline::BUBBLE_PROBES.with(std::cell::Cell::get);
+    assert!((1..=40).contains(&probes), "{probes} layouts: {message}");
+    let ((need_w, need_h), (own_w, own_h)) = named_figure(&message);
+    assert!((own_w - width * 72.0).abs() < 1e-9 && (own_h - height * 72.0).abs() < 1e-9);
+    assert!(need_w >= own_w && need_h >= own_h && (need_w, need_h) != (own_w, own_h));
+    assert_bubbles_inside(&make(need_w / 72.0, need_h / 72.0), &message);
+    message
 }
 
 #[test]
-fn bubbles_larger_than_the_plot_fail_with_a_plot_size_that_holds_them() {
+fn bubbles_larger_than_the_plot_fail_with_a_figure_size_that_holds_them() {
     let make = |width, height| {
         let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
@@ -379,16 +377,15 @@ fn bubbles_larger_than_the_plot_fail_with_a_plot_size_that_holds_them() {
         .unwrap();
         f
     };
-    assert_too_large_then_fits(
-        make,
-        (0.75, 0.75),
-        (1.0, 1.0),
-        "Figure.to_scene(): the bubbles need a plot at least 74 × 74 pt; the plot is 30 × 30 pt.",
+    let message = assert_named_figure_holds(make, (0.75, 0.75));
+    assert_eq!(
+        message,
+        "Figure.to_scene(): the bubbles need a figure at least 61 × 61 pt; the figure is 54 × 54 pt."
     );
 }
 
 #[test]
-fn bubbles_too_large_for_one_axis_name_their_label_and_both_lengths() {
+fn bubbles_too_large_for_one_axis_name_their_label_and_grow_that_side() {
     // The plot is wide enough to hold the bubbles with room to spare, but too short.
     let make = |width, height| {
         let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
@@ -413,17 +410,16 @@ fn bubbles_too_large_for_one_axis_name_their_label_and_both_lengths() {
             .unwrap();
         f
     };
-    assert_too_large_then_fits(
-        make,
-        (3.0, 0.75),
-        (1.0, 1.0),
-        "Figure.to_scene(): the bubbles \"Cities\" need a plot at least 192 × 67 pt; the plot is \
-         192 × 30 pt.",
+    let message = assert_named_figure_holds(make, (3.0, 0.75));
+    assert_eq!(
+        message,
+        "Figure.to_scene(): the bubbles \"Cities\" need a figure at least 216 × 58 pt; the figure \
+         is 216 × 54 pt."
     );
 }
 
 #[test]
-fn a_grid_of_small_panels_fails_with_a_plot_size_that_holds_its_bubbles() {
+fn a_grid_of_small_panels_fails_with_a_figure_size_that_holds_its_bubbles() {
     let make = |width, height| {
         let grid = Grid::new(4, 4).unwrap();
         let mut f = Figure::with_grid(width, height, Theme::pigment(), grid).unwrap();
@@ -451,12 +447,11 @@ fn a_grid_of_small_panels_fails_with_a_plot_size_that_holds_its_bubbles() {
         f
     };
     // The plots are wide enough for the bubbles, but shorter than the largest one.
-    assert_too_large_then_fits(
-        make,
-        (6.0, 4.0),
-        (4.0, 4.0),
-        "Figure.to_scene(): row 0, col 0: the bubbles need a plot at least 74 × 74 pt; the plot \
-         is 72 × 27 pt.",
+    let message = assert_named_figure_holds(make, (6.0, 4.0));
+    assert_eq!(
+        message,
+        "Figure.to_scene(): row 0, col 0: the bubbles need a figure at least 432 × 327 pt; the \
+         figure is 432 × 288 pt."
     );
 }
 
@@ -836,12 +831,7 @@ fn every_size_an_error_names_holds_its_bubbles() {
                 ranged += 1;
                 continue;
             }
-            let ((need_w, need_h), (plot_w, plot_h)) = named_plots(&message);
-            let grown = make((
-                small.0 + (need_w - plot_w) / 72.0,
-                small.1 + (need_h - plot_h) / 72.0,
-            ));
-            assert_bubbles_inside(&grown, &format!("{case}: {message}"));
+            assert_named_figure_holds(|w, h| make((w, h)), small);
             checked += 1;
         }
     }
@@ -889,4 +879,92 @@ fn a_shared_axis_names_the_panel_and_bubbles_whose_bound_fails() {
         "Figure.to_scene(): row 0, col 1: the bubbles \"Far\" need x limits beyond the \
          supported range."
     );
+}
+
+#[test]
+fn a_log_value_axis_finished_below_bars_names_a_figure_that_holds_its_bubbles() {
+    let make = |width, height| {
+        let grid = Grid::new(1, 2).unwrap().with_share_y(Share::All);
+        let mut f = Figure::with_grid(width, height, Theme::pigment(), grid).unwrap();
+        let at = |col| Placement {
+            row: GridIndex::At(0),
+            col: GridIndex::At(col),
+            ..Placement::default()
+        };
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        f.add_axes_at(at(0), ScaleKind::Category, log)
+            .unwrap()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
+            .bar(
+                vec!["a".into(), "b".into()],
+                &[1.0, 1e200],
+                crate::BarOptions::default(),
+            )
+            .unwrap();
+        f.add_axes_at(at(1), ScaleKind::Linear, log)
+            .unwrap()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .bubbles(&[0.0], &[1e200], &[1.0], BubbleOptions::default())
+            .unwrap();
+        f
+    };
+    assert_named_figure_holds(make, (5.0, 0.9));
+}
+
+#[test]
+fn shared_panels_of_other_lengths_name_a_figure_that_holds_their_bubbles() {
+    let make = |width, height| {
+        let grid = Grid::new(2, 2).unwrap().with_share_x(Share::All);
+        let mut f = Figure::with_grid(width, height, Theme::pigment(), grid).unwrap();
+        let log = ScaleKind::Log { base: LogBase::TEN };
+        for (row, col, span, x) in [(0, 0, 2, 1e-280), (1, 0, 1, 1e280), (1, 1, 1, 1.0)] {
+            f.add_axes_at(
+                Placement {
+                    row: GridIndex::At(row),
+                    col: GridIndex::At(col),
+                    col_span: span,
+                    ..Placement::default()
+                },
+                log,
+                ScaleKind::Linear,
+            )
+            .unwrap()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
+            .xticks(&[])
+            .unwrap()
+            .yticks(&[])
+            .unwrap()
+            .bubbles(&[x], &[0.0], &[1.0], BubbleOptions::default())
+            .unwrap();
+        }
+        f
+    };
+    assert_named_figure_holds(make, (3.0, 4.0));
+}
+
+#[test]
+fn tick_labels_that_widen_at_the_named_size_are_laid_out_too() {
+    let make = |width, height| {
+        let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Log { base: LogBase::TEN }, ScaleKind::Linear)
+            .unwrap()
+            .legend(LegendStyle::None, crate::SizeSpec::Auto)
+            .unwrap()
+            .yticks(&[])
+            .unwrap()
+            .bubbles(
+                &[1e-200, 1e200],
+                &[0.0, 1.0],
+                &[1.0, 1.0],
+                BubbleOptions::default(),
+            )
+            .unwrap();
+        f
+    };
+    assert_named_figure_holds(make, (1.5, 4.0));
 }

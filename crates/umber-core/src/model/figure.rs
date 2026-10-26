@@ -798,6 +798,16 @@ impl Figure {
         self.height_in
     }
 
+    /// A copy of this figure `width_in` × `height_in` inches large, for a layout at another
+    /// size; the caller keeps the sides within the accepted range.
+    pub(crate) fn resized(&self, width_in: f64, height_in: f64) -> Figure {
+        Figure {
+            width_in,
+            height_in,
+            ..self.clone()
+        }
+    }
+
     /// The axes at `index` among the panels. Every [`AxesMut`] holds an index in range for as
     /// long as it borrows the figure.
     pub(super) fn panel(&self, index: usize) -> &Axes {

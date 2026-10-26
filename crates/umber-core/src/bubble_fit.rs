@@ -30,15 +30,14 @@
 //! marker with its own outline, the thinner one of a color-mapped mark, so that only the
 //! markers as drawn decide that the bubbles do not fit.
 //!
-//! When no extent holds the bubbles of an axis, the render fails ([`BubbleFits::error`]): a
+//! When no extent holds the bubbles of an axis, the layout fails ([`BubbleFits::failure`]): a
 //! bubble reaches at least half the plot length (the furthest reaches towards both ends
 //! together take the whole plot), or the fitted extent leaves the supported numeric range.
-//! The error names the bubbles whose bound fails, and a plot size on which the fit, padded
-//! and made again as the final layout does, holds them within the supported range, with room
-//! to spare ([`BubbleFit::sufficient_length`]); when no plot that a figure can have does, it
-//! names the axis whose limits would leave the range instead. A layout that cannot hold the
-//! fitted limits fails as layouts do. Explicit limits are never fitted, and the plot clips the
-//! bubbles that reach past them.
+//! The failure names the bubbles whose bound fails, and estimates the plot lengths that hold
+//! them ([`BubbleFit::sufficient_length`]); the pipeline starts from that estimate to find, by
+//! laying the figure out at larger sizes, a figure size that holds them, which its error
+//! names. A layout that cannot hold the fitted limits fails as layouts do. Explicit limits are
+//! never fitted, and the plot clips the bubbles that reach past them.
 //!
 //! Only a fit that does not settle within [`MAX_REFITS`] attempts, or within the rounds of the
 //! layout, still falls back: its axis keeps the limits of the data positions alone, as it would
@@ -69,20 +68,20 @@ const MAX_REFITS: usize = 8;
 const PATH_ALLOWANCE: f64 = 1e-4;
 /// The error context of the raw extent's scale; its errors are never reported.
 const CONTEXT: &str = "Figure.to_scene()";
-/// The share of the plot length that the plot size named in the error for bubbles too large
-/// for their plot leaves to the data positions: the bubbles' reaches take the rest, so the
-/// fitted limits are at most twice the data's extent, and tick labels that change with them
-/// leave the plot room enough.
+/// The share of the plot length that the estimate of a plot holding bubbles too large for
+/// their plot leaves to the data positions: the bubbles' reaches take the rest, so the fitted
+/// limits are at most twice the data's extent.
 const DATA_SHARE: f64 = 0.5;
-/// The longest plot, in points, that the error for bubbles too large for their plot may name:
-/// the side of the largest figure inside its padding. Bubbles that do not fit within the
-/// supported range on it fit on no plot a figure can have.
+/// The longest plot, in points, that the estimate of a plot holding bubbles considers: the
+/// side of the largest figure inside its padding.
 const LONGEST_PLOT: f64 = crate::model::MAX_FIGURE_IN * 72.0 - 2.0 * crate::layout::PADDING;
 /// The bisection steps that find the shortest plot length holding the bubbles within the
 /// supported range.
 const BISECTION_STEPS: usize = 64;
-/// The hint of the errors for bubbles that automatic limits cannot hold.
+/// The hint of the error for bubbles too large for their plot.
 const HINT: &str = "make the figure larger, or set explicit limits, which clip the bubbles.";
+/// The hint of the error for bubbles that no figure holds within the supported range.
+const RANGE_HINT: &str = "set explicit limits, which clip the bubbles.";
 
 /// The axis a fit is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -477,15 +476,6 @@ impl BubbleFit {
         Some(long)
     }
 
-    /// The bubble whose bound leaves the supported range on the longest plot, as an index into
-    /// the fit's bubbles; `None` when every bound stays within it there.
-    fn out_of_range(&self) -> Option<usize> {
-        match self.solve(0.0, &vec![LONGEST_PLOT; self.panels()]) {
-            Err(Unfit::OutOfRange(bubble)) => bubble,
-            _ => None,
-        }
-    }
-
     /// The label of the bubbles mark of the bubble at `bubble` in an error, a space first; empty
     /// for a mark without one. For a bar label, or no bubble, the furthest reaching bubble of
     /// `panel` is named, or of any panel without one there; `marks` are the resolved marks of
@@ -875,26 +865,19 @@ impl BubbleFits {
     /// Fits again every axis whose bubbles need it on the axes `resolved` and the solved plots
     /// `plots` (see [`BubbleFit::update`]). Returns whether any extent changed, in which case
     /// the axes must be resolved and the layout solved again, unless a fit failed
-    /// ([`error`](Self::error)).
+    /// ([`failure`](Self::failure)).
     pub fn update(&mut self, resolved: &[Resolved], plots: &[PlotSize]) -> bool {
         self.each(resolved, plots, BubbleFit::update)
     }
 
-    /// The error of the first fit, in panel order and x before y, that no extent can make,
-    /// with the panel it names, as an index into `marks`, the resolved marks of every panel;
-    /// `None` while every fit can be made. Errors are reported in `context`.
+    /// The first fit, in panel order and x before y, that no extent can make, as the failure
+    /// that names it; `None` while every fit can be made. `marks` are the resolved marks of
+    /// every panel, for the label of the bubbles named.
     ///
-    /// The error names the bubbles mark (its label, if any) and the panel of the bubble whose
-    /// bound fails, and a plot size that holds the bubbles of both axes of that panel
-    /// ([`BubbleFit::sufficient_length`]), in whole points: the length of the failing axis
-    /// rounded up and at least one point more than the plot's, and of the other axis at least
-    /// the plot's. When no plot holds the bubbles of an axis within the supported range, the
-    /// error names that axis instead, and the bubble that takes its limits past the range.
-    pub fn error(
-        &self,
-        marks: &[&[ResolvedMark<'_>]],
-        context: &'static str,
-    ) -> Option<(usize, Error)> {
+    /// The failure names the bubbles mark (its label, if any) and the panel of the bubble whose
+    /// bound fails, and estimates the plot lengths that hold the bubbles of both axes of that
+    /// panel ([`BubbleFit::sufficient_length`]).
+    pub fn failure(&self, marks: &[&[ResolvedMark<'_>]]) -> Option<BubbleFailure> {
         let (fit, reason, plots) =
             self.fits
                 .iter()
@@ -914,45 +897,28 @@ impl BubbleFits {
             },
             |i| fit.bubbles[i].panel,
         );
-        // The fits of both axes of the panel, the failing one first.
-        let mut fits: Vec<&BubbleFit> = Axis::BOTH
-            .iter()
-            .filter_map(|side| self.fits[self.leaders[panel][side.index()]][side.index()].as_ref())
-            .collect();
-        fits.sort_by_key(|other| other.axis != fit.axis);
-        let mut lengths = [None, None];
-        for other in fits {
-            let Some(length) = other.sufficient_length() else {
-                let bubble = other.out_of_range();
-                let panel = bubble.map_or(panel, |i| other.bubbles[i].panel);
-                let message = format!(
-                    "the bubbles{} need {} limits beyond the supported range.",
-                    other.label(bubble, panel, marks),
-                    other.axis.name()
-                );
-                return Some((panel, Error::style(context, message).with_hint(HINT)));
-            };
-            lengths[other.axis.index()] = Some(length);
-        }
-        let [width, height] = Axis::BOTH.map(|side| {
-            let room = side.length(plots[panel]).max(0.0).floor();
-            let least = lengths[side.index()].map_or(0.0, f64::ceil);
-            let least = if side == fit.axis {
-                least.max(room + 1.0)
-            } else {
-                least.max(room)
-            };
-            (number(least), number(room))
+        let estimate = Axis::BOTH.map(|side| {
+            self.fits[self.leaders[panel][side.index()]][side.index()]
+                .as_ref()
+                .and_then(BubbleFit::sufficient_length)
         });
-        let message = format!(
-            "the bubbles{} need a plot at least {} × {} pt; the plot is {} × {} pt.",
-            fit.label(reason.bubble(), panel, marks),
-            width.0,
-            height.0,
-            width.1,
-            height.1
-        );
-        Some((panel, Error::style(context, message).with_hint(HINT)))
+        Some(BubbleFailure {
+            panel,
+            label: fit.label(reason.bubble(), panel, marks),
+            axis: fit.axis,
+            plot: plots[panel],
+            estimate,
+        })
+    }
+
+    /// Whether every fit holding a bubble settled: none fell back to the limits of the data
+    /// positions, so the plots hold every drawn bubble.
+    pub fn settled(&self) -> bool {
+        self.fits
+            .iter()
+            .flatten()
+            .flatten()
+            .all(|fit| fit.on_demand || fit.state != State::Clipped)
     }
 
     /// Clips every fit whose bubbles still reach past the plot edges of the axes `resolved` on
@@ -981,6 +947,61 @@ impl BubbleFits {
             }
         }
         changed
+    }
+}
+
+/// Bubbles that no automatic limits hold on the plots of a layout, as the first failing fit
+/// names them ([`BubbleFits::failure`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BubbleFailure {
+    /// The panel of the bubble whose bound fails, in the order of the panels.
+    pub panel: usize,
+    /// The label of the bubbles mark in an error, a space first; empty without one.
+    label: String,
+    /// The axis of the failing fit.
+    axis: Axis,
+    /// The plot of the panel when the fit failed.
+    pub plot: PlotSize,
+    /// The plot lengths, x then y, that the fits of the panel's axes estimate to hold their
+    /// bubbles ([`BubbleFit::sufficient_length`]); `None` for an axis without a fit, or whose
+    /// fit finds no such length.
+    pub estimate: [Option<f64>; 2],
+}
+
+impl BubbleFailure {
+    /// The figure side that grows the failing axis's plots: 0 for the width (x), 1 for the
+    /// height (y).
+    pub fn side(&self) -> usize {
+        self.axis.index()
+    }
+
+    /// The error for bubbles that a figure of `figure` (width and height, in points) cannot
+    /// hold and one of `needed` can, reported in `context`.
+    pub fn needs_figure(&self, context: &'static str, needed: [f64; 2], figure: [f64; 2]) -> Error {
+        let [w, h] = needed.map(number);
+        let [fw, fh] = figure.map(number);
+        Error::style(
+            context,
+            format!(
+                "the bubbles{} need a figure at least {w} × {h} pt; the figure is {fw} × {fh} pt.",
+                self.label
+            ),
+        )
+        .with_hint(HINT)
+    }
+
+    /// The error for bubbles that no figure holds within the supported numeric range, reported
+    /// in `context`.
+    pub fn out_of_range(&self, context: &'static str) -> Error {
+        Error::style(
+            context,
+            format!(
+                "the bubbles{} need {} limits beyond the supported range.",
+                self.label,
+                self.axis.name()
+            ),
+        )
+        .with_hint(RANGE_HINT)
     }
 }
 
@@ -1206,7 +1227,6 @@ mod tests {
             vec![bubble(0.0, 1.0), bubble(crate::MAX_MAGNITUDE, 1.0)],
         );
         assert_eq!(edge.sufficient_length(), None);
-        assert_eq!(edge.out_of_range(), Some(1));
     }
 
     #[test]

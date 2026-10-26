@@ -849,9 +849,10 @@ impl<'a> AxesMut<'a> {
     /// space on log axes. Shared axes fit all their panels' bubbles. When no automatic limits
     /// hold them, rendering fails with `Error::Style` (see
     /// [`Figure::to_scene`](crate::Figure::to_scene)): a marker, outline included, at least as
-    /// long as the plot along an automatic axis names a plot size that holds the bubbles, and
-    /// limits beyond the supported numeric range name the axis. Only limits that do not settle in the final layout fall back: that axis's limits
-    /// come from the data positions alone, and the plot clips the bubbles that overflow.
+    /// long as the plot along an automatic axis names a figure size that holds the bubbles,
+    /// and limits beyond the supported numeric range on every figure name the axis. Only
+    /// limits that do not settle in the final layout fall back: that axis's limits come from
+    /// the data positions alone, and the plot clips the bubbles that overflow.
     /// Explicit limits are kept as given and clip the bubbles that reach past them, and
     /// scatter limits are unchanged. Legend swatches and size circles show the marker fill
     /// composited over the plot background.

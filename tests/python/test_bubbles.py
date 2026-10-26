@@ -278,7 +278,7 @@ def test_native_rendering_parity(marker: ub.Marker) -> None:
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 
-def test_bubbles_too_large_for_their_plot_raise_with_a_plot_size_that_holds_them() -> None:
+def test_bubbles_too_large_for_their_plot_raise_with_a_figure_size_that_holds_them() -> None:
     def axes_on(width: float, height: float) -> ub.Axes[float, float]:
         ax = ub.Figure(width, height).add_axes().legend(ub.LegendStyle.NONE)
         return ax.xticks([]).yticks([]).bubbles([0, 1], [0, 1], [1, 4], label="Cities")
@@ -286,15 +286,15 @@ def test_bubbles_too_large_for_their_plot_raise_with_a_plot_size_that_holds_them
     with pytest.raises(ub.StyleError) as caught:
         axes_on(3, 0.75).figure.to_png()
     assert str(caught.value) == (
-        'Figure.to_png(): the bubbles "Cities" need a plot at least 192 × 74 pt; '
-        "the plot is 192 × 30 pt."
+        'Figure.to_png(): the bubbles "Cities" need a figure at least 216 × 61 pt; '
+        "the figure is 216 × 54 pt."
     )
     assert details(caught.value) == (
         None,
         "make the figure larger, or set explicit limits, which clip the bubbles.",
     )
-    # The plot grown by the named size holds them; explicit limits clip them instead.
-    assert axes_on(3, 0.75 + (74 - 30) / 72).figure.to_png().startswith(b"\x89PNG")
+    # The figure of the named size holds them; explicit limits clip them instead.
+    assert axes_on(3, 61 / 72).figure.to_png().startswith(b"\x89PNG")
     clipped = axes_on(3, 0.75).xlim(-1, 2).ylim(-1, 2)
     assert clipped.figure.to_png().startswith(b"\x89PNG")
 
