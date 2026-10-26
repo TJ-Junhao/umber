@@ -312,6 +312,14 @@ fn benches(c: &mut Criterion) {
     group.bench_function("scatter_100k_mapped_png", |b| {
         b.iter(|| black_box(mapped_scatter.to_png(i64::from(DPI)).unwrap()));
     });
+    for dpi in [100, 144] {
+        group.bench_function(format!("scatter_100k_png_{dpi}dpi"), |b| {
+            b.iter(|| black_box(scatter.to_png(dpi).unwrap()));
+        });
+        group.bench_function(format!("scatter_100k_mapped_png_{dpi}dpi"), |b| {
+            b.iter(|| black_box(mapped_scatter.to_png(dpi).unwrap()));
+        });
+    }
 
     // The v0.2 grid target, including the shared-axes resolve/layout repair path.
     for (name, share) in [

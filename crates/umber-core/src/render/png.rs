@@ -244,6 +244,7 @@ fn fill_paint(gradient: GradientKind) -> Option<sk::Paint<'static>> {
 
 /// A stroke ready to draw: the (dashed) path in scene space, the stroke without a dash and the
 /// paint.
+#[derive(Clone)]
 struct PreparedStroke {
     path: sk::Path,
     stroke: sk::Stroke,
@@ -758,6 +759,7 @@ fn draw_image(surface: &mut Surface<'_>, image: &ImageView<'_>) {
 }
 
 /// One marker, ready to draw at any position.
+#[derive(Clone)]
 struct Marker {
     path: sk::Path,
     fill: Option<sk::Paint<'static>>,
@@ -800,17 +802,66 @@ impl Sprite {
     }
 }
 
-/// Pre-rendered copies of one marker at [`PHASES`] x [`PHASES`] sub-pixel phases.
-struct Sprites {
+/// How a sprite set is prepared and composited. Its placement data cannot select another kind.
+trait SpriteKind: Sized + Sync {
+    type Colors: Copy + Sync;
+
+    fn prepare(
+        sprites: &mut Sprites<Self>,
+        marker: &Marker,
+        scale: DeviceScale,
+        phase: usize,
+        colors: Self::Colors,
+    ) -> Option<usize>;
+
+    fn blend_row(dst: &mut [u8], src: &[u8], colors: Self::Colors);
+
+    fn materialize(_sprites: &mut Sprites<Self>, _marker: &Marker, _scale: DeviceScale) {}
+
+    fn is_full(&self, _phase: usize, _colors: Self::Colors) -> bool {
+        false
+    }
+
+    fn clear(&mut self) {}
+}
+
+/// Already-colored sprites of a single marker item.
+struct Colored;
+
+impl SpriteKind for Colored {
+    type Colors = ();
+
+    fn prepare(
+        sprites: &mut Sprites<Self>,
+        marker: &Marker,
+        scale: DeviceScale,
+        phase: usize,
+        (): (),
+    ) -> Option<usize> {
+        sprites.phases.resize_with(PHASES * PHASES, || None);
+        if sprites.phases[phase].is_none() {
+            sprites.phases[phase] = Some(sprites.render(marker, scale, phase)?);
+        }
+        Some(phase)
+    }
+
+    fn blend_row(dst: &mut [u8], src: &[u8], (): ()) {
+        blend_row(dst, src);
+    }
+}
+
+/// Pre-rendered copies of one geometry, with a single pixel representation for the whole set.
+struct Sprites<K: SpriteKind = Colored> {
     /// Where the marker origin sits inside each sprite, in pixels.
     origin: (i32, i32),
     size: (u32, u32),
     phases: Vec<Option<Sprite>>,
+    kind: K,
 }
 
-impl Sprites {
+impl<K: SpriteKind> Sprites<K> {
     /// `None` when the sprite would be larger than [`MAX_SPRITE_SIDE`] pixels per side.
-    fn new(marker: &Marker, scale: DeviceScale) -> Option<Sprites> {
+    fn new(marker: &Marker, scale: DeviceScale, kind: K) -> Option<Self> {
         let bounds = marker.path.bounds();
         let reach = marker
             .stroke
@@ -838,26 +889,24 @@ impl Sprites {
         Some(Sprites {
             origin: (-left, -top),
             size: (w as u32, h as u32),
-            phases: (0..PHASES * PHASES).map(|_| None).collect(),
+            phases: Vec::new(),
+            kind,
         })
     }
 
-    /// Renders the sprite at `index` in `phases` unless it exists: the phase
-    /// (`index % PHASES`, `index / PHASES`). `None` when it cannot be allocated.
-    fn prepare(&mut self, marker: &Marker, scale: DeviceScale, index: usize) -> Option<()> {
-        let (px, py) = (index % PHASES, index / PHASES);
-        let slot = self.phases.get_mut(index)?;
-        if slot.is_none() {
-            let mut pixmap = sk::Pixmap::new(self.size.0, self.size.1)?;
-            let step = 1.0 / PHASES as f32;
-            let at = sk::Transform::from_scale(scale.get(), scale.get()).post_translate(
-                self.origin.0 as f32 + px as f32 * step,
-                self.origin.1 as f32 + py as f32 * step,
-            );
-            marker.draw(&mut pixmap, at, None);
-            *slot = Some(Sprite::new(pixmap));
-        }
-        Some(())
+    /// Renders the original fill and stroke at one sub-pixel phase, without a clip mask.
+    fn render(&self, marker: &Marker, scale: DeviceScale, phase: usize) -> Option<Sprite> {
+        let mut pixmap = sk::Pixmap::new(self.size.0, self.size.1)?;
+        marker.draw(&mut pixmap, self.transform(scale, phase), None);
+        Some(Sprite::new(pixmap))
+    }
+
+    fn transform(&self, scale: DeviceScale, phase: usize) -> sk::Transform {
+        let step = 1.0 / PHASES as f32;
+        sk::Transform::from_scale(scale.get(), scale.get()).post_translate(
+            self.origin.0 as f32 + (phase % PHASES) as f32 * step,
+            self.origin.1 as f32 + (phase / PHASES) as f32 * step,
+        )
     }
 
     /// Composites the queued sprites over `pixmap` in queue order and empties the queue.
@@ -866,7 +915,14 @@ impl Sprites {
     /// to up to [`MAX_THREADS`] threads; each band belongs to one thread, which composites the
     /// queued sprites that reach it in queue order. Every pixel therefore sees the same sprites
     /// in the same order whatever the number of threads, and the output is the same.
-    fn flush(&self, pixmap: &mut sk::Pixmap, queue: &mut Vec<Placement>) {
+    fn flush(
+        &mut self,
+        pixmap: &mut sk::Pixmap,
+        queue: &mut Vec<Placement<K::Colors>>,
+        marker: &Marker,
+        scale: DeviceScale,
+    ) {
+        K::materialize(self, marker, scale);
         let (width, height) = (pixmap.width() as usize, pixmap.height() as usize);
         let threads = compositing_threads(queue.len());
         let image = pixmap.data_mut();
@@ -897,10 +953,10 @@ impl Sprites {
         &self,
         image: &mut [u8],
         (width, height): (usize, usize),
-        queue: &[Placement],
+        queue: &[Placement<K::Colors>],
         threads: usize,
     ) -> usize {
-        let mut reaching: Vec<Vec<&Placement>> = (0..height.div_ceil(BAND_ROWS))
+        let mut reaching: Vec<Vec<&Placement<K::Colors>>> = (0..height.div_ceil(BAND_ROWS))
             .map(|_| Vec::new())
             .collect();
         let (band_rows, sprite_rows) = (BAND_ROWS as i64, i64::from(self.size.1));
@@ -915,7 +971,7 @@ impl Sprites {
                 }
             }
         }
-        let work: Vec<(Band<'_>, Vec<&Placement>)> = image
+        let work: Vec<(Band<'_>, Vec<&Placement<K::Colors>>)> = image
             .chunks_mut(BAND_ROWS * width * 4)
             .zip(reaching)
             .enumerate()
@@ -929,7 +985,7 @@ impl Sprites {
             })
             .collect();
         let threads = threads.min(work.len());
-        let run = |share: Vec<(Band<'_>, Vec<&Placement>)>| -> usize {
+        let run = |share: Vec<(Band<'_>, Vec<&Placement<K::Colors>>)>| -> usize {
             share
                 .into_iter()
                 .map(|(band, placements)| self.composite(band, width, placements.into_iter()))
@@ -938,8 +994,7 @@ impl Sprites {
         if threads <= 1 {
             return run(work);
         }
-        let mut shares: Vec<Vec<(Band<'_>, Vec<&Placement>)>> =
-            (0..threads).map(|_| Vec::new()).collect();
+        let mut shares: Vec<_> = (0..threads).map(|_| Vec::new()).collect();
         for (i, item) in work.into_iter().enumerate() {
             if let Some(share) = shares.get_mut(i % threads) {
                 share.push(item);
@@ -967,26 +1022,23 @@ impl Sprites {
         &self,
         mut band: Band<'_>,
         width: usize,
-        placements: impl Iterator<Item = &'q Placement>,
-    ) -> usize {
+        placements: impl Iterator<Item = &'q Placement<K::Colors>>,
+    ) -> usize
+    where
+        K::Colors: 'q,
+    {
         let mut visits = 0;
         for placement in placements {
             visits += 1;
-            if let Some(Some(sprite)) = self.phases.get(placement.phase) {
-                if let Some((fill, stroke)) = placement.colors {
-                    blit_rows(
-                        &mut band,
-                        width,
-                        sprite,
-                        placement.left,
-                        placement.top,
-                        |dst, src| {
-                            colored_markers::blend_row(dst, src, fill, stroke);
-                        },
-                    );
-                } else {
-                    blit_over(&mut band, width, sprite, placement.left, placement.top);
-                }
+            if let Some(Some(sprite)) = self.phases.get(placement.index) {
+                blit_rows(
+                    &mut band,
+                    width,
+                    sprite,
+                    placement.left,
+                    placement.top,
+                    |dst, src| K::blend_row(dst, src, placement.colors),
+                );
             }
         }
         visits
@@ -1043,34 +1095,35 @@ const QUEUE_LIMIT: usize = 32_768;
 /// every pixel of the sprite is one the clip mask covers fully, so masking would change
 /// nothing. [`Placement::unmasked`] is the only way to make one.
 #[derive(Debug, Clone, Copy)]
-struct Placement {
+struct Placement<C> {
     /// The sprite's index in [`Sprites::phases`].
-    phase: usize,
+    index: usize,
     left: i32,
     top: i32,
-    /// Fill and outline for a coverage sprite; `None` for an already colored sprite.
-    colors: Option<(Rgba, Rgba)>,
+    /// Set-specific data: no colors for a single-color set, fill and outline for mapped sets.
+    colors: C,
 }
 
-impl Placement {
+impl<C> Placement<C> {
     /// The placement of a `size` sprite at (`left`, `top`), or `None` when part of it lies
     /// outside `interior`, the whole pixels the clip mask covers fully (`None` for no clip).
     fn unmasked(
         interior: Option<(i32, i32, i32, i32)>,
-        phase: usize,
+        index: usize,
         (left, top): (i32, i32),
         (w, h): (i32, i32),
-    ) -> Option<Placement> {
+        colors: C,
+    ) -> Option<Self> {
         if let Some((il, it, ir, ib)) = interior
             && (left < il || top < it || left + w > ir || top + h > ib)
         {
             return None;
         }
         Some(Placement {
-            phase,
+            index,
             left,
             top,
-            colors: None,
+            colors,
         })
     }
 }
@@ -1108,8 +1161,7 @@ fn draw_markers(surface: &mut Surface<'_>, markers: &MarkersView<'_>) {
         stroke,
         positions,
     } = *markers;
-    let (scale, root, clip) = (surface.scale, surface.root, surface.clip);
-    let pixmap = &mut *surface.pixmap;
+    let (scale, root) = (surface.scale, surface.root);
     let Some(normalized) = normalize_path(shape) else {
         return;
     };
@@ -1127,12 +1179,29 @@ fn draw_markers(surface: &mut Surface<'_>, markers: &MarkersView<'_>) {
     let mut sprites = if sprites_disabled() {
         None
     } else {
-        Sprites::new(&marker, scale)
+        Sprites::new(&marker, scale, Colored)
     };
+    let mut queue = Vec::new();
+    place_markers(surface, &marker, positions, &mut sprites, &mut queue, ());
+    if let Some(sprites) = &mut sprites {
+        sprites.flush(surface.pixmap, &mut queue, &marker, scale);
+    }
+}
+
+/// Places every sprite kind in the same order, flushing before masked paths or cache eviction.
+fn place_markers<K: SpriteKind>(
+    surface: &mut Surface<'_>,
+    marker: &Marker,
+    positions: &[Point],
+    sprites: &mut Option<Sprites<K>>,
+    queue: &mut Vec<Placement<K::Colors>>,
+    colors: K::Colors,
+) {
+    let (scale, root, clip) = (surface.scale, surface.root, surface.clip);
+    let pixmap = &mut *surface.pixmap;
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let mask = clip.map(|(m, _)| m);
     let interior = clip.map(|(_, c)| c.interior(pixmap.width(), pixmap.height()));
-    let mut queue = Vec::new();
     for p in positions.iter().filter(|p| valid_point(**p)) {
         let Some(sprites) = sprites.as_mut() else {
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
@@ -1146,22 +1215,27 @@ fn draw_markers(surface: &mut Surface<'_>, markers: &MarkersView<'_>) {
             continue;
         }
         let phase = py * PHASES + px;
-        let Some(placement) = Placement::unmasked(interior, phase, (left, top), (w, h)) else {
-            sprites.flush(pixmap, &mut queue);
+        let Some(mut placement) = Placement::unmasked(interior, phase, (left, top), (w, h), colors)
+        else {
+            sprites.flush(pixmap, queue, marker, scale);
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
             continue;
         };
-        if sprites.prepare(&marker, scale, phase).is_none() {
-            continue;
+        if sprites.kind.is_full(phase, colors) {
+            // Queued indices must be consumed before their cache entries can be reused.
+            sprites.flush(pixmap, queue, marker, scale);
+            sprites.phases.clear();
+            sprites.kind.clear();
         }
+        let Some(index) = K::prepare(sprites, marker, scale, phase, colors) else {
+            continue;
+        };
+        placement.index = index;
         debug_assert!(mask.is_none_or(|m| mask_is_full(m, (left, top), (w, h))));
         queue.push(placement);
         if queue.len() == QUEUE_LIMIT {
-            sprites.flush(pixmap, &mut queue);
+            sprites.flush(pixmap, queue, marker, scale);
         }
-    }
-    if let Some(sprites) = &sprites {
-        sprites.flush(pixmap, &mut queue);
     }
 }
 
@@ -1170,17 +1244,13 @@ fn div255(x: u32) -> u32 {
     (x + (x >> 8)) >> 8
 }
 
-/// Composites the premultiplied `sprite` over the rows of `band` of a `width`-pixel image, with
+/// Composites `sprite` using its set's blend function over a `width`-pixel image's `band`, with
 /// the sprite's top-left corner at (`left`, `top`) of the image, source-over, without a clip
 /// mask (see [`Placement`]).
 ///
 /// This is `draw_pixmap` without the per-call shader setup, which dominates when drawing
 /// hundreds of thousands of small sprites. Each row visits only its span of non-transparent
 /// pixels and copies opaque ones. All arithmetic is integer, so output is exact.
-fn blit_over(band: &mut Band<'_>, width: usize, sprite: &Sprite, left: i32, top: i32) {
-    blit_rows(band, width, sprite, left, top, blend_row);
-}
-
 fn blit_rows(
     band: &mut Band<'_>,
     width: usize,
@@ -1221,7 +1291,7 @@ fn blit_rows(
 /// Composites the premultiplied pixels `src` over `dst`, source-over: transparent pixels are
 /// skipped, opaque ones copied.
 ///
-/// Kept out of line: inlined into [`blit_over`], the per-pixel blend is no longer vectorized,
+/// Kept out of line: inlined into [`blit_rows`], the per-pixel blend is no longer vectorized,
 /// which made compositing a 100,000-marker scatter about 25 ms slower.
 #[inline(never)]
 fn blend_row(dst: &mut [u8], src: &[u8]) {
@@ -2189,7 +2259,7 @@ mod tests {
             stroke: stroke.and_then(|s| prepare_stroke(&normalized, &path, s, root)),
             path,
         };
-        let mut sprites = Sprites::new(&marker, scale).unwrap();
+        let mut sprites = Sprites::new(&marker, scale, Colored).unwrap();
         let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
         let mask = clip.map(|(m, _)| m);
         let interior = clip.map(|(_, c)| c.interior(pixmap.width(), pixmap.height()));
@@ -2210,7 +2280,7 @@ mod tests {
                 continue;
             }
             let phase = py * PHASES + px;
-            sprites.prepare(&marker, scale, phase).unwrap();
+            Colored::prepare(&mut sprites, &marker, scale, phase, ()).unwrap();
             let sprite = sprites.phases[phase].as_ref().unwrap();
             reference_blit(pixmap, &sprite.pixmap, left, top, mask);
         }

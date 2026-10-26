@@ -86,6 +86,10 @@ pub(super) struct MarkerGeometry {
 }
 
 impl MarkerGeometry {
+    /// Expand by the full outline width: these shapes' miter joins reach no further than
+    /// that beyond a vertex (the triangle's 60° apex reaches exactly one width). Map the
+    /// extents into the axes' frame first; callers can use a horizontal mark's frame, as
+    /// box outliers do, rather than the usual scatter frame.
     pub(super) fn new(context: &MarkContext<'_>, shape: Marker, size: f32, width: f32) -> Self {
         let shape = marker_shape(shape, size);
         let (half_w, half_h) = extent(&shape);

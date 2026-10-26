@@ -44,14 +44,16 @@ pub(super) fn bubble_items(
             None => Outline::Background,
         }
         .style(context.theme);
-        if previous.as_ref().is_none_or(|(size, _)| *size != diameter) {
-            previous = Some((
-                diameter,
-                MarkerGeometry::new(context, mark.options().marker, diameter, stroke.width),
-            ));
-        }
-        let Some((_, geometry)) = &previous else {
-            continue;
+        let geometry = match &mut previous {
+            Some((size, geometry)) if *size == diameter => geometry,
+            slot => {
+                &mut slot
+                    .insert((
+                        diameter,
+                        MarkerGeometry::new(context, mark.options().marker, diameter, stroke.width),
+                    ))
+                    .1
+            }
         };
         let Some(position) = geometry.position(context, x, y) else {
             continue;
