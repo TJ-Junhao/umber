@@ -18,7 +18,10 @@
 
 mod tables;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+#[cfg(test)]
+mod tests;
 
 use crate::error::number;
 use crate::{Error, Result, Rgba};
@@ -268,6 +271,38 @@ fn decode(channel: u8) -> f64 {
 
 /// The 8-bit sRGB channel of a linear-light value, clamped to the gamut.
 fn encode(linear: f64) -> u8 {
+    const BINS: usize = 4096;
+    const UNCERTAIN: u16 = 256;
+    static CONSTANT: OnceLock<[u16; BINS]> = OnceLock::new();
+    if !(0.0..1.0).contains(&linear) {
+        return encode_direct(linear);
+    }
+    let constant = CONSTANT.get_or_init(|| {
+        std::array::from_fn(|i| {
+            // sRGB is monotone. Only intervals whose two ends round to the same byte are
+            // cached; intervals crossing a rounding boundary use the original expression.
+            // Expand the ends well beyond floating-point roundoff, so a boundary near a
+            // bin edge also takes that path. There is no interpolation or color approximation.
+            let low = encode_direct(i as f64 / BINS as f64 - 1e-12);
+            let high = encode_direct((i + 1) as f64 / BINS as f64 + 1e-12);
+            if low == high {
+                u16::from(low)
+            } else {
+                UNCERTAIN
+            }
+        })
+    });
+    // Multiplication by this power of two is exact; truncation selects the enclosing bin.
+    let cached = constant[(linear * BINS as f64) as usize];
+    if cached == UNCERTAIN {
+        encode_direct(linear)
+    } else {
+        cached as u8
+    }
+}
+
+/// The original transfer function, also used for every interval containing a byte transition.
+fn encode_direct(linear: f64) -> u8 {
     let c = linear.clamp(0.0, 1.0);
     let srgb = if c <= 0.003_130_8 {
         12.92 * c

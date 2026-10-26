@@ -8,7 +8,7 @@ use super::fill::marker_alpha;
 use super::mapping::AxisPoint;
 use super::marker::{extent, marker_shape};
 use crate::color_scale::ResolvedColorScale;
-use crate::geometry::Point;
+use crate::geometry::{Path, Point};
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle};
 use crate::{Marker, Rgba, Theme};
 
@@ -62,6 +62,59 @@ pub(super) enum Outline {
     Background,
     /// A mapped outline color, with the mapped marker width.
     Contrasting(Rgba),
+}
+
+impl Outline {
+    pub(super) fn style(self, theme: &Theme) -> StrokeStyle {
+        let (color, width) = match self {
+            Self::Background => (theme.background(), MARKER_OUTLINE),
+            Self::Contrasting(color) => (color, MAPPED_MARKER_OUTLINE),
+        };
+        StrokeStyle {
+            color,
+            width,
+            dash: Vec::new(),
+            cap: LineCap::Butt,
+            join: LineJoin::Miter,
+        }
+    }
+}
+
+/// A marker path and its culling bounds, shared by points with the same diameter.
+pub(super) struct MarkerGeometry {
+    pub(super) shape: Path,
+    bounds: Bounds,
+}
+
+impl MarkerGeometry {
+    /// Expand by the full outline width: these shapes' miter joins reach no further than
+    /// that beyond a vertex (the triangle's 60° apex reaches exactly one width). Map the
+    /// extents into the axes' frame first; callers can use a horizontal mark's frame, as
+    /// box outliers do, rather than the usual scatter frame.
+    pub(super) fn new(context: &MarkContext<'_>, shape: Marker, size: f32, width: f32) -> Self {
+        let shape = marker_shape(shape, size);
+        let (half_w, half_h) = extent(&shape);
+        let reach = f64::from(width) + MARKER_SLACK;
+        let (half_first, half_second) = context.maps.in_frame((half_w, half_h));
+        let (left, right) = context.maps.x.expanded(half_first + reach);
+        let (top, bottom) = context.maps.y.expanded(half_second + reach);
+        Self {
+            shape,
+            bounds: Bounds {
+                left,
+                top,
+                right,
+                bottom,
+            },
+        }
+    }
+
+    pub(super) fn position(&self, context: &MarkContext<'_>, x: f64, y: f64) -> Option<Point> {
+        let point = AxisPoint::new(x, y);
+        self.bounds
+            .contains(point)
+            .then(|| context.maps.to_plot(point).to_scene())
+    }
 }
 
 /// Mapped outline colors shared within one mark, with one background conversion to Oklab.
@@ -136,49 +189,20 @@ pub(super) fn markers_item(
     size: f32,
     outline: Outline,
 ) -> Option<Item> {
-    let MarkContext { theme, maps, .. } = *context;
-    let (color, width) = match outline {
-        Outline::Background => (theme.background(), MARKER_OUTLINE),
-        Outline::Contrasting(color) => (color, MAPPED_MARKER_OUTLINE),
-    };
-    let shape_path = marker_shape(shape, size);
-    // Cull in axis space by the shape's own extent on each axis, plus the outline (whose miter
-    // joins reach at most its width beyond the path for these shapes) and the slack. The maps
-    // may be in the frame of horizontal marks, as for the outliers of horizontal boxes, whose
-    // first axis is the plot's y axis.
-    let (half_w, half_h) = extent(&shape_path);
-    let reach = f64::from(width) + MARKER_SLACK;
-    let (half_first, half_second) = maps.in_frame((half_w, half_h));
-    let ((left, right), (top, bottom)) = (
-        maps.x.expanded(half_first + reach),
-        maps.y.expanded(half_second + reach),
-    );
-    let bounds = Bounds {
-        left,
-        top,
-        right,
-        bottom,
-    };
+    let stroke = outline.style(context.theme);
+    let geometry = MarkerGeometry::new(context, shape, size, stroke.width);
     let positions: Vec<Point> = xs
         .iter()
         .zip(ys)
-        .map(|(&x, &y)| AxisPoint::new(x, y))
-        .filter(|&p| bounds.contains(p))
-        .map(|p| maps.to_plot(p).to_scene())
+        .filter_map(|(&x, &y)| geometry.position(context, x, y))
         .collect();
     if positions.is_empty() {
         return None;
     }
     Some(Item::Markers {
-        shape: shape_path,
+        shape: geometry.shape,
         fill: Some(fill),
-        stroke: Some(StrokeStyle {
-            color,
-            width,
-            dash: Vec::new(),
-            cap: LineCap::Butt,
-            join: LineJoin::Miter,
-        }),
+        stroke: Some(stroke),
         positions,
     })
 }
@@ -230,39 +254,31 @@ pub(super) fn scatter_items(
         return;
     }
     let mut outlines = MappedOutlines::new(context.theme);
-    let mut run: Option<(Rgba, Vec<f64>, Vec<f64>)> = None;
+    let geometry = MarkerGeometry::new(context, shape, size, MAPPED_MARKER_OUTLINE);
+    let mut run: Option<(Rgba, Vec<Point>)> = None;
+    let mut append = |color, positions: Vec<Point>| {
+        if !positions.is_empty() {
+            items.push(Item::Markers {
+                shape: geometry.shape.clone(),
+                fill: Some(color),
+                stroke: Some(Outline::Contrasting(outlines.color(color)).style(context.theme)),
+                positions,
+            });
+        }
+    };
     for (index, (&x, &y)) in xs.iter().zip(ys).enumerate() {
         let Some(color) = fill.at(context.theme, index) else {
             continue;
         };
-        match &mut run {
-            Some((current, run_xs, run_ys)) if *current == color => {
-                run_xs.push(x);
-                run_ys.push(y);
-            }
-            _ => {
-                if let Some((color, run_xs, run_ys)) = run.take() {
-                    items.extend(markers_item(
-                        context,
-                        (&run_xs, &run_ys),
-                        color,
-                        shape,
-                        size,
-                        Outline::Contrasting(outlines.color(color)),
-                    ));
-                }
-                run = Some((color, vec![x], vec![y]));
-            }
+        if run.as_ref().is_some_and(|(current, _)| *current != color)
+            && let Some((color, positions)) = run.take()
+        {
+            append(color, positions);
         }
+        let (_, positions) = run.get_or_insert_with(|| (color, Vec::new()));
+        positions.extend(geometry.position(context, x, y));
     }
-    if let Some((color, run_xs, run_ys)) = run {
-        items.extend(markers_item(
-            context,
-            (&run_xs, &run_ys),
-            color,
-            shape,
-            size,
-            Outline::Contrasting(outlines.color(color)),
-        ));
+    if let Some((color, positions)) = run {
+        append(color, positions);
     }
 }

@@ -2,7 +2,7 @@
 
 use super::MarkContext;
 use super::mapping::axis_shared;
-use super::scatter::{MappedOutlines, Outline, PointFill, markers_item};
+use super::scatter::{MappedOutlines, MarkerGeometry, Outline, PointFill};
 use crate::model::BubbleMark;
 use crate::resolve::Resolved;
 use crate::{FillRule, Item, Paint};
@@ -26,6 +26,7 @@ pub(super) fn bubble_items(
         PointFill::Uniform(_) => None,
         PointFill::Mapped { .. } => Some(MappedOutlines::new(context.theme)),
     };
+    let mut previous: Option<(f32, MarkerGeometry)> = None;
     let points = xs.iter().zip(&ys).zip(mark.sizes()).enumerate();
     for (index, ((&x, &y), &value)) in points {
         if value == 0.0 {
@@ -38,40 +39,34 @@ pub(super) fn bubble_items(
         if diameter == 0.0 {
             continue;
         }
-        let Some(Item::Markers {
-            shape,
-            fill: marker_fill,
-            stroke,
-            positions,
-        }) = markers_item(
-            context,
-            (&[x], &[y]),
-            color,
-            mark.options().marker,
-            diameter,
-            match &mut outlines {
-                Some(outlines) => Outline::Contrasting(outlines.color(color)),
-                None => Outline::Background,
-            },
-        )
-        else {
+        let stroke = match &mut outlines {
+            Some(outlines) => Outline::Contrasting(outlines.color(color)),
+            None => Outline::Background,
+        }
+        .style(context.theme);
+        let geometry = match &mut previous {
+            Some((size, geometry)) if *size == diameter => geometry,
+            slot => {
+                &mut slot
+                    .insert((
+                        diameter,
+                        MarkerGeometry::new(context, mark.options().marker, diameter, stroke.width),
+                    ))
+                    .1
+            }
+        };
+        let Some(position) = geometry.position(context, x, y) else {
             continue;
         };
-        for position in positions {
-            let path = shape.translated(position.x, position.y);
-            if let Some(marker_fill) = marker_fill {
-                items.push(Item::Fill {
-                    path: path.clone(),
-                    paint: Paint::Solid(marker_fill),
-                    rule: FillRule::NonZero,
-                });
-            }
-            if let Some(style) = &stroke {
-                items.push(Item::Stroke {
-                    path,
-                    style: style.clone(),
-                });
-            }
-        }
+        let path = geometry.shape.translated(position.x, position.y);
+        items.push(Item::Fill {
+            path: path.clone(),
+            paint: Paint::Solid(color),
+            rule: FillRule::NonZero,
+        });
+        items.push(Item::Stroke {
+            path,
+            style: stroke,
+        });
     }
 }
