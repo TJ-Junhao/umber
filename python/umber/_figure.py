@@ -637,7 +637,8 @@ class Figure:
         Raises:
             TypeError: If ``dpi`` is not an int.
             StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
-                axis labels or x tick labels cannot fit their room, or the image would be too large.
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, or the image would be too large.
 
         Example:
             >>> import umber as ub
@@ -662,7 +663,8 @@ class Figure:
         Raises:
             TypeError: If ``text`` is not an ``SvgText``.
             StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room.
+                cannot fit their room, or bubbles are too large for the plot of an axis with
+                automatic limits.
 
         Example:
             >>> import umber as ub
@@ -685,7 +687,8 @@ class Figure:
 
         Raises:
             StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, or a font cannot render the requested text.
+                cannot fit their room, bubbles are too large for the plot of an axis with
+                automatic limits, or a font cannot render the requested text.
 
         Example:
             >>> import umber as ub
@@ -707,7 +710,8 @@ class Figure:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``dpi`` is not
                 an int.
             StyleError: If ``dpi`` is out of range, the plot area, titles, subtitles,
-                axis labels or x tick labels cannot fit their room, or the image would be too large.
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, or the image would be too large.
             OSError: If the file cannot be written.
 
         Example:
@@ -731,7 +735,8 @@ class Figure:
             TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
                 an ``SvgText``.
             StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room.
+                cannot fit their room, or bubbles are too large for the plot of an axis with
+                automatic limits.
             OSError: If the file cannot be written.
 
         Example:
@@ -755,7 +760,8 @@ class Figure:
         Raises:
             TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
             StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, or a font cannot render the requested text.
+                cannot fit their room, bubbles are too large for the plot of an axis with
+                automatic limits, or a font cannot render the requested text.
             OSError: If the file cannot be written.
 
         Example:

@@ -206,6 +206,23 @@ impl MeasuredColorbar {
                 .max(self.label.as_ref().map_or(0.0, Label::width))
     }
 
+    /// How far past the start of a right bar's room the x tick labels of a row beside it may
+    /// reach, in points: to the middle of the bar's gap when the bar runs on down past the row
+    /// (`through`); otherwise, at the bar's lower end, to the end of its ticks when its end tick
+    /// label drops into the x tick label row below the plot. `None` for a bottom bar, and for
+    /// an end tick label that stays above that row.
+    pub(super) fn x_label_reach(&self, through: bool) -> Option<f64> {
+        if self.position != ColorbarSide::Right {
+            None
+        } else if through {
+            Some(self.gap / 2.0)
+        } else if self.tick_overhang().1 > super::X_LABEL_GAP {
+            Some(self.gap + self.thickness + self.tick_length)
+        } else {
+            None
+        }
+    }
+
     /// The vertical room including its gap; zero for a right bar.
     pub(crate) fn bottom_reserve(&self) -> f64 {
         if self.position != ColorbarSide::Bottom {

@@ -24,9 +24,12 @@
 //!    whole grid moves in on that side, by at most [`END_LABEL_SHARE`] of the inner width
 //!    beyond the band that is already there. Between two columns a label may reach into the
 //!    gap up to its middle; beyond that, the band of its column on that side grows by the
-//!    overflow, for every panel of the column, so the plots stay equal. Growing a band narrows
-//!    every plot, and widens the plots of the panels that span across it, so the least growth
-//!    that fits every label is solved as a linear program (see [`fit_columns`]).
+//!    overflow, for every panel of the column, so the plots stay equal. A shared colorbar right
+//!    of a column's plots sits after the band's growth, and the labels of the panels beside it
+//!    stop short of it: in the rows it runs on down past, at the middle of its gap; in its last
+//!    row, at the end of its ticks when its end tick label drops into the label row. Growing a
+//!    band narrows every plot, and widens the plots of the panels that span across it, so the
+//!    least growth that fits every label is solved as a linear program (see [`fit_columns`]).
 //! 4. Headers. A panel's header starts at its row's top; its title, subtitle and legend row
 //!    start at the plot's left edge, and the legend row wraps within the plot's width. The x
 //!    axis labels of a row sit at the bottom of its band below the plots, so they line up.
@@ -275,8 +278,9 @@ fn pie_columns(
     });
     if beside_bar {
         // Where the room of the shared colorbars right of the column starts.
-        let bar = placed.plot_x[last] + placed.plot_width + columns.right[last]
-            - shared_right(input)[last];
+        let bar = placed.plot_x[last]
+            + placed.plot_width
+            + placed.bar_offset(last, columns.canvas, &columns.bar_reserve);
         (left, right.min(bar))
     } else {
         (left, right)
@@ -486,7 +490,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                 width: right - left,
                 height: bottom - top,
             };
-            let offset = columns.right[last_col] - shared_right(input)[last_col];
+            let offset = placed.bar_offset(last_col, columns.canvas, &columns.bar_reserve);
             let bottom = bottom + rows.below[last_row] - shared_bottom(input)[last_row];
             let bar = shared.measured.clone().place(
                 plot,
@@ -527,6 +531,43 @@ struct Columns {
     right: Vec<f64>,
     /// The plot width needed by each panel's axis labels, over all its spanned columns.
     min_widths: Vec<(CellRange, f64)>,
+    /// The part of each column's right band that shared colorbars take (see [`shared_right`]),
+    /// after the room of the panels' own bands.
+    bar_reserve: Vec<f64>,
+    /// The shared colorbars right of their plots, which x tick labels keep clear of.
+    bars: Vec<BarBeside>,
+}
+
+/// A shared colorbar right of its plots, as the x tick labels of the panels beside it see it.
+/// The bar's room starts after the panels' own bands and any growth of the band (see
+/// [`PlacedColumns::bar_offset`]), so growing the band moves the bar away from the labels.
+#[derive(Debug, Clone, Copy)]
+struct BarBeside {
+    /// The cells whose plots the bar spans.
+    cells: CellRange,
+    /// How far past the start of the bar's room the labels of a row that the bar runs on down
+    /// past may reach (see [`super::MeasuredColorbar::x_label_reach`]).
+    through: Option<f64>,
+    /// How far the labels of the bar's last row may reach, if its end tick label limits them.
+    end: Option<f64>,
+}
+
+impl BarBeside {
+    /// How far past the start of the bar's room the x tick labels of the panel covering
+    /// `cells` may reach; `None` when the bar is not level with them: the panel does not end in
+    /// the bar's last column, shares no row with it, or reaches below it.
+    fn reach(&self, cells: CellRange) -> Option<f64> {
+        let column = self.cells.col() + self.cells.col_span() - 1;
+        if cells.col() + cells.col_span() - 1 != column || !share_a_row(self.cells, cells) {
+            return None;
+        }
+        let row = cells.row() + cells.row_span() - 1;
+        match row.cmp(&(self.cells.row() + self.cells.row_span() - 1)) {
+            std::cmp::Ordering::Less => self.through,
+            std::cmp::Ordering::Equal => self.end,
+            std::cmp::Ordering::Greater => None,
+        }
+    }
 }
 
 /// The columns placed for some growth of their bands.
@@ -551,6 +592,19 @@ impl PlacedColumns {
     /// The left and right edges of the plot of the panel covering `cells`.
     fn span(&self, cells: CellRange) -> (f64, f64) {
         self.edges(cells.col(), cells.col() + cells.col_span() - 1)
+    }
+
+    /// How far right of the plots of column `c` the room of the shared colorbars there starts,
+    /// on a canvas `canvas` pt wide whose columns take `bar_reserve` for them (see
+    /// [`shared_right`]): after the column's band and its growth, less that reserve. In the last
+    /// column the growth is the grid's move in from the canvas edge.
+    fn bar_offset(&self, c: usize, canvas: f64, bar_reserve: &[f64]) -> f64 {
+        let band = if c + 1 == self.plot_x.len() {
+            canvas - PADDING - (self.plot_x[c] + self.plot_width)
+        } else {
+            self.right[c]
+        };
+        band - bar_reserve[c]
     }
 
     /// The left and right edges of the frame of the panel covering `cells` on a canvas
@@ -621,9 +675,20 @@ impl Columns {
             left[first] = left[first].max(bands.y_tick_column);
             right[last] = right[last].max(bands.right());
         }
-        for (right, bar) in right.iter_mut().zip(shared_right(input)) {
+        let bar_reserve = shared_right(input);
+        for (right, bar) in right.iter_mut().zip(&bar_reserve) {
             *right += bar;
         }
+        let bars = input
+            .colorbars
+            .iter()
+            .filter(|shared| shared.measured.right_reserve() > 0.0)
+            .map(|shared| BarBeside {
+                cells: shared.cells,
+                through: shared.measured.x_label_reach(true),
+                end: shared.measured.x_label_reach(false),
+            })
+            .collect();
         let mut min_widths: Vec<_> = cells
             .iter()
             .zip(bands)
@@ -642,6 +707,8 @@ impl Columns {
             left,
             right,
             min_widths,
+            bar_reserve,
+            bars,
         }
     }
 
@@ -809,6 +876,13 @@ impl Columns {
             } else {
                 self.gap / 2.0
             };
+            // Beside a shared colorbar, the labels end before the bar's room, short of the bar.
+            let right_base = self
+                .bars
+                .iter()
+                .filter_map(|bar| bar.reach(*cells))
+                .map(|reach| self.right[last] - self.bar_reserve[last] + reach)
+                .fold(self.right[last] + right_room, f64::min);
             for TickSpan { pos, half } in &bands.x_spans {
                 let half = half.min(half_max);
                 bounds.push(LabelBound {
@@ -827,7 +901,7 @@ impl Columns {
                     growth: Columns::right_growth(last, cols),
                     half,
                     share: 1.0 - pos,
-                    base: self.right[last] + right_room,
+                    base: right_base,
                 });
             }
         }
@@ -2647,9 +2721,11 @@ mod tests {
         Columns {
             canvas,
             gap,
+            bar_reserve: vec![0.0; right.len()],
             left,
             right,
             min_widths: Vec::new(),
+            bars: Vec::new(),
         }
     }
 

@@ -45,10 +45,10 @@ impl Default for BubbleOptions {
 /// marks on an axes share one size scale; the largest size among points with finite x and y
 /// coordinates maps to the theme's maximum radius. Automatic axis limits fit the whole
 /// markers and their outlines using the final plot size, across all panels sharing that axis;
-/// explicit limits still clip. When the bubbles cannot all fit on an automatic axis (a marker
-/// at least as long as the plot along it, limits beyond the supported numeric range, or limits
-/// that do not settle), that axis's limits come from the data positions alone and the plot
-/// clips the bubbles.
+/// explicit limits clip the bubbles that reach past them. Bubbles that no automatic limits
+/// hold (a marker at least as long as the plot along the axis, or limits beyond the supported
+/// numeric range) fail the render; only limits that do not settle fall back to the data
+/// positions alone, and the plot clips the bubbles.
 ///
 /// # Examples
 ///

@@ -109,6 +109,8 @@ impl Figure {
     /// within the canvas padding above the grid. Their height joins the grid's height need.
     /// The x axis labels of a grid row share a baseline. An x tick label may reach halfway
     /// into the gap next to its axes; beyond that, the plots of the grid narrow so that it fits.
+    /// Beside a shared colorbar right of the plots, the plots narrow so that the x tick labels
+    /// stop short of the bar and its tick labels.
     ///
     /// Automatic colors share one palette slot per label, in first appearance order across
     /// row-major panels. Unlabelled automatic series take slots after all label slots, per
@@ -138,10 +140,19 @@ impl Figure {
     /// figure needs, and the hint suggests making the figure taller or removing whichever of
     /// the title, subtitle and legend it has.
     ///
-    /// Bubbles never make rendering fail: automatic limits fit whole bubble markers and their
-    /// outlines to the final plot size, across every panel sharing the scale, and when they
-    /// cannot (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)) the axis keeps the limits of
-    /// the data positions and the plot clips the bubbles.
+    /// Automatic limits fit whole bubble markers and their outlines to the final plot size,
+    /// across every panel sharing the scale. A marker, outline included, at least as long as
+    /// the plot along an automatic axis fails, and so do limits that would leave the supported
+    /// numeric range. The message names the bubbles and the smallest figure size, in whole
+    /// points, whose own layout holds every drawn bubble (`the bubbles "…" need a figure at
+    /// least … × … pt; the figure is … × … pt.`, the label left out when the mark has none),
+    /// found by laying the figure out at larger sizes (40 layouts at most); the hint suggests
+    /// making the figure larger or setting explicit limits, which clip the bubbles. When not
+    /// even the largest figure holds them, the message names the axis instead (`the bubbles
+    /// "…" need x limits beyond the supported range.`). Only drawn bubbles count: one whose
+    /// value maps to no color is left out, and a color-mapped marker counts with its thinner
+    /// outline. Limits that do not settle in the final layout fall back to the data positions,
+    /// and the plot clips the bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
     ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs

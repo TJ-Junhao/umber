@@ -6,7 +6,7 @@ use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
     AxisData, ColorBy, ColorbarOptions, ColorbarPosition, Figure, FontLibrary, Grid, GridIndex,
     LegendMode, LegendPosition, LegendStyle, LineOptions, Paint, Placement, PointColor, ScaleKind,
-    ScatterOptions, SceneFonts, Share, SizeSpec, Theme,
+    ScatterOptions, SceneFonts, Share, SizeSpec, Theme, TickFormat,
 };
 
 fn texts(scene: &Scene) -> Vec<&TextItem> {
@@ -213,17 +213,12 @@ fn assert_text_separation(figure: &Figure, auto: &Figure) {
                 continue;
             }
             // AUTO at the equivalent font scale already has contact between a y label and
-            // its top tick when their sizes are equal. In a shared-colorbar grid, a row's
-            // last x tick can also touch the bar beside it or its end tick label. Large title
-            // and subtitle fonts can exceed their line boxes and touch across the fixed gap.
-            // Only these pairs are exempt, and only when that same pair actually overlaps.
+            // its top tick when their sizes are equal. Large title and subtitle fonts can
+            // exceed their line boxes and touch across the fixed gap. Only these pairs are
+            // exempt, and only when that same pair actually overlaps.
             let exempt = (a.size == b.size
                 && ((a.name.starts_with("Vertical") && b.name.starts_with("Y tick"))
                     || (b.name.starts_with("Vertical") && a.name.starts_with("Y tick"))))
-                || (a.name.starts_with("X tick") && b.name == "colorbar rectangle")
-                || (b.name.starts_with("X tick") && a.name == "colorbar rectangle")
-                || (a.name.starts_with("X tick") && b.name.parse::<f64>().is_ok())
-                || (b.name.starts_with("X tick") && a.name.parse::<f64>().is_ok())
                 || (a.name.starts_with("Panel") && b.name.starts_with("Subtitle"))
                 || (b.name.starts_with("Panel") && a.name.starts_with("Subtitle"))
                 || (a.name == "Figure" && b.name == "Figure subtitle")
@@ -338,6 +333,135 @@ fn large_text_figure(
             .unwrap();
     }
     figure
+}
+
+/// A `rows` × `cols` grid on a `width` × `height` in figure whose panels share their color
+/// scale as `share`, with the figure's colorbar at `position` (the side `share` implies when
+/// `None`), its ticks labelled " K", and x tick labels at `size` on ticks at both ends of every
+/// x axis.
+fn shared_colorbar_figure(
+    theme: Theme,
+    (rows, cols): (i64, i64),
+    (width, height): (f64, f64),
+    share: Share,
+    position: Option<ColorbarPosition>,
+    size: SizeSpec,
+) -> Figure {
+    let grid = Grid::new(rows, cols).unwrap().with_share_color(share);
+    let mut figure = Figure::with_grid(width, height, theme, grid).unwrap();
+    figure
+        .colorbar(ColorbarOptions {
+            label: "Temperature".into(),
+            position,
+            format: Some(TickFormat::fixed(0).unwrap().affix("", " K").unwrap()),
+            ..ColorbarOptions::default()
+        })
+        .unwrap();
+    for row in 0..rows {
+        for col in 0..cols {
+            let mut axes = figure
+                .add_axes_at(
+                    Placement {
+                        row: GridIndex::At(row),
+                        col: GridIndex::At(col),
+                        ..Placement::default()
+                    },
+                    ScaleKind::Linear,
+                    ScaleKind::Linear,
+                )
+                .unwrap();
+            axes.scatter(
+                AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+                &[1.0, 3.0, 2.0],
+                ScatterOptions {
+                    color: PointColor::By(ColorBy::new(vec![0.0, 5.0, (10 + row + col) as f64])),
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+            axes.xlim(0.0, 2.0).unwrap().xtick_labels(size).unwrap();
+        }
+    }
+    figure
+}
+
+/// The figure side, in inches, that an error naming the figure's width or height as too small
+/// says suffices: `(true, w)` for a width, `(false, h)` for a height.
+fn sufficient_side(message: &str) -> Option<(bool, f64)> {
+    let (_, rest) = message.split_once("the figure is ")?;
+    let wide = rest.split_once(" pt ")?.1.starts_with("wide");
+    let (_, rest) = rest.split_once("at least ")?;
+    let points: f64 = rest.split_once(" pt")?.0.parse().ok()?;
+    Some((wide, points / 72.0))
+}
+
+#[test]
+fn x_tick_labels_keep_clear_of_shared_colorbars() {
+    let theme = Theme::pigment();
+    let scale = 48.0 / f64::from(theme.body_size());
+    let mut failures = Vec::new();
+    for (rows, cols) in [(2, 2), (1, 3)] {
+        // A row's bar sits right of it and a column's below it; a figure's on either side.
+        for (share, position) in [
+            (Share::Row, None),
+            (Share::Col, None),
+            (Share::All, Some(ColorbarPosition::Right)),
+            (Share::All, Some(ColorbarPosition::Bottom)),
+        ] {
+            for (theme, size) in [
+                (theme.clone(), SizeSpec::pt(48.0).unwrap()),
+                (theme.with_font_scale(scale).unwrap(), SizeSpec::Auto),
+            ] {
+                let case = format!("{rows} x {cols} {share:?} {position:?} {size:?}");
+                let mut side = (4.0 * cols as f64 + 2.0, 3.5 * rows as f64);
+                // A figure too small for its texts names a size that suffices; that renders.
+                let scene = loop {
+                    let figure = shared_colorbar_figure(
+                        theme.clone(),
+                        (rows, cols),
+                        side,
+                        share,
+                        position,
+                        size,
+                    );
+                    match figure.to_scene(FontLibrary::global()) {
+                        Ok(scene) => break Some(scene),
+                        Err(error) => match sufficient_side(&error.to_string()) {
+                            Some((true, width)) if width > side.0 => side.0 = width,
+                            Some((false, height)) if height > side.1 => side.1 = height,
+                            _ => {
+                                failures.push(format!("{case} at {side:?}: {error}"));
+                                break None;
+                            }
+                        },
+                    }
+                };
+                let Some(scene) = scene else {
+                    continue;
+                };
+                let boxes = scene_boxes(&scene);
+                let colorbar: Vec<_> = boxes
+                    .iter()
+                    .filter(|b| {
+                        b.name == "colorbar rectangle"
+                            || b.name == "Temperature"
+                            || b.name.ends_with(" K")
+                    })
+                    .collect();
+                let x_ticks: Vec<_> = boxes
+                    .iter()
+                    .filter(|b| b.name.parse::<f64>().is_ok())
+                    .collect();
+                assert!(colorbar.len() > 2 && x_ticks.len() >= 2, "{case}");
+                for tick in &x_ticks {
+                    for bar in colorbar.iter().filter(|bar| overlap(tick, bar)) {
+                        failures.push(format!("{case}: {tick:?} overlaps {bar:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
