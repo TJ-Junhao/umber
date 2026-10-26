@@ -39,6 +39,8 @@ fn matching(items: &[Item]) -> usize {
     items
         .iter()
         .take_while(|item| {
+            #[cfg(test)]
+            tests::MATCHING_ITEMS.with(|count| count.set(count.get() + 1));
             matches!(item, Item::Markers {
                 shape: other,
                 fill: Some(fill),
@@ -82,7 +84,6 @@ pub(super) fn draw(surface: &mut Surface<'_>, items: &[Item]) -> usize {
         fill: Some(solid_paint(Rgba::opaque(255, 255, 255))),
         stroke: Some(stroke),
     };
-    let items = &items[..matching(items)];
     // Hairlines can visit a pixel more than once: retain the original colored rendering,
     // rather than trying to recover those visits from their combined coverage.
     if style.width * surface.scale.get() <= 1.0 {
@@ -101,6 +102,8 @@ fn draw_run<K: SpriteKind<Colors = (Rgba, Rgba)>>(
     let Some(sprites) = Sprites::new(&marker, surface.scale, kind) else {
         return 0;
     };
+    // Scan the full run only when we can consume it, not once per oversized marker.
+    let items = &items[..matching(items)];
     let mut sprites = Some(sprites);
     let mut queue = Vec::new();
     for item in items {

@@ -20,7 +20,7 @@ use umber_core::render::{SvgText, render_png, render_svg};
 use umber_core::{
     AreaOptions, BandOptions, ColorBy, Figure, FontLibrary, Grid, GridIndex, HeatmapOptions,
     HexbinOptions, Hist2dOptions, Instant, LegendPosition, LegendStyle, Placement, PointColor,
-    ScaleKind, Series, Share, Theme,
+    ScaleKind, Series, Share, SizeSpec, Theme,
 };
 
 const DPI: u32 = 200;
@@ -93,7 +93,7 @@ fn scatter_figure(n: usize) -> Figure {
     figure
 }
 
-fn mapped_scatter_figure(n: usize) -> Figure {
+fn mapped_scatter_figure(n: usize, size: SizeSpec) -> Figure {
     let x: Vec<f64> = (0..n).map(|i| unit(2 * i) * 100.0).collect();
     let y: Vec<f64> = (0..n).map(|i| unit(2 * i + 1) * 50.0).collect();
     let values: Vec<f64> = (0..n).map(|i| unit(2 * n + i) * 2.0 - 1.0).collect();
@@ -109,6 +109,7 @@ fn mapped_scatter_figure(n: usize) -> Figure {
                     center: Some(0.0),
                     ..ColorBy::new(values)
                 }),
+                size,
                 ..ScatterOptions::default()
             },
         )
@@ -308,7 +309,7 @@ fn benches(c: &mut Criterion) {
     group.bench_function("scatter_100k_png", |b| {
         b.iter(|| black_box(scatter.to_png(i64::from(DPI)).unwrap()));
     });
-    let mapped_scatter = mapped_scatter_figure(100_000);
+    let mapped_scatter = mapped_scatter_figure(100_000, SizeSpec::Auto);
     group.bench_function("scatter_100k_mapped_png", |b| {
         b.iter(|| black_box(mapped_scatter.to_png(i64::from(DPI)).unwrap()));
     });
@@ -320,6 +321,12 @@ fn benches(c: &mut Criterion) {
             b.iter(|| black_box(mapped_scatter.to_png(dpi).unwrap()));
         });
     }
+
+    // At 450 dpi, 60 pt markers exceed the sprite-size limit and use path rendering.
+    let large_mapped_scatter = mapped_scatter_figure(20_000, SizeSpec::pt(60.0).unwrap());
+    group.bench_function("scatter_20k_mapped_large_png_450dpi", |b| {
+        b.iter(|| black_box(large_mapped_scatter.to_png(450).unwrap()));
+    });
 
     // The v0.2 grid target, including the shared-axes resolve/layout repair path.
     for (name, share) in [

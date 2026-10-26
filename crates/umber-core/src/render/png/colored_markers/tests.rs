@@ -10,6 +10,10 @@ use crate::{
 };
 use tiny_skia as sk;
 
+std::thread_local! {
+    pub(super) static MATCHING_ITEMS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn shape(marker: Shape) -> Path {
     fn find(items: &[Item]) -> Option<Path> {
         items.iter().find_map(|item| match item {
@@ -194,6 +198,31 @@ fn incompatible_batches_leave_surface_untouched() {
                 assert_eq!(surface.pixmap.data(), before);
             });
         }
+    }
+}
+
+#[test]
+fn oversized_sprites_only_scan_a_bounded_prefix() {
+    for (dpi, side) in [(100, 200.0), (450, 60.0)] {
+        let mut shape = Path::new();
+        shape.move_to(Point { x: 0.0, y: 0.0 });
+        shape.line_to(Point { x: side, y: 0.0 });
+        shape.line_to(Point { x: side, y: side });
+        shape.line_to(Point { x: 0.0, y: side });
+        shape.close();
+        let items = items(&shape, dpi, LineCap::Butt, LineJoin::Miter);
+        with_surface(dpi, true, |surface| {
+            let before = surface.pixmap.data().to_vec();
+            MATCHING_ITEMS.set(0);
+            for start in 0..items.len() {
+                assert_eq!(draw(surface, &items[start..]), 0);
+                assert!(
+                    MATCHING_ITEMS.get() <= (start + 1) * MIN_BATCH_ITEMS,
+                    "oversized sprites must not scan the full remaining run at dpi={dpi}"
+                );
+            }
+            assert_eq!(surface.pixmap.data(), before);
+        });
     }
 }
 
