@@ -278,6 +278,25 @@ struct FigurePlan {
     header: FigureHeader,
     panels: Vec<(Resolved, Layout)>,
     colorbars: Vec<(usize, layout::PlacedColorbar)>,
+    /// Whether every bubble fit settled, so that the plots hold every drawn bubble (see
+    /// [`BubbleFits::settled`]).
+    bubbles_settled: bool,
+}
+
+/// Why a layout was not made: an error, or bubbles that no automatic limits hold, which
+/// [`plan_cells`] turns into an error naming a figure size that holds them.
+#[derive(Debug)]
+enum Unplanned {
+    /// The layout fails with this error.
+    Failed(Error),
+    /// No automatic limits hold these bubbles on the plots of the layout.
+    Bubbles(crate::bubble_fit::BubbleFailure),
+}
+
+impl From<Error> for Unplanned {
+    fn from(error: Error) -> Self {
+        Unplanned::Failed(error)
+    }
 }
 
 /// One side of a plot area.
@@ -567,9 +586,11 @@ fn resolve_groups(
 /// the first time, every automatic axis holding bubbles widens its data extent to fit them on
 /// those plots, before padding (and log-axis rounding), and later whenever a bubble reaches past a
 /// plot edge, shared panels with hidden tick labels included. A changed extent resolves the
-/// axes and solves the grid again, with the same tick choices. A fit the grid cannot hold, or
-/// one still unsettled after the rounds, leaves its axis with the limits of the data positions,
-/// and the plot clips its bubbles; bubbles never make the layout fail.
+/// axes and solves the grid again, with the same tick choices. Bubbles that no extent holds
+/// fail the layout ([`BubbleFits::failure`]; [`plan_cells`] names a figure size that holds
+/// them), and so does a grid that cannot hold the fitted limits. Only a fit still unsettled
+/// after the rounds leaves its axis with the limits of the data positions, and the plot clips
+/// its bubbles.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -578,7 +599,9 @@ fn resolve_groups(
 /// # Errors
 ///
 /// As [`layout::solve_grid`], from either pass: the final pass needs the plot sizes of the
-/// first; then as [`layout::check_panel_contents`], for the final layout only.
+/// first; [`Unplanned::Bubbles`] for bubbles that no automatic limits hold
+/// ([`BubbleFits::failure`]); then as [`layout::check_panel_contents`], for the final layout
+/// only.
 fn plan(
     figure: &Figure,
     panels: &[Panel<'_>],
@@ -586,7 +609,7 @@ fn plan(
     lib: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
-) -> Result<FigurePlan> {
+) -> std::result::Result<FigurePlan, Unplanned> {
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib)?;
     header.check(figure, context)?;
@@ -707,7 +730,12 @@ fn plan(
             Layer::Primary(crate::Panel::Pie(_)) => Vec::new(),
         })
         .collect();
-    let mut fits = BubbleFits::new(&marks, &ends, &limits, groups);
+    let scales: Vec<_> = panels.iter().map(|panel| panel.color.as_ref()).collect();
+    let fills = crate::bubble_fit::Fills {
+        theme,
+        scales: &scales,
+    };
+    let mut fits = BubbleFits::new(&marks, &ends, &limits, groups, fills);
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| match panel.axes {
@@ -981,14 +1009,9 @@ fn plan(
         })
         .sum();
     // Resolves the axes for the current tick choices and bubble fits and solves the grid
-    // again. When the grid cannot hold the fitted limits, every fit is clipped, and the axes
-    // are resolved and the grid solved with the limits of the data positions.
-    let refit = |fits: &mut BubbleFits, choices: &[[TickChoice; 3]]| match solve_ticks(
-        resolve_choices(choices, fits),
-    ) {
-        Ok(planned) => Ok(planned),
-        Err(_) if fits.clip_all() => solve_ticks(resolve_choices(choices, fits)),
-        Err(error) => Err(error),
+    // again; a grid that cannot hold the fitted limits fails.
+    let refit = |fits: &BubbleFits, choices: &[[TickChoice; 3]]| {
+        solve_ticks(resolve_choices(choices, fits))
     };
     for _ in 0..rounds + fits.budget() {
         // The sides whose labels crowd on the solved plots, chosen again.
@@ -999,8 +1022,12 @@ fn plan(
             .iter()
             .map(|slot| slot.plot.size())
             .collect();
-        if fits.update(&resolved, &plots) {
-            (resolved, bands, solution) = refit(&mut fits, &choices)?;
+        let refitted = fits.update(&resolved, &plots);
+        if let Some(failure) = fits.failure(&marks) {
+            return Err(Unplanned::Bubbles(failure));
+        }
+        if refitted {
+            (resolved, bands, solution) = refit(&fits, &choices)?;
             continue;
         }
         for (i, r) in resolved.iter().enumerate() {
@@ -1102,7 +1129,7 @@ fn plan(
         .map(|slot| slot.plot.size())
         .collect();
     if fits.clip_unsettled(&resolved, &plots) {
-        (resolved, bands, solution) = refit(&mut fits, &choices)?;
+        (resolved, bands, solution) = refit(&fits, &choices)?;
     }
 
     // A single label can release room that the previous crowded set needed. A crowded set
@@ -1315,6 +1342,7 @@ fn plan(
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
         colorbars: solution.colorbars,
+        bubbles_settled: fits.settled(),
     })
 }
 
@@ -1351,6 +1379,161 @@ fn plan_cells(
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
+    match lay_out(figure, panels, groups, lib, context, labels) {
+        Ok(planned) => Ok(planned),
+        Err(Unplanned::Failed(error)) => Err(error),
+        Err(Unplanned::Bubbles(failure)) => Err(in_cell(
+            figure,
+            panels[failure.panel].axes,
+            bubbles_error(figure, failure, lib, context, labels),
+        )),
+    }
+}
+
+/// The most layouts [`bubbles_error`] makes of a figure at larger sizes.
+const MAX_PROBES: usize = 40;
+
+/// The most of those layouts that grow the figure before the largest figure is tried.
+const GROWTH_PROBES: usize = 20;
+
+#[cfg(test)]
+thread_local! {
+    /// How many layouts [`bubbles_error`] made for the last error it built.
+    pub(crate) static BUBBLE_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The error for bubbles that no automatic limits hold in the layout of `figure`, as
+/// `failure` names them, reported in `context` with the fonts `lib` and the cache `labels`.
+///
+/// It names the smallest figure size, in whole points, whose own layout holds every drawn
+/// bubble, found by laying the same figure out at larger sizes, so that every layout effect,
+/// padding, log-axis finishing, tick labels, shared panels and spanned cells included, is the
+/// real one: the sides that the failing fits need grow, from the failure's estimate
+/// ([`crate::bubble_fit::BubbleFailure::estimate`]) and then doubling their growth, until a
+/// layout holds the bubbles; then each grown side is bisected on whole points. A layout holds
+/// them when it is made and every bubble fit settled. At most [`MAX_PROBES`] layouts are
+/// made; the size named is always one whose layout held them. When even the largest figure
+/// ([`crate::model::MAX_FIGURE_IN`] on the grown sides) does not, the error names the axis
+/// whose limits would leave the supported range.
+fn bubbles_error(
+    figure: &Figure,
+    failure: crate::bubble_fit::BubbleFailure,
+    lib: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+) -> Error {
+    let largest = crate::model::MAX_FIGURE_IN * 72.0;
+    let own = [figure.width_in() * 72.0, figure.height_in() * 72.0];
+    let probes = std::cell::Cell::new(0);
+    // Whether the figure at `size` lays out holding every drawn bubble; the bubbles that do
+    // not fit when it does not, if that is why.
+    let holds = |size: [f64; 2]| -> std::result::Result<(), Option<_>> {
+        probes.set(probes.get() + 1);
+        let resized = figure.resized(size[0] / 72.0, size[1] / 72.0);
+        let groups = ShareGroups::new(&resized);
+        let mut records = panels(&resized, &groups, lib).map_err(|_| None)?;
+        match lay_out(&resized, &mut records, &groups, lib, context, labels) {
+            Ok(planned) if planned.bubbles_settled => Ok(()),
+            Ok(_) | Err(Unplanned::Failed(_)) => Err(None),
+            Err(Unplanned::Bubbles(failure)) => Err(Some(failure)),
+        }
+    };
+    // How much one point more along a side lengthens the panel's plot along it.
+    let cells = match figure.grid().rows() * figure.grid().cols() {
+        1 => [1.0, 1.0],
+        _ => {
+            let panel = figure
+                .layers()
+                .nth(failure.panel)
+                .map(|layer| layer.cells());
+            panel.map_or([1.0, 1.0], |cells| {
+                [
+                    figure.grid().cols() as f64 / cells.col_span() as f64,
+                    figure.grid().rows() as f64 / cells.row_span() as f64,
+                ]
+            })
+        }
+    };
+    let plot = [failure.plot.width, failure.plot.height];
+    let mut grows = [false; 2];
+    grows[failure.side()] = true;
+    let mut size = own;
+    for side in 0..2 {
+        match failure.estimate[side] {
+            Some(length) if length > plot[side] || grows[side] => {
+                grows[side] = true;
+                let growth = ((length - plot[side]) * cells[side]).max(1.0);
+                size[side] = (own[side] + growth).ceil().min(largest);
+            }
+            None if grows[side] => size[side] = largest,
+            _ => {}
+        }
+    }
+    // The largest size of each side known not to hold the bubbles: the failing side's own;
+    // the other side may hold them as it is.
+    let mut short = own.map(|side| side - 1.0);
+    short[failure.side()] = own[failure.side()];
+    let mut last = failure;
+    loop {
+        let failed = match holds(size) {
+            Ok(()) => break,
+            Err(failed) => failed,
+        };
+        let mut sides = grows;
+        if let Some(failed) = failed {
+            sides = [false; 2];
+            sides[failed.side()] = true;
+            last = failed;
+        }
+        if (0..2).all(|side| !sides[side] || size[side] >= largest) {
+            return last.out_of_range(context);
+        }
+        for side in (0..2).filter(|&side| sides[side]) {
+            grows[side] = true;
+            short[side] = short[side].max(size[side]);
+            size[side] = if probes.get() >= GROWTH_PROBES {
+                largest
+            } else {
+                (size[side] + (size[side] - own[side]).max(36.0))
+                    .ceil()
+                    .min(largest)
+            };
+        }
+    }
+    // Each grown side down to the least whole point, or the figure's own size, that still
+    // holds them, the other kept.
+    for side in (0..2).filter(|&side| grows[side]) {
+        let (mut low, mut high) = (short[side], size[side]);
+        while probes.get() < MAX_PROBES {
+            // Never below the figure's own size, which the other sides keep.
+            let middle = (low + (high - low) / 2.0).ceil().max(own[side]);
+            if middle >= high {
+                break;
+            }
+            let mut tried = size;
+            tried[side] = middle;
+            if holds(tried).is_ok() {
+                high = middle;
+                size = tried;
+            } else {
+                low = middle;
+            }
+        }
+    }
+    #[cfg(test)]
+    BUBBLE_PROBES.with(|count| count.set(probes.get()));
+    last.needs_figure(context, size, own)
+}
+
+/// [`plan_cells`] without naming a figure size for bubbles that no automatic limits hold.
+fn lay_out(
+    figure: &Figure,
+    panels: &mut [Panel<'_>],
+    groups: &ShareGroups,
+    lib: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+) -> std::result::Result<FigurePlan, Unplanned> {
     let mut planned = plan(figure, panels, groups, lib, context, labels)?;
     if !panels.iter().any(|panel| {
         panel
@@ -1463,7 +1646,8 @@ fn plan_cells(
                     if independent && only_hexbin && tight {
                         bins.fit(aspects[i]);
                     } else {
-                        bins.fit_on_axes(aspects[i], scales[i], limits, context)?;
+                        bins.fit_on_axes(aspects[i], scales[i], limits, context)
+                            .map_err(Unplanned::Failed)?;
                     }
                     for j in 0..2 {
                         if let [lo, hi] = bins.domain(j) {
@@ -1514,7 +1698,8 @@ fn plan_cells(
          a stable numeric range is required.",
     )
     .with_parameter("gridsize")
-    .with_hint("choose a larger gridsize, or increase the figure size."))
+    .with_hint("choose a larger gridsize, or increase the figure size.")
+    .into())
 }
 
 /// The passes after which [`plan_cells`] stops fitting lone hexbins tightly.
@@ -2289,15 +2474,16 @@ mod tests {
             let fonts = crate::test_support::figure_fonts(figure.theme());
             let groups = ShareGroups::new(&figure);
             let panels = panels(&figure, &groups, &fonts).unwrap();
-            let planned = plan(
+            let Ok(planned) = plan(
                 &figure,
                 &panels,
                 &groups,
                 &fonts,
                 "Figure.to_scene()",
                 &layout::LabelCache::new(&fonts),
-            )
-            .unwrap();
+            ) else {
+                panic!("the figure lays out")
+            };
             assert_eq!(
                 planned.colorbars.len(),
                 if share == Share::All { 1 } else { 2 }

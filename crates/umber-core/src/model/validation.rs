@@ -34,7 +34,7 @@ pub(super) const AREA_GAP_HINT: &str = "use NaN to leave a gap in the area.";
 const BAR_GAP_HINT: &str = "use NaN to leave a category without a bar.";
 
 /// The largest accepted figure side, in inches.
-const MAX_FIGURE_IN: f64 = 200.0;
+pub(crate) const MAX_FIGURE_IN: f64 = 200.0;
 
 /// Checks `values`, shown as `name` in messages (`"y"`, `"series[1].values"`), against the
 /// transform of their axis. An error names `parameter`, the Python parameter that holds them, and

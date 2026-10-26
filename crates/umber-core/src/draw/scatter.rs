@@ -24,13 +24,14 @@ const MAPPED_OUTLINE_LIGHTNESS: f64 = 0.25;
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;
 
-/// How far a marker of `shape` and nominal `diameter` reaches from its centre along x and along
-/// y, outline included, in points: the shape's extent on each axis plus half the outline for a
-/// circle, or the whole outline for a polygon, whose miter joins reach at most that far past a
-/// vertex for these shapes (a triangle's 60° apex reaches exactly that far).
-pub(crate) fn marker_reach(shape: Marker, diameter: f32) -> (f64, f64) {
+/// How far a marker of `shape` and nominal `diameter` with an outline `outline` pt wide
+/// reaches from its centre along x and along y, outline included, in points: the shape's extent
+/// on each axis plus half the outline for a circle, or the whole outline for a polygon, whose
+/// miter joins reach at most that far past a vertex for these shapes (a triangle's 60° apex
+/// reaches exactly that far).
+pub(crate) fn marker_reach(shape: Marker, diameter: f32, outline: f32) -> (f64, f64) {
     let (half_w, half_h) = extent(&marker_shape(shape, diameter));
-    let outline = f64::from(MARKER_OUTLINE);
+    let outline = f64::from(outline);
     let join = match shape {
         Marker::Circle => outline / 2.0,
         Marker::Square | Marker::Triangle | Marker::Diamond | Marker::Cross => outline,

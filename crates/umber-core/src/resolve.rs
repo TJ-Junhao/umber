@@ -17,8 +17,9 @@
 //! then add 5 % of the log span on each side, retaining those ticks.
 //! Bubbles contribute their whole markers and outlines, not only their centers: the final
 //! layout widens each shared automatic extent to fit them on the solved plot
-//! (see [`crate::bubble_fit`]), before padding (and rounding on log axes). When they cannot
-//! all fit, the extent stays that of the data positions, and the plot clips the bubbles.
+//! (see [`crate::bubble_fit`]), before padding (and rounding on log axes). Bubbles that no
+//! extent holds fail the render; only when the fit does not settle does the extent stay that
+//! of the data positions, and the plot clips the bubbles.
 //! The baseline lies on the value axis ([`Baseline`]): at 0 when 0 is inside a linear domain,
 //! and otherwise at the axis's lower limit before padding.
 //! Explicit ticks replace automatic ones. Without explicit limits the domain encloses both
