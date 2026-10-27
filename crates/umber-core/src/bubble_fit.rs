@@ -746,6 +746,7 @@ fn bubbles<'a>(
                 .iter()
                 .enumerate()
                 .filter_map(move |(i, &size)| {
+                    // A NaN size has no radius, so it is skipped with the zero sizes below.
                     let r = crate::bubble_scale::radius(size, maximum, radius);
                     if !(is_drawn(data.x_values(), i) && is_drawn(data.y_values(), i))
                         || r <= 0.0

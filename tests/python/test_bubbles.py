@@ -48,7 +48,7 @@ def test_lists_arrays_and_series_match() -> None:
 
 @pytest.mark.parametrize(
     ("value", "text"),
-    [(-1.0, "-1"), (np.nan, "NaN"), (np.inf, "inf"), (-np.inf, "-inf")],
+    [(-1.0, "-1"), (np.inf, "inf"), (-np.inf, "-inf")],
 )
 def test_invalid_sizes_are_atomic(value: float, text: str) -> None:
     ax = axes().bubbles([0, 1], [1, 2], [100, 870], label="Cities")
@@ -60,6 +60,58 @@ def test_invalid_sizes_are_atomic(value: float, text: str) -> None:
     )
     assert details(caught.value) == ("sizes", "use 0 for a point to leave out.")
     assert ax.figure.to_svg() == before
+
+
+def _gapped_pair() -> tuple[ub.Axes[float, float], ub.Axes[float, float]]:
+    """Axes with a far-off bubble of NaN size, and axes with the same bubbles without it."""
+    with_gap = axes().bubbles([1, 5000, 2], [2, -5000, 4], [100, np.nan, 400], label="Cities")
+    without = axes().bubbles([1, 2], [2, 4], [100, 400], label="Cities")
+    return with_gap, without
+
+
+def _same_figure(with_gap: ub.Axes[Any, Any], without: ub.Axes[Any, Any]) -> bool:
+    return with_gap.figure.to_svg() == without.figure.to_svg()
+
+
+def test_nan_size_leaves_the_bubble_out_of_the_figure() -> None:
+    assert _same_figure(*_gapped_pair())
+
+
+def _polars_nullable() -> object:
+    pl = pytest.importorskip("polars")
+    return pl.Series([100.0, None, 400.0])
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        [100, np.nan, 400],
+        (100.0, float("nan"), 400.0),
+        np.array([100, np.nan, 400]),
+        pd.Series([100.0, np.nan, 400.0]),
+        pd.Series([100.0, None, 400.0], dtype="Float64"),
+        pd.Series([100, None, 400], dtype="Int64"),
+        _polars_nullable,
+    ],
+    ids=["list", "tuple", "numpy", "pandas", "pandas-Float64", "pandas-Int64", "polars"],
+)
+def test_missing_sizes_leave_their_bubbles_out(sizes: object) -> None:
+    if callable(sizes):
+        sizes = sizes()
+    gapped = axes()
+    bubbles(gapped)([1, 5000, 2], [2, -5000, 4], sizes, label="Cities")
+    plain = axes().bubbles([1, 2], [2, 4], [100, 400], label="Cities")
+    assert _same_figure(gapped, plain)
+
+
+def test_none_in_a_list_of_sizes_still_raises_and_names_the_gap_marker() -> None:
+    with pytest.raises(ub.DataError) as caught:
+        bubbles(axes())([0, 1, 2], [1, 2, 3], [100, None, 400])
+    assert str(caught.value) == "Axes.bubbles(): sizes[1] is None; values must be numbers."
+    assert details(caught.value) == (
+        "sizes",
+        "use NaN for missing values, e.g. series.to_numpy(dtype=float, na_value=np.nan).",
+    )
 
 
 @pytest.mark.parametrize(

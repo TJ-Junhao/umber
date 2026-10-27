@@ -433,12 +433,13 @@ Axes.bubbles(self: SXY, x: Values[X], y: Values[Y], sizes: Values[float], *, lab
 Add markers whose areas are proportional to non-negative size values.
 
 Bubble marks on these axes share one size scale. The largest size among points with
-finite x and y coordinates has a radius of 18 points. Zero sizes and NaN coordinates
-draw nothing; a zero-size point's position still counts in the axis domains like any
-point. Markers draw in data order, without downsampling. ``ColorBy`` fills stay opaque
-and use the scatter's 0.5 pt outline: contrasting for fills close to the background in
-Oklab, fading to the background color for more distant fills. Single-color markers keep
-the theme's marker alpha and a 0.8 pt background-colored outline.
+finite x, y and size has a radius of 18 points. Zero sizes, NaN sizes and NaN
+coordinates draw nothing; a zero-size point's position still counts in the axis
+domains like any point, and a NaN-size point's does not. Markers draw in data order,
+without downsampling. ``ColorBy`` fills stay opaque and use the scatter's 0.5 pt
+outline: contrasting for fills close to the background in Oklab, fading to the
+background color for more distant fills. Single-color markers keep the theme's marker
+alpha and a 0.8 pt background-colored outline.
 Automatic limits fit each whole marker and its outline on the final plot, along each
 axis by the marker shape's own extent, in log space on a log axis and in seconds on a
 time axis, before padding (and rounding on a log axis). Shared axes fit bubbles from
@@ -470,6 +471,7 @@ Args:
     y: The y coordinates, one per x coordinate: numbers on a linear or log y axis,
         times on a time y axis.
     sizes: Finite values from 0 to 1e300, one per point; area is proportional to value.
+        A NaN (or a null in a nullable column) leaves its bubble out.
     label: The legend label; empty skips this mark's legend entry.
     color: The marker color. ``Color.AUTO`` takes the next palette color.
         ``ColorBy(values)`` colors each bubble by its value instead, as for
@@ -483,7 +485,7 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type.
     DataError: If lengths differ, coordinates are invalid for their axes, a size
-        is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
+        is negative, infinite, or above 1e300, or a ``ColorBy`` does not have one
         value per point.
     UsageError: If either axis is a category axis (type checkers refuse such axes, so
         this is raised only for calls they do not check), or a ``ColorBy`` differs in
