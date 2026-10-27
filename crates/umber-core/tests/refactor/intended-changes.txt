@@ -1,2 +1,7 @@
-# A NaN bubble size now skips the bubble instead of raising.
-errors/bubbles
+# Color-mapped contour lines close to the background are drawn darker (lighter on dark themes).
+contour-annotated-graphite
+contour-annotated-midnight
+contour-annotated-pigment
+contour-lines-graphite
+contour-lines-midnight
+contour-lines-pigment

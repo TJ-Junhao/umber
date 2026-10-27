@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::MarkContext;
 use super::clip::Bounds;
+use super::contrast::Background;
 use super::fill::marker_alpha;
 use super::mapping::AxisPoint;
 use super::marker::{extent, marker_shape};
@@ -16,10 +17,6 @@ use crate::{Marker, Rgba, Theme};
 pub(crate) const MARKER_OUTLINE: f32 = 0.8;
 /// The color-mapped scatter and bubble outline width, in points.
 pub(super) const MAPPED_MARKER_OUTLINE: f32 = 0.5;
-/// The Oklab distance at which a mapped outline becomes the background color.
-const MAPPED_OUTLINE_DISTANCE: f64 = 0.25;
-/// The Oklab lightness shift of a mapped outline away from the background.
-const MAPPED_OUTLINE_LIGHTNESS: f64 = 0.25;
 /// Scatter points whose marker (shape extent plus outline) lies further than this many points
 /// outside the plot area are dropped.
 const MARKER_SLACK: f64 = 1.0;
@@ -119,17 +116,14 @@ impl MarkerGeometry {
 
 /// Mapped outline colors shared within one mark, with one background conversion to Oklab.
 pub(super) struct MappedOutlines {
-    background: Rgba,
-    background_lab: [f64; 3],
+    background: Background,
     colors: HashMap<Rgba, Rgba>,
 }
 
 impl MappedOutlines {
     pub(super) fn new(theme: &Theme) -> Self {
-        let background = theme.background();
         Self {
-            background,
-            background_lab: crate::cmap::to_oklab(background),
+            background: Background::of(theme),
             colors: HashMap::new(),
         }
     }
@@ -138,40 +132,27 @@ impl MappedOutlines {
         *self
             .colors
             .entry(fill)
-            .or_insert_with(|| mapped_outline_color(self.background, self.background_lab, fill))
+            .or_insert_with(|| mapped_outline_color(self.background, fill))
     }
 }
 
-/// The outline color for a mapped point, computed from its fill before marker alpha.
-/// In Oklab, let `d` be the Euclidean distance from `fill` to the background `bg`, and
-/// `w = clamp(1 - d / T, 0, 1)`, where `T = MAPPED_OUTLINE_DISTANCE = 0.25`. Move the fill's
-/// L by `MAPPED_OUTLINE_LIGHTNESS = 0.25`, down when the background's L is at least 0.5 and
-/// up otherwise, leaving a and b unchanged, to get `ring`. Mix `(1 - w) * bg + w * ring`
-/// in Oklab, then clamp to the sRGB gamut as colormaps do. Distance uses only color channels,
-/// not alpha. The outline alpha is `(1 - w) * background.a + w * 255`, rounded to 8 bits;
+/// The outline color for a mapped point, computed from its fill before marker alpha, with the
+/// contrast rule of [`super::contrast`]: the contrasting color `ring` (the fill with its Oklab
+/// lightness moved 0.25 away from the background's) and its weight `w`, from the Oklab distance
+/// `d` between the fill's color channels and the background's, `w = clamp(1 - d / 0.25, 0, 1)`.
+/// The outline mixes `(1 - w) * bg + w * ring` in Oklab, then clamps to the sRGB gamut as
+/// colormaps do. The outline alpha is `(1 - w) * background.a + w * 255`, rounded to 8 bits;
 /// at `w = 0` it is exactly the theme background, including alpha, and at `w = 1` it is opaque.
-/// `bg` is the background's Oklab conversion, shared by all points in the mark.
 /// Scatter and bubbles use this color with `MAPPED_MARKER_OUTLINE = 0.5` pt; their fills
 /// and the colorbar are unchanged.
-fn mapped_outline_color(background: Rgba, bg: [f64; 3], fill: Rgba) -> Rgba {
-    let mut ring = crate::cmap::to_oklab(fill);
-    let distance = ring
-        .iter()
-        .zip(bg)
-        .map(|(fill, background)| (fill - background).powi(2))
-        .sum::<f64>()
-        .sqrt();
-    let weight = (1.0 - distance / MAPPED_OUTLINE_DISTANCE).clamp(0.0, 1.0);
-    if weight == 0.0 {
-        return background;
-    }
-    ring[0] += if bg[0] >= 0.5 {
-        -MAPPED_OUTLINE_LIGHTNESS
-    } else {
-        MAPPED_OUTLINE_LIGHTNESS
+fn mapped_outline_color(background: Background, fill: Rgba) -> Rgba {
+    let Some(contrast) = background.contrast(fill) else {
+        return background.color();
     };
+    let (weight, ring) = (contrast.weight, contrast.full());
+    let bg = background.lab();
     Rgba {
-        a: ((1.0 - weight) * f64::from(background.a) + weight * 255.0).round() as u8,
+        a: ((1.0 - weight) * f64::from(background.color().a) + weight * 255.0).round() as u8,
         ..crate::cmap::from_oklab(std::array::from_fn(|i| {
             (1.0 - weight) * bg[i] + weight * ring[i]
         }))

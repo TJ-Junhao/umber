@@ -11,6 +11,7 @@ mod cells;
 mod chrome;
 mod clip;
 mod contour;
+mod contour_contrast;
 mod contour_fixes;
 mod downsample;
 mod error_bars;
