@@ -39,11 +39,12 @@ impl Default for BubbleOptions {
 
 /// Validated bubble coordinates, size values and options, shared by clones.
 ///
-/// Sizes are finite values from 0 to 1e300. A zero size, a NaN coordinate or a missing time
-/// draws nothing.
-/// A zero-size point's position still counts in the axis domains like any point. All bubble
-/// marks on an axes share one size scale; the largest size among points with finite x and y
-/// coordinates maps to the theme's maximum radius. Automatic axis limits fit the whole
+/// Sizes are finite values from 0 to 1e300, or NaN. A zero size, a NaN size, a NaN coordinate
+/// or a missing time draws nothing.
+/// A zero-size point's position still counts in the axis domains like any point; a point with
+/// a NaN size counts in neither axis domain. All bubble marks on an axes share one size
+/// scale; the largest size among points with finite x, y and size maps to the theme's maximum
+/// radius. Automatic axis limits fit the whole
 /// markers and their outlines using the final plot size, across all panels sharing that axis;
 /// explicit limits clip the bubbles that reach past them. Bubbles that no automatic limits
 /// hold (a marker at least as long as the plot along the axis, or limits beyond the supported
@@ -176,7 +177,7 @@ impl BubbleMark {
         &self.y
     }
 
-    /// The non-negative size values, one per coordinate pair.
+    /// The size values, one per coordinate pair: non-negative, or NaN for a bubble left out.
     ///
     /// # Examples
     ///
@@ -192,6 +193,21 @@ impl BubbleMark {
     #[must_use]
     pub fn sizes(&self) -> &[f64] {
         &self.sizes
+    }
+
+    /// Whether any size is NaN, which leaves its bubble out.
+    pub(crate) fn has_missing_size(&self) -> bool {
+        self.sizes.iter().any(|size| size.is_nan())
+    }
+
+    /// The members of `values` whose bubble has a size, in data order: the points that count in
+    /// the axis domains.
+    pub(crate) fn sized<'a, T>(&'a self, values: &'a [T]) -> impl Iterator<Item = &'a T> + 'a {
+        values
+            .iter()
+            .zip(self.sizes.iter())
+            .filter(|(_, size)| !size.is_nan())
+            .map(|(value, _)| value)
     }
 
     /// The label, color and marker shape.

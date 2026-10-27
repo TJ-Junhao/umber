@@ -833,9 +833,9 @@ impl<'a> AxesMut<'a> {
     /// Adds markers whose areas are proportional to `sizes`, on numeric axes.
     ///
     /// All bubble marks on these axes share one size scale. The largest size among points with
-    /// finite x and y coordinates maps to [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius).
-    /// Zero sizes and NaN coordinates draw nothing; a zero-size point's position still counts
-    /// in the axis domains like any point. The remaining markers draw in input order with the
+    /// finite x, y and size maps to [`Theme::bubble_max_radius`](crate::Theme::bubble_max_radius).
+    /// Zero sizes, NaN sizes and NaN coordinates draw nothing; a zero-size point's position
+    /// still counts in the axis domains like any point, and a NaN-size point's does not. The remaining markers draw in input order with the
     /// scatter outline: 0.5 pt for mapped colors, contrasting when the fill is close to the
     /// background in Oklab and fading to the background color otherwise; 0.8 pt in the
     /// background color for uniform colors. Mapped fills stay opaque; uniform fills keep
@@ -862,8 +862,8 @@ impl<'a> AxesMut<'a> {
     /// their size values give them the same maximum.
     ///
     /// A category x axis gives `Error::Usage`, and so does a time axis, which takes
-    /// [`AxesMut::bubbles_time`]. Different lengths, non-finite or negative sizes,
-    /// or sizes above 1e300 give `Error::Data`; coordinates follow the scatter rules.
+    /// [`AxesMut::bubbles_time`]. Different lengths, infinite or negative sizes,
+    /// or sizes above 1e300 give `Error::Data`; a NaN size leaves its bubble out; coordinates follow the scatter rules.
     /// A color mapping follows the scatter rules too, except that a color-mapped bubble mark
     /// keeps its label: its legend entry and size references are drawn in the theme's text
     /// color, keeping their usual background-colored outline. Errors change nothing.

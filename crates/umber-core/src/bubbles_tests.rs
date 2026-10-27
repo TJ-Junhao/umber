@@ -1,5 +1,7 @@
 //! Bubble area scales, size legends, geometry and validation.
 
+use std::sync::Arc;
+
 use crate::bubble_scale::{nice_125_below, nice_125_round, radius, references};
 use crate::legend::{Legend, Swatch};
 use crate::pipeline::{plan_figure, try_plan_panels};
@@ -296,6 +298,81 @@ fn bubble_maximum_ignores_nan_coordinates_across_marks() {
     for (radius, expected) in radii.iter().zip([9.0, 18.0]) {
         assert!((radius - expected).abs() < 1e-5, "{radii:?}");
     }
+}
+
+#[test]
+fn nan_sizes_leave_their_bubbles_out_of_drawing_domains_and_scale() {
+    let build = |x: &[f64], y: &[f64], sizes: &[f64]| {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .bubbles(x, y, sizes, options("Cities"))
+            .unwrap();
+        f
+    };
+    // The NaN-size point is far away and has the largest finite neighbour size: it must not
+    // stretch the domains, set the scale or draw.
+    let with = build(
+        &[1.0, 5000.0, 2.0],
+        &[2.0, -5000.0, 4.0],
+        &[100.0, f64::NAN, 400.0],
+    );
+    let without = build(&[1.0, 2.0], &[2.0, 4.0], &[100.0, 400.0]);
+    let marks = resolve_marks(with.single_axes().marks(), with.theme());
+    assert!(matches!(
+        marks[0],
+        ResolvedMark::Bubbles { maximum: 400.0, .. }
+    ));
+    assert_eq!(
+        marks[0].x_numbers().collect::<Vec<_>>(),
+        [1.0, 2.0],
+        "x domain"
+    );
+    assert_eq!(
+        marks[0].y_numbers().collect::<Vec<_>>(),
+        [2.0, 4.0],
+        "y domain"
+    );
+    let fonts = FontLibrary::global();
+    assert_eq!(
+        with.to_scene(fonts).unwrap(),
+        without.to_scene(fonts).unwrap()
+    );
+    assert_eq!(
+        with.to_svg(SvgText::Outlines).unwrap(),
+        without.to_svg(SvgText::Outlines).unwrap()
+    );
+    // Every size missing draws nothing and leaves an empty scale.
+    let none = build(&[1.0], &[2.0], &[f64::NAN]);
+    assert!(none.to_svg(SvgText::Outlines).is_ok());
+}
+
+#[test]
+fn nan_sizes_leave_time_bubbles_out_of_the_domain() {
+    let build = |times: Vec<Option<Instant>>, y: Vec<f64>, sizes: &[f64]| {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Time, ScaleKind::Linear)
+            .unwrap()
+            .bubbles_time(
+                AxisData::Times(times),
+                AxisData::Numbers(y),
+                Arc::from(sizes),
+                options(""),
+            )
+            .unwrap();
+        f
+    };
+    let with = build(
+        vec![day(0), day(400), day(9)],
+        vec![1.0, 900.0, 3.0],
+        &[1.0, f64::NAN, 4.0],
+    );
+    let without = build(vec![day(0), day(9)], vec![1.0, 3.0], &[1.0, 4.0]);
+    let fonts = FontLibrary::global();
+    assert_eq!(
+        with.to_scene(fonts).unwrap(),
+        without.to_scene(fonts).unwrap()
+    );
 }
 
 #[test]
@@ -607,7 +684,6 @@ fn invalid_bubbles_are_atomic_and_name_the_first_size() {
     let before = f.clone();
     for (value, text) in [
         (-1.0, "-1"),
-        (f64::NAN, "NaN"),
         (f64::INFINITY, "inf"),
         (f64::NEG_INFINITY, "-inf"),
     ] {
