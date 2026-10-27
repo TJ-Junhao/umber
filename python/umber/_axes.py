@@ -1162,7 +1162,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If an argument has the wrong type.
             DataError: If lengths differ, coordinates are invalid for their axes, a size
-                is negative, non-finite, or above 1e300, or a ``ColorBy`` does not have one
+                is negative, infinite, or above 1e300, or a ``ColorBy`` does not have one
                 value per point.
             UsageError: If either axis is a category axis (type checkers refuse such axes, so
                 this is raised only for calls they do not check), or a ``ColorBy`` differs in

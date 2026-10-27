@@ -42,8 +42,9 @@ impl Default for BubbleOptions {
 /// Sizes are finite values from 0 to 1e300, or NaN. A zero size, a NaN size, a NaN coordinate
 /// or a missing time draws nothing.
 /// A zero-size point's position still counts in the axis domains like any point; a point with
-/// a NaN size, like one with a NaN coordinate, does not. All bubble marks on an axes share one
-/// size scale; the largest size among points with finite x, y and size maps to the theme's maximum radius. Automatic axis limits fit the whole
+/// a NaN size counts in neither axis domain. All bubble marks on an axes share one size
+/// scale; the largest size among points with finite x, y and size maps to the theme's maximum
+/// radius. Automatic axis limits fit the whole
 /// markers and their outlines using the final plot size, across all panels sharing that axis;
 /// explicit limits clip the bubbles that reach past them. Bubbles that no automatic limits
 /// hold (a marker at least as long as the plot along the axis, or limits beyond the supported

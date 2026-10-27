@@ -55,13 +55,15 @@ These errors cannot be found when the mark is added, because they depend on the 
 |---|---|---|
 | `ub.StyleError` | A fixed or percent tick format cannot label any value in the axis or colorbar range, such as `TickFormat.fixed(0)` on values between 0.1 and 0.2. | Use more decimals, or set the ticks explicitly. |
 | `ub.StyleError` | A title, subtitle, axis label, tick label, legend label or colorbar does not fit its room, or the figure is too small for the plot area. The message names the text and both widths. | Make the figure larger, shorten the text, or use a smaller `size=`. |
-| `ub.StyleError` | Bubbles do not fit the figure: a marker is as long as the plot, or the limits would leave the supported range. The message names a figure size that holds them. | Make the figure at least that large, or set `xlim()` and `ylim()`. |
+| `ub.StyleError` | Bubbles do not fit the plot space: a marker is as long as the plot. The message names a figure size that holds them. | Make the figure at least that large. |
+| `ub.StyleError` | Bubbles need limits beyond the supported numeric range. A larger figure does not help. | Set explicit `xlim()` and `ylim()`, which clip the bubbles. |
 | `ub.StyleError` | `text()` or `annotate()` is placed outside the axes limits, or an annotation reaches past the edge of the figure or has no room for its arrow. | Include the point in `xlim()` and `ylim()`, or change `offset=` and `align=`, or pass `arrow=False`. |
 | `ub.DataError` | `vline()`, `text()` or `annotate()` names a category that no mark on the axes has. | Draw a mark with that category first. |
 | `ub.StyleError` | The values written on bars (`annotate=True`) or heatmap cells do not fit inside the plot or the cell. | Make the figure larger, write fewer decimals with `format=`, or pass `annotate=False`. |
+| `ub.StyleError` | Contours that share a colorbar have different levels, on one axes or on panels that share the colorbar. | Give them identical `levels`. |
 | `ub.StyleError` | `swarm()` points do not fit their category band. | Use `strip()` or `violin()` for many points. |
 | `ub.StyleError` | Pie labels cannot be placed outside the circle without overlap. | Merge small slices into "Other", enlarge the figure, or use `legend(ub.LegendStyle.HEADER)` or `ub.LegendStyle.CHIPS`. |
-| `ub.StyleError` | A mesh or 2-D histogram drawn with `ub.Render.RASTER` has a cell cut by explicit limits that reaches far past them. | Use `render=ub.Render.VECTOR` or `ub.AUTO`, or widen the limits. |
+| `ub.StyleError` | A mesh or 2-D histogram drawn with `ub.Render.RASTER` has a cell cut by explicit limits that reaches far past them, or an edge that lands more than 0.001 pt from its place in the image (for example a mesh edge at 1.0000999 with `xlim(0.98, 1.02)` at `dpi=600`). | Use `render=ub.Render.VECTOR` or `ub.AUTO`, or widen the limits. |
 | `ub.DataError` | The ranges of a `hexbin()` are too far apart for one lattice of regular hexagons on these axes, or its hexagons do not settle at the plot size. | Draw them on separate axes, set explicit limits, or choose another `gridsize`. |
 | `ub.StyleError` | `to_png()` gets a `dpi` outside 10 to 2400, or the pixel size is too large. | Use a dpi in range, a smaller figure or a lower dpi. |
 
