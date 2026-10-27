@@ -10,9 +10,18 @@
 //! [`ContourStyle::Both`] go over the bands. A level label sits at the middle of a line long
 //! enough to hold it ([`labels::place`]), turned along it and upright, in the tick label font
 //! and the theme's text color, and the line is broken under it [`LABEL_GAP`] pt either side.
+//!
+//! A line colored by its level whose color comes close to the background is drawn darker, or
+//! lighter on a dark background ([`super::contrast`]): with `w = clamp(1 − d / 0.25, 0, 1)` from
+//! the Oklab distance `d` between the level's color, taken opaque, and the theme background, the
+//! line takes that color with its Oklab lightness moved `w × 0.25` away from the background's
+//! and clamped to `0..=1`, a and b unchanged, at the line's own opacity and width. A line with
+//! `w = 0`, a line in one color and the lines of [`ContourStyle::Both`] keep their color; the
+//! colorbar keeps the colormap's colors.
 
 use super::MarkContext;
 use super::clip::clip_ring;
+use super::contrast::Background;
 use super::line::{LineClip, stroke};
 use super::mapping::{AxisPoint, PlotPoint, axis_value, point};
 use crate::color_scale::ResolvedColorScale;
@@ -49,13 +58,16 @@ pub(super) struct Contour<'a> {
 enum LineColor<'a> {
     /// One color for every line.
     One(Rgba),
-    /// Each line in the color of its level on the axes' color scale, at the opacity `alpha`;
-    /// no line without a color scale.
+    /// Each line in the color of its level on the axes' color scale, moved away from the
+    /// `background` when it comes close to it ([`Background::contrast`]), at the opacity
+    /// `alpha`; no line without a color scale.
     ByLevel {
         /// The color scale, if the axes have one.
         scale: Option<&'a ResolvedColorScale>,
         /// The opacity of the lines.
         alpha: Alpha,
+        /// The theme background.
+        background: Background,
     },
 }
 
@@ -64,7 +76,17 @@ impl LineColor<'_> {
     fn at(self, level: f64) -> Option<Rgba> {
         match self {
             LineColor::One(color) => Some(color),
-            LineColor::ByLevel { scale, alpha } => Some(scale?.color(level)?.with_alpha(alpha)),
+            LineColor::ByLevel {
+                scale,
+                alpha,
+                background,
+            } => {
+                let color = scale?.color(level)?;
+                let color = background.contrast(color).map_or(color, |contrast| {
+                    crate::cmap::from_oklab(contrast.weighted())
+                });
+                Some(color.with_alpha(alpha))
+            }
         }
     }
 }
@@ -122,9 +144,10 @@ fn between(a: f64, b: f64, t: f64) -> f64 {
 }
 
 /// The items of `contour` appended to `items`: its bands, when it is filled and the axes have a
-/// color scale; then its lines, colored by level on the color scale (none without one) or in its
-/// own color, or for [`ContourStyle::Both`] in the theme's text color; then its level labels,
-/// shaped with the scene's `fonts`.
+/// color scale; then its lines, colored by level on the color scale (none without one) and moved
+/// away from the background where they come close to it, or in their own color, or for
+/// [`ContourStyle::Both`] in the theme's text color; then its level labels, shaped with the
+/// scene's `fonts`.
 ///
 /// # Errors
 ///
@@ -158,6 +181,7 @@ pub(super) fn contour_items(
                 (true, ColorSpec::Auto(alpha)) => LineColor::ByLevel {
                     scale: resolved.color.as_ref(),
                     alpha,
+                    background: Background::of(context.theme),
                 },
                 _ => LineColor::One(contour.color),
             },

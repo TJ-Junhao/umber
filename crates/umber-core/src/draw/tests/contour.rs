@@ -302,7 +302,15 @@ fn lines_take_their_level_colors_or_one_color() {
         .collect();
     let expected: Vec<(Rgba, f32)> = levels(&f)
         .iter()
-        .map(|&level| (color.color(level).unwrap(), 1.25))
+        .map(|&level| {
+            // Levels close to the background are drawn darker (`contour_contrast`).
+            let level_color = color.color(level).unwrap();
+            let drawn = super::contour_contrast::expected_line_color(
+                Theme::pigment().background(),
+                level_color,
+            );
+            (drawn, 1.25)
+        })
         .collect();
     assert_eq!(strokes, expected);
     // One color: every line in it, no color scale and no colorbar.

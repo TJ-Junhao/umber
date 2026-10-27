@@ -3473,6 +3473,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
         without padding. By default a contour alone draws no baseline.
 
+        A line colored by its level whose color comes close to the background, such as the
+        lines near the middle of a diverging colormap, is drawn darker on a light background
+        and lighter on a dark one, so that it stays visible. The closer its color is to the
+        background (Oklab distance below 0.25), the more it is darkened or lightened; lines
+        farther from the background, lines of one ``color`` and the lines of ``Contour.BOTH``
+        keep their colors, and the colorbar always shows the colormap's own colors.
+
         A field that changes from cell to cell, such as noise or a checkerboard, makes many short
         lines and many small bands, so vector output grows very large and slow to write and to
         draw. Use fewer levels, or ``Contour.FILLED`` instead of ``Contour.BOTH``; smooth or

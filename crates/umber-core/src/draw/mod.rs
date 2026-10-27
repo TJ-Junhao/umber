@@ -44,6 +44,7 @@ mod chrome;
 mod clip;
 pub(crate) mod colorbar;
 mod contour;
+mod contrast;
 mod ecdf;
 mod error_bars;
 pub(crate) mod fill;

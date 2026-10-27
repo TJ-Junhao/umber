@@ -1,1 +1,7 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Color-mapped contour lines close to the background are drawn darker (lighter on dark themes).
+contour-annotated-graphite
+contour-annotated-midnight
+contour-annotated-pigment
+contour-lines-graphite
+contour-lines-midnight
+contour-lines-pigment
