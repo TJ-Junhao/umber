@@ -1,1 +1,2 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# A NaN bubble size now skips the bubble instead of raising.
+errors/bubbles

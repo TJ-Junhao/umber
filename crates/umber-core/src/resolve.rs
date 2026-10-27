@@ -2059,6 +2059,9 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::Line { mark, .. } => mark.x().numbers(),
             ResolvedMark::Scatter { mark, .. } => mark.x().numbers(),
+            ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
+                return DomainValues::Computed(Box::new(mark.sized(mark.x()).copied()));
+            }
             ResolvedMark::Bubbles { mark, .. } => mark.x(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
             // A heatmap's cells lie at categories, which have no numbers.
@@ -2188,6 +2191,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::VLine { mark, .. } => DomainTimes::whole(mark.x().times()),
             ResolvedMark::VSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
             ResolvedMark::Mesh { mark, .. } => DomainTimes::whole(mark.x_edges.times()),
+            ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
+                DomainTimes::Groups(Box::new(mark.sized(mark.x_times()).copied().flatten()))
+            }
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.x_times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2230,6 +2236,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::HLine { mark, .. } => DomainTimes::whole(mark.y().times()),
             ResolvedMark::HSpan { mark, .. } => DomainTimes::whole(mark.time_bounds()),
             ResolvedMark::Mesh { mark, .. } => DomainTimes::whole(mark.y_edges.times()),
+            ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
+                DomainTimes::Groups(Box::new(mark.sized(mark.y_times()).copied().flatten()))
+            }
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.y_times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2413,6 +2422,9 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::Line { mark, .. } => mark.y().numbers(),
             ResolvedMark::Scatter { mark, .. } => mark.y().numbers(),
+            ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
+                return DomainValues::Computed(Box::new(mark.sized(mark.y()).copied()));
+            }
             ResolvedMark::Bubbles { mark, .. } => mark.y(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
             ResolvedMark::Heatmap { .. } => &[],
@@ -3973,7 +3985,8 @@ fn resolve_panel_marks_from<'a>(
         })
         .flat_map(|mark| {
             mark.sizes().iter().enumerate().filter_map(|(i, &size)| {
-                (!mark.x_values().is_gap(i) && !mark.y_values().is_gap(i)).then_some(size)
+                (!mark.x_values().is_gap(i) && !mark.y_values().is_gap(i) && !size.is_nan())
+                    .then_some(size)
             })
         })
         .fold(0.0, f64::max);

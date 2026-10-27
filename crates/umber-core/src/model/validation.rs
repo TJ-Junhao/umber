@@ -500,9 +500,13 @@ fn check_bubble_lengths(context: &'static str, x: usize, y: usize, sizes: usize)
     Ok(())
 }
 
-/// Checks that every bubble size is finite, at least 0 and at most [`MAX_MAGNITUDE`].
+/// Checks that every bubble size is NaN (a bubble left out) or a finite number from 0 to
+/// [`MAX_MAGNITUDE`].
 fn check_bubble_sizes(context: &'static str, sizes: &[f64]) -> Result<()> {
     for (i, &value) in sizes.iter().enumerate() {
+        if value.is_nan() {
+            continue;
+        }
         if !value.is_finite() || value < 0.0 {
             return Err(Error::data(
                 context,

@@ -1,8 +1,9 @@
 //! The axes-wide bubble area scale and its reference values.
 
-/// A radius in points. Taking square roots separately avoids underflow in the ratio.
+/// A radius in points; zero for a NaN, zero or negative size. Taking square roots separately avoids underflow in the ratio.
 pub(crate) fn radius(value: f64, maximum: f64, radius: f32) -> f32 {
-    if value <= 0.0 || maximum <= 0.0 {
+    // A NaN size, which leaves its bubble out, has no radius.
+    if value.is_nan() || value <= 0.0 || maximum <= 0.0 {
         0.0
     } else {
         (f64::from(radius) * (value.sqrt() / maximum.sqrt())) as f32

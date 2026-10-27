@@ -159,7 +159,6 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         ("y length", vec![1.0], vec![], vec![]),
         ("sizes length", vec![1.0], vec![1.0], vec![]),
         ("negative", vec![1.0, 2.0], vec![1.0, 2.0], vec![0.0, -1.0]),
-        ("nan", vec![1.0], vec![1.0], vec![f64::NAN]),
         (
             "positive infinity",
             vec![1.0],
