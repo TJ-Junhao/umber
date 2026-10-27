@@ -356,7 +356,7 @@ TypeError: Axes.line(): color is str; color must be of type Color.
 hint: use Color.hex("#3366B8"), Color.rgb() or a named color such as Color.BLUE.
 ```
 
-只取决于图形设置的错误，在第一次绘制时就会出现；少数错误取决于数据，比如数值变成无穷大，或对数轴上出现 0，可能在长任务的后期才出现。在训练循环或模拟里，请先记录数据、结束后再画图，或者用 `try`/`except umber.UmberError` 包住画图代码并记录错误，避免一张画不出来的图让整个任务停下。
+只取决于图形设置的错误，在第一次绘制时就会出现；少数错误取决于数据，比如数值变成无穷大，或对数轴上出现 0，可能在长任务的后期才出现。在训练循环或模拟里，请先记录数据、结束后再画图，或者用 `try`/`except umber.UmberError` 包住画图代码并记录错误，避免一张画不出来的图让整个任务停下。只在绘制时才会出现的错误列在[错误参考](https://github.com/TJ-Junhao/umber/blob/main/skills/umber/references/errors.md#errors-raised-when-the-figure-is-rendered)里；在任务开始前，先用与最终图相同的图形尺寸和标签长度渲染一张预览，就能提前发现这些错误。
 
 在支持颜色的终端里，提示和高亮会以彩色显示；设置 `NO_COLOR` 可关闭颜色，设置 `FORCE_COLOR` 可强制开启。在 Jupyter 中同样会显示这些说明。
 
