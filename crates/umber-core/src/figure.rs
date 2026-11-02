@@ -60,9 +60,11 @@ pub use crate::model::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use crate::model::{StemMark, StemOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
-use crate::render::{SvgText, check_dpi, render_pdf, render_png, render_svg};
+use crate::render::{
+    SvgText, check_dpi, page_size, render_pdf, render_pdf_pages, render_png, render_svg,
+};
 use crate::scene::Scene;
-use crate::{FontLibrary, Result, pipeline, resolve};
+use crate::{Error, FontLibrary, Result, pipeline, resolve};
 
 impl Figure {
     /// Builds the figure's [`Scene`]: resolve scales and ticks, lay out the axes, then draw.
@@ -287,6 +289,63 @@ impl Figure {
         let scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
         render_pdf(&scene)
     }
+}
+
+/// Renders `figures` as one PDF document, a page for each in list order, with the global
+/// [`FontLibrary`].
+///
+/// Each page is the size of its figure and draws what [`Figure::to_pdf`] draws for it. A font
+/// used on several pages is embedded once, as a subset of the glyphs of every page that uses
+/// it; raster images stay with their page. Every figure is laid out before anything is
+/// written, so the result is all pages or an error. The same figure may appear more than once.
+/// One figure gives the bytes of [`Figure::to_pdf`]. The same figures always give the same
+/// bytes.
+///
+/// # Errors
+///
+/// `Error::Data` with context `"to_pdf()"` when `figures` is empty. When a figure cannot be
+/// rendered, the error [`Figure::to_pdf`] gives for it, with context `"to_pdf()"`, parameter
+/// `"figures"` and the message beginning `figures[i]: `, where `i` is the 0-based index of the
+/// first such figure.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Figure, ScaleKind, Theme, pdf_pages};
+///
+/// let mut wide = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// wide.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
+/// let tall = Figure::new(4.0, 6.0, Theme::pigment())?;
+/// let pdf = pdf_pages(&[&wide, &tall])?;
+/// let text = String::from_utf8_lossy(&pdf);
+/// assert!(text.contains("/MediaBox [0 0 432 288]"));
+/// assert!(text.contains("/MediaBox [0 0 288 432]"));
+/// assert!(pdf_pages(&[]).is_err());
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub fn pdf_pages(figures: &[&Figure]) -> Result<Vec<u8>> {
+    const CONTEXT: &str = "to_pdf()";
+    if figures.is_empty() {
+        return Err(
+            Error::data(CONTEXT, "figures is empty; a PDF needs at least one page.")
+                .with_parameter("figures")
+                .with_hint("pass at least one figure."),
+        );
+    }
+    let mut scenes = Vec::with_capacity(figures.len());
+    for (index, figure) in figures.iter().enumerate() {
+        let scene = figure
+            .scene(FontLibrary::global(), CONTEXT)
+            .and_then(|scene| page_size(&scene).map(|_| scene))
+            .map_err(|err| {
+                err.with_context(CONTEXT)
+                    .with_parameter("figures")
+                    .with_message_prefix(&format!("figures[{index}]: "))
+            })?;
+        scenes.push(scene);
+    }
+    let scenes: Vec<&Scene> = scenes.iter().collect();
+    render_pdf_pages(&scenes).map_err(|err| err.with_context(CONTEXT))
 }
 
 impl Figure {

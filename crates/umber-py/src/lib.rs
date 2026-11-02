@@ -45,6 +45,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enums::enum_members, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_auto_size, m)?)?;
     m.add_function(wrap_pyfunction!(figure::grid_cells, m)?)?;
+    m.add_function(wrap_pyfunction!(figure::pdf_pages, m)?)?;
     m.add_function(wrap_pyfunction!(color::named_colors, m)?)?;
     m.add_function(wrap_pyfunction!(font::bundled_fonts, m)?)?;
     m.add_class::<font::FontValue>()?;

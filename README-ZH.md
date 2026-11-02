@@ -328,7 +328,7 @@ fig = ub.Figure(theme=serif)
 
 ## 输出
 
-`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。
+`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。`ub.save_pdf(path, [fig1, fig2])` 把多个 figure 写入同一个 PDF，每个 figure 一页，页面大小各自保持；`ub.to_pdf([fig1, fig2])` 返回字节。
 
 ### Jupyter 和 `show()`
 

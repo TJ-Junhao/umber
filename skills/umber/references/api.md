@@ -6357,6 +6357,40 @@ Example:
 >>> ax.figure.save_svg("orders.svg")
 ```
 
+## `umber.save_pdf`
+
+```text
+save_pdf(path: str | os.PathLike[str], figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> None
+```
+
+Render several figures as one PDF document and write it to ``path``.
+
+See ``to_pdf()``. Every figure is rendered before the file is touched, so when a figure
+cannot be rendered no file is written and an existing file at ``path`` is left as it was.
+
+Args:
+    path: The file to write; an existing file is replaced.
+    figures: The figures, one per page; a list or tuple with at least one item.
+
+Raises:
+    TypeError: If ``path`` is not a ``str`` or a path-like object returning a string,
+        ``figures`` is a single ``Figure`` or not a list or tuple, or an item is not a
+        figure or the axes of one.
+    DataError: If ``figures`` is empty.
+    DataError, StyleError: If a figure cannot be rendered. The error keeps the class the
+        figure's own render raises, and its message begins with ``figures[i]: ``, where
+        ``i`` counts from 0.
+    OSError: If the file cannot be written.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> first = ub.line([0, 1, 2], [1, 3, 2]).figure
+>>> second = ub.bar(["a", "b"], [3, 5]).figure
+>>> ub.save_pdf("results.pdf", [first, second])
+```
+
 ## `umber.scatter`
 
 ```text
@@ -6403,4 +6437,42 @@ Example:
 >>> ax.figure.save_png("points.png", dpi=100)
 >>> ax = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], color=ub.ColorBy([5.0, 1.0, 3.0]))
 >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+```
+
+## `umber.to_pdf`
+
+```text
+to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> bytes
+```
+
+Render several figures as one PDF with embedded fonts.
+
+Each figure is one page at its own size, in list order, and draws what ``Figure.to_pdf()``
+draws for it. A font used on several pages is embedded once. The same figure may appear
+more than once. Every figure is rendered before anything is returned.
+
+Args:
+    figures: The figures, one per page; a list or tuple with at least one item. An axes
+        stands for its figure.
+
+Returns:
+    The PDF file contents.
+
+Raises:
+    TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, or an item is
+        not a figure or the axes of one.
+    DataError: If ``figures`` is empty.
+    DataError, StyleError: If a figure cannot be rendered (see ``Figure.to_pdf()``). The
+        error keeps the class the figure's own render raises, and its message begins with
+        ``figures[i]: ``, where ``i`` counts from 0.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> first = ub.line([0, 1, 2], [1, 3, 2]).figure
+>>> second = ub.bar(["a", "b"], [3, 5]).figure
+>>> pdf = ub.to_pdf([first, second])
+>>> pdf.count(b"/MediaBox")
+2
 ```

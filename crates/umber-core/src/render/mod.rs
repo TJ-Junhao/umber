@@ -16,7 +16,8 @@ pub(crate) mod normalize;
 mod pdf;
 mod svg;
 
-pub use pdf::render_pdf;
+pub(crate) use pdf::page_size;
+pub use pdf::{render_pdf, render_pdf_pages};
 pub use svg::render_svg;
 
 /// How the SVG backend writes text. `Outlines` is the default.

@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Collection, Iterator
+from operator import attrgetter
 from pathlib import Path
 from typing import Any, Final, Never, Self, cast, final
 
@@ -24,6 +25,7 @@ _SCALE_HINT: Final = "use Scale.linear(), Scale.log(), Scale.category() or Scale
 _SVG_TEXT_HINT: Final = "use SvgText.OUTLINES or SvgText.EDITABLE."
 _SHARE_HINT: Final = "use Share.NONE, Share.ROW, Share.COL or Share.ALL."
 _LEGEND_HINT: Final = "use Legend.MERGED or Legend.PER_PANEL."
+_NATIVE: Final = attrgetter("_native")
 
 
 def _inches(context: str, name: str, value: float | Auto) -> float | None:
@@ -873,3 +875,21 @@ class Figure:
                 parameter=None,
                 hint="save it with save_png(), save_svg() or save_pdf(), or build it again.",
             )
+
+
+def native(figure: Figure) -> _umber.Figure:
+    """Return the native figure of ``figure``.
+
+    Args:
+        figure: The figure.
+
+    Returns:
+        The native figure object.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._figure import native
+        >>> native(ub.Figure()) is native(ub.Figure())
+        False
+    """
+    return cast(_umber.Figure, _NATIVE(figure))

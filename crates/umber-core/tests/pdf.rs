@@ -16,7 +16,7 @@ use umber_core::scene::{Item, Scene};
 use umber_core::{
     Alpha, ColorSpec, FaceId, Figure, FillStyle, Font, FontLibrary, Grid, GridIndex,
     HeatmapOptions, Placement, Point, PointColor, Render, Rgba, ScaleKind, TextStyle, Theme,
-    Weight,
+    Weight, pdf_pages,
 };
 
 #[path = "support/pdf_check.rs"]
@@ -922,5 +922,258 @@ fn pdf_resolves_bold_fallback_to_the_regular_face() {
     assert_readers_parse(&path);
     if have("pdftotext") {
         assert!(extracted_text(&path).contains("Bold fallback"));
+    }
+}
+
+// --- Several figures in one document -------------------------------------------------------------
+
+/// A figure that cannot be drawn: its x tick label is far wider than the plot.
+fn failing_figure() -> Figure {
+    let mut figure = Figure::new(1.0, 1.0, Theme::pigment()).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
+        .unwrap();
+    figure
+}
+
+/// A line chart with `title`, on a page of `width` by 4 inches.
+fn titled_figure(width: f64, title: &str) -> Figure {
+    themed_figure(Theme::pigment(), width, title)
+}
+
+/// `titled_figure` in `theme`.
+fn themed_figure(theme: Theme, width: f64, title: &str) -> Figure {
+    let mut figure = Figure::new(width, 4.0, theme).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title(title)
+        .line(
+            AxisData::Numbers(vec![1.0, 2.0, 3.0, 4.0]),
+            &[3.0, 4.5, 4.0, 6.5],
+            LineOptions::default(),
+        )
+        .unwrap();
+    figure
+}
+
+/// The `/MediaBox` of every page, in file order.
+fn media_boxes(pdf: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(pdf);
+    text.match_indices("/MediaBox [")
+        .map(|(at, marker)| {
+            let rest = &text[at + marker.len()..];
+            rest[..rest.find(']').unwrap()].to_owned()
+        })
+        .collect()
+}
+
+/// The decoded content stream of every page, in page order.
+fn page_contents(pdf: &[u8]) -> Vec<String> {
+    references(pdf, "/Contents")
+        .into_iter()
+        .map(|n| String::from_utf8(stream_data(pdf, n)).unwrap())
+        .collect()
+}
+
+/// `content` with every resource name (`/F0`, `/G1`, `/S0`, `/X2`) replaced by `/R`.
+fn without_resource_names(content: &str) -> String {
+    let is_name = |token: &str| {
+        let digits = token
+            .strip_prefix(['/'])
+            .and_then(|t| t.strip_prefix(['F', 'G', 'S', 'X']));
+        digits.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+    };
+    content
+        .split_inclusive(char::is_whitespace)
+        .map(|piece| {
+            let token = piece.trim_end();
+            if is_name(token) {
+                format!("/R{}", &piece[token.len()..])
+            } else {
+                piece.to_owned()
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn pdf_pages_keep_order_and_size() {
+    let (wide, narrow, tall) = (
+        titled_figure(6.0, "Wide"),
+        titled_figure(3.5, "Narrow"),
+        Figure::new(2.0, 5.0, Theme::graphite()).unwrap(),
+    );
+    let pdf = pdf_pages(&[&wide, &narrow, &tall]).unwrap();
+    assert_eq!(
+        media_boxes(&pdf),
+        ["0 0 432 288", "0 0 252 288", "0 0 144 360"]
+    );
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(text.contains("/Count 3"), "page count");
+    assert_eq!(references(&pdf, "/Contents").len(), 3);
+    // The same figure twice gives two pages.
+    let twice = pdf_pages(&[&wide, &wide]).unwrap();
+    assert_eq!(media_boxes(&twice), ["0 0 432 288", "0 0 432 288"]);
+    let contents = page_contents(&twice);
+    assert_eq!(contents[0], contents[1]);
+}
+
+#[test]
+fn pdf_pages_of_one_figure_is_to_pdf() {
+    for figure in [line_figure(), all_features_figure()] {
+        assert!(pdf_pages(&[&figure]).unwrap() == figure.to_pdf().unwrap());
+    }
+}
+
+#[test]
+fn pdf_pages_embed_a_shared_font_once() {
+    let (first, second) = (titled_figure(6.0, "Alpha"), titled_figure(5.0, "Omega"));
+    let single = first.to_pdf().unwrap();
+    let pdf = pdf_pages(&[&first, &second]).unwrap();
+    let count = |pdf: &[u8], key: &str| references(pdf, key).len();
+    for key in [
+        "/FontFile2",
+        "/FontDescriptor",
+        "/ToUnicode",
+        "/CIDToGIDMap",
+    ] {
+        assert!(count(&single, key) >= 1, "{key}");
+        assert_eq!(count(&pdf, key), count(&single, key), "{key}");
+    }
+    // The text of both pages is in the shared subsets' ToUnicode maps.
+    let maps: String = references(&pdf, "/ToUnicode")
+        .into_iter()
+        .map(|n| String::from_utf8(stream_data(&pdf, n)).unwrap())
+        .collect();
+    for letter in ['A', 'l', 'p', 'h', 'a', 'O', 'm', 'e', 'g'] {
+        assert!(
+            maps.contains(&format!("<{:04X}>", u32::from(letter))),
+            "{letter}"
+        );
+    }
+}
+
+#[test]
+fn pdf_pages_draw_what_a_single_page_draws() {
+    // The pages share all their text, so the shared subsets give the same character codes.
+    let (first, second) = (
+        titled_figure(6.0, "Title"),
+        themed_figure(Theme::graphite(), 6.0, "Title"),
+    );
+    let pdf = pdf_pages(&[&first, &second]).unwrap();
+    let pages = page_contents(&pdf);
+    for (page, figure) in pages.iter().zip([&first, &second]) {
+        let single = String::from_utf8(stream_data(&figure.to_pdf().unwrap(), 4)).unwrap();
+        assert_eq!(
+            without_resource_names(page),
+            without_resource_names(&single)
+        );
+    }
+    // A page whose text comes first in the document is the single page exactly.
+    let other = titled_figure(6.0, "Other words");
+    let pdf = pdf_pages(&[&first, &other]).unwrap();
+    let single = String::from_utf8(stream_data(&first.to_pdf().unwrap(), 4)).unwrap();
+    assert_eq!(page_contents(&pdf)[0], single);
+}
+
+#[test]
+fn pdf_pages_keep_raster_images_with_their_page() {
+    let (plain, grid) = (titled_figure(6.0, "Plain"), all_features_figure());
+    let images = |pdf: &[u8]| {
+        String::from_utf8_lossy(pdf)
+            .matches("/Subtype /Image")
+            .count()
+    };
+    let pdf = pdf_pages(&[&plain, &grid, &grid]).unwrap();
+    assert_eq!(images(&pdf), 2 * images(&grid.to_pdf().unwrap()));
+    assert_eq!(images(&pdf_pages(&[&plain]).unwrap()), 0);
+}
+
+#[test]
+fn pdf_pages_report_the_page_that_fails() {
+    let (good, bad) = (titled_figure(6.0, "Fine"), failing_figure());
+    let single = bad.to_pdf().unwrap_err();
+    let err = pdf_pages(&[&good, &bad, &good]).unwrap_err();
+    let text = err.to_string();
+    assert!(text.starts_with("to_pdf(): figures[1]: "), "{text}");
+    let own = single.to_string();
+    assert!(
+        text.ends_with(own.strip_prefix("Figure.to_pdf(): ").unwrap()),
+        "{text} / {own}"
+    );
+    assert!(matches!(err, umber_core::Error::Style { .. }));
+    assert_eq!(err.parameter(), Some("figures"));
+    // The first failing page is the one named.
+    let err = pdf_pages(&[&bad, &bad]).unwrap_err();
+    assert!(
+        err.to_string().starts_with("to_pdf(): figures[0]: "),
+        "{err}"
+    );
+}
+
+#[test]
+fn pdf_pages_need_a_page() {
+    let err = pdf_pages(&[]).unwrap_err();
+    assert!(matches!(err, umber_core::Error::Data { .. }));
+    assert!(
+        err.to_string().starts_with("to_pdf(): figures is empty"),
+        "{err}"
+    );
+    assert!(umber_core::render::render_pdf_pages(&[]).is_err());
+}
+
+#[test]
+fn pdf_pages_are_deterministic() {
+    let (first, second) = (titled_figure(6.0, "Alpha"), all_features_figure());
+    let pdf = pdf_pages(&[&first, &second]).unwrap();
+    assert!(pdf == pdf_pages(&[&first, &second]).unwrap());
+    assert_ne!(pdf, pdf_pages(&[&second, &first]).unwrap());
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(!text.contains("/CreationDate") && !text.contains("/ModDate"));
+    assert_eq!(
+        text.matches(&format!("/Producer (umber {})", umber_core::VERSION))
+            .count(),
+        1
+    );
+    assert_eq!(text.matches("/ID [").count(), 1);
+    assert!(pdf.starts_with(b"%PDF-1.7\n"));
+}
+
+#[test]
+fn pdf_pages_rasterize_like_single_pages() {
+    if !have("pdftoppm") {
+        return;
+    }
+    let dir = scratch("pages");
+    let figures = [
+        titled_figure(6.0, "Alpha"),
+        all_features_figure(),
+        line_figure(),
+    ];
+    let refs: Vec<&Figure> = figures.iter().collect();
+    let combined = write(&dir, "combined.pdf", &pdf_pages(&refs).unwrap());
+    for (index, figure) in figures.iter().enumerate() {
+        let single = write(
+            &dir,
+            &format!("single{index}.pdf"),
+            &figure.to_pdf().unwrap(),
+        );
+        let page = u32::try_from(index).unwrap() + 1;
+        let (mean, far) = raster_difference(
+            &poppler_page_raster(&combined, 100, page),
+            &poppler_raster(&single, 100),
+        );
+        assert_eq!((mean, far), (0.0, 0.0), "page {page}");
+    }
+    assert_qpdf_clean_if_available(&combined);
+}
+
+/// Checks the document with `qpdf` when it is installed.
+fn assert_qpdf_clean_if_available(path: &FsPath) {
+    if have("qpdf") {
+        assert_qpdf_clean(path);
     }
 }

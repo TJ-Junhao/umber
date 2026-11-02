@@ -81,7 +81,7 @@
 //! - times: [`Instant`] and its [`Civil`] date and time, and [`times_from_micros`] and
 //!   [`time_from_micros`], which read times given as microseconds, with [`MISSING_TIME`];
 //! - scales: [`ScaleKind`] and [`LogBase`];
-//! - output: [`SvgText`];
+//! - output: [`SvgText`] and [`pdf_pages`], which writes several figures as one PDF;
 //! - event rows: [`EventsMark`] and [`EventsOptions`]; category points: [`StripMark`],
 //!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
 //! - panel kinds: [`Panel`] distinguishes Cartesian axes from [`PiePanel`]; circular panels
@@ -97,7 +97,8 @@
 //! - scenes and geometry: [`Scene`], its records ([`Item`], [`TextItem`], [`Paint`],
 //!   [`StrokeStyle`] and the rest of [`scene`]), [`Path`], [`PathVerb`] and [`Point`];
 //! - rendering a scene: [`render_png`](render::render_png),
-//!   [`render_svg`](render::render_svg) and [`render_pdf`](render::render_pdf), and
+//!   [`render_svg`](render::render_svg), [`render_pdf`](render::render_pdf) and
+//!   [`render_pdf_pages`](render::render_pdf_pages), and
 //!   [`Figure::to_scene`] to get a figure's scene;
 //! - text: [`FontLibrary`], the [`SceneFonts`] of one scene with its [`FaceId`], [`TextStyle`],
 //!   [`TextLayout`], [`TextGlyphs`] and [`Weight`];
@@ -167,6 +168,7 @@ pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, ErrorMessage, Result};
 pub use figure::StackedAreaMark;
+pub use figure::pdf_pages;
 pub use figure::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions, ValueLabels};
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,

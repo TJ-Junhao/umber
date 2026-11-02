@@ -74,6 +74,7 @@ __all__ = [
     "enum_members",
     "grid_auto_size",
     "grid_cells",
+    "pdf_pages",
     "named_colors",
 ]
 
@@ -89,6 +90,7 @@ type _ColorArg = tuple[int, int, float]
 def enum_members() -> dict[str, list[tuple[str, int]]]: ...
 def grid_auto_size(rows: int, cols: int) -> tuple[float, float]: ...
 def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
+def pdf_pages(figures: list[Figure], file: bool) -> bytes: ...
 
 # Named colors as (name, 0xRRGGBBAA), in the order BLACK, WHITE, GRAY, RED, ORANGE, YELLOW,
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.

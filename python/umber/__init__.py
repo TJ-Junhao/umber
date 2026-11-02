@@ -38,6 +38,7 @@ from umber._enums import (
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._font import Font
+from umber._pdf import save_pdf, to_pdf
 from umber._pie import PieAxes
 from umber._quick import bar, hist, line, pie, scatter
 from umber._scale import Scale
@@ -104,7 +105,9 @@ __all__ = [
     "hist",
     "line",
     "pie",
+    "save_pdf",
     "scatter",
+    "to_pdf",
 ]
 
 
@@ -163,5 +166,7 @@ _report_package_as_module(
     hist,
     line,
     pie,
+    save_pdf,
     scatter,
+    to_pdf,
 )
