@@ -6,9 +6,9 @@
 use umber_core::render::{SvgText, render_pdf, render_png, render_svg};
 use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
-    Align, AxisData, ColorBy, ColorbarOptions, ColorbarPosition, Error, Figure, FontLibrary, Grid,
-    GridIndex, LegendPosition, LegendStyle, LineOptions, PieOptions, Placement, PointColor,
-    ScaleKind, ScatterOptions, SizeSpec, Theme,
+    Align, AnnotateOptions, AxisData, AxisValue, ColorBy, ColorbarOptions, ColorbarPosition, Error,
+    Figure, FontLibrary, Grid, GridIndex, LegendMode, LegendPosition, LegendStyle, LineOptions,
+    PieOptions, Placement, PointColor, ScaleKind, ScatterOptions, SizeSpec, Theme,
 };
 
 const PADDING: f64 = 12.0;
@@ -430,4 +430,150 @@ fn png_svg_and_pdf_draw_the_same_caption() {
     figure.caption("");
     assert_ne!(figure.to_png(72).unwrap(), png);
     assert_ne!(figure.to_pdf().unwrap(), pdf);
+}
+
+/// The bounds of the glyphs of `text`: top and bottom of its ink.
+fn ink(item: &TextItem) -> (f64, f64) {
+    let (low, high) = item.outline.bounds().unwrap();
+    (f64::from(low.y), f64::from(high.y))
+}
+
+#[test]
+fn per_panel_bottom_legends_sit_between_their_x_label_and_the_caption() {
+    let theme = Theme::pigment()
+        .with_legend_style(LegendStyle::Header)
+        .unwrap()
+        .with_legend_position(LegendPosition::Bottom)
+        .unwrap();
+    let grid = Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel);
+    let mut figure = Figure::with_grid(9.0, 4.5, theme, grid).unwrap();
+    for col in [0, 1] {
+        let mut axes = figure
+            .add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.xlabel("Epoch");
+        for label in ["Short", "Long"] {
+            axes.line(
+                AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+                &[1.0, 3.0, 2.0],
+                LineOptions {
+                    label: label.into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+    }
+    figure.caption(CAPTION);
+    let drawn = scene(&figure);
+    let caption = only(&drawn, CAPTION);
+    let at = |name: &str| {
+        let mut found: Vec<_> = texts(&drawn)
+            .into_iter()
+            .filter(|item| item.text == name)
+            .collect();
+        assert_eq!(found.len(), 2, "{name}");
+        found.sort_by(|a, b| a.origin.x.total_cmp(&b.origin.x));
+        found
+    };
+    let (labels, legends) = (at("Epoch"), at("Short"));
+    for (label, legend) in labels.iter().zip(&legends) {
+        assert!(label.origin.y < legend.origin.y, "legend above its x label");
+        assert!(
+            legend.origin.y < caption.origin.y,
+            "legend below the caption"
+        );
+        // Each legend belongs to its own panel: it starts in the panel's half.
+        assert_eq!(legend.origin.x < 324.0, label.origin.x < 324.0);
+    }
+}
+
+#[test]
+fn annotations_and_text_cannot_reach_into_the_caption() {
+    let build = |caption: bool, dy: f64, text: bool| {
+        let theme = Theme::pigment().with_title_align(Align::Center).unwrap();
+        let mut figure = Figure::new(6.0, 4.0, theme).unwrap();
+        let mut axes = figure
+            .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap();
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions::default(),
+        )
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap();
+        let at = (AxisValue::Number(0.5), AxisValue::Number(0.0));
+        if text {
+            let options = umber_core::TextOptions {
+                align: Align::Center,
+                ..umber_core::TextOptions::default()
+            };
+            let lines = vec!["line"; dy as usize].join("\n");
+            axes.text(&lines, at, options).unwrap();
+        } else {
+            let options = AnnotateOptions {
+                offset: (0.0, -dy),
+                arrow: false,
+                ..AnnotateOptions::default()
+            };
+            axes.annotate("Annotation annotation", at, options).unwrap();
+        }
+        if caption {
+            figure.caption("Caption caption caption");
+        }
+        figure.to_scene(FontLibrary::global())
+    };
+    let (mut fits, mut refused) = (0, 0);
+    for dy in (5..70).step_by(5) {
+        match build(true, f64::from(dy), false) {
+            Ok(drawn) => {
+                fits += 1;
+                let note = only(&drawn, "Annotation annotation");
+                let caption = only(&drawn, "Caption caption caption");
+                assert!(ink(note).1 <= ink(caption).0, "dy {dy}: ink overlaps");
+            }
+            Err(error) => {
+                refused += 1;
+                let message = error.to_string();
+                assert!(message.contains("into the caption."), "{message}");
+                assert!(message.contains("the annotation \"Annotation annotation\""));
+                assert_eq!(error.hint(), Some("change align or offset."));
+                // Without a caption the same annotation is unchanged: drawn, or refused only
+                // for the figure edge.
+                if let Err(plain) = build(false, f64::from(dy), false) {
+                    assert!(!plain.to_string().contains("caption"), "{plain}");
+                }
+            }
+        }
+    }
+    assert!(fits > 0 && refused > 0, "{fits} fit, {refused} refused");
+    // Text written with `text()` goes through the same check: a block of lines centered on the
+    // plot's bottom reaches past the bottom edge without a caption and into it with one.
+    let mut found = false;
+    for lines in 1..40 {
+        let plain = build(false, f64::from(lines), true);
+        let captioned = build(true, f64::from(lines), true);
+        if let (Ok(_), Err(error)) = (&plain, &captioned) {
+            found = true;
+            assert!(
+                error.to_string().contains("pt into the caption."),
+                "{error}"
+            );
+        }
+        if let Err(error) = &plain {
+            assert!(error.to_string().contains("edge of the figure."), "{error}");
+        }
+    }
+    assert!(found, "no block of lines reaches only into the caption");
 }

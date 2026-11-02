@@ -1,1 +1,2 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# The line-break hint names captions among the texts that may hold line breaks.
+errors/line-breaks

@@ -225,3 +225,16 @@ def test_caption_matches_native_rendering() -> None:
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     expected.title(0, 0, "Panel", (0, 0.0))
     assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
+
+
+def test_an_annotation_cannot_reach_into_the_caption() -> None:
+    theme = ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER)
+    fig = ub.Figure(6, 4, theme=theme).caption("Caption caption caption")
+    ax = fig.add_axes().line([0, 1], [0.0, 1.0]).xlim(0, 1).ylim(0, 1)
+    ax.annotate("Annotation annotation", (0.5, 0.0), offset=(0.0, -25.0), arrow=False)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    message = str(caught.value)
+    assert message.startswith('Figure.to_svg(): the annotation "Annotation annotation" reaches ')
+    assert message.endswith(" pt into the caption.")
+    assert details(caught.value) == (None, "change align or offset.")

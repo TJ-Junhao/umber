@@ -2030,7 +2030,11 @@ fn scene_with_labels(
             resolved,
             layout,
             axes.annotations(),
-            (width, height),
+            draw::AnnotationCanvas {
+                width,
+                height,
+                caption_top: planned.header.caption.top(),
+            },
             context,
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;

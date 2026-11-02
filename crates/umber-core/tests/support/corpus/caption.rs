@@ -6,8 +6,8 @@ use std::fmt::Write as _;
 
 use umber_core::{
     Align, AxisData, ColorBy, ColorbarOptions, ColorbarPosition, Figure, FontLibrary, Grid,
-    GridIndex, LegendPosition, LegendStyle, LineOptions, PieOptions, Placement, PointColor,
-    ScaleKind, ScatterOptions, SizeSpec, Theme,
+    GridIndex, LegendMode, LegendPosition, LegendStyle, LineOptions, PieOptions, Placement,
+    PointColor, ScaleKind, ScatterOptions, SizeSpec, Theme,
 };
 
 use super::super::{Output, emit_scene, record, themes};
@@ -46,7 +46,13 @@ fn grid_with_bottom_legend(theme: Theme) -> Figure {
         .unwrap()
         .with_legend_position(LegendPosition::Bottom)
         .unwrap();
-    let mut figure = Figure::with_grid(9.0, 4.5, theme, Grid::new(1, 2).unwrap()).unwrap();
+    let mut figure = Figure::with_grid(
+        9.0,
+        4.5,
+        theme,
+        Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel),
+    )
+    .unwrap();
     figure.title("Learning rate schedules");
     for (col, title) in [(0, "Cosine"), (1, "Step")] {
         let mut axes = figure

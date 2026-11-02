@@ -1,4 +1,4 @@
-"""Line breaks in titles, subtitles, text() and annotate(), and their refusal elsewhere."""
+"""Line breaks in titles, subtitles, captions, text() and annotate(), and their refusal."""
 
 import re
 from collections.abc import Callable
@@ -10,7 +10,7 @@ import pytest
 import umber as ub
 from umber._errors import details
 
-LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, text() and annotate()."
+LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, captions, text() and annotate()."
 SVG = "{http://www.w3.org/2000/svg}"
 BAD = "Hours\nUTC"
 """Text of one line that holds a line break at index 5."""

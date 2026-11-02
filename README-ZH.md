@@ -268,7 +268,7 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
 
 ## 标题与 legend
 
-`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。`fig.caption(text)` 在整张图下方添加一条说明，例如脚注，布局会为它预留空间。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题或副标题分成多行，每行按标题的对齐方式对齐；其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
+`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。`fig.caption(text)` 在整张图下方添加一条说明，例如脚注，布局会为它预留空间。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题、副标题或 caption 分成多行，每行按标题的对齐方式对齐；其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
 
 `Theme.with_title_align(ub.Align.LEFT)` 设置标题对齐方式，也可使用 `CENTER` 和 `RIGHT`。subtitle 跟随对应 title 对齐。多 panel figure 的 merged legend 固定放在 figure title 和 subtitle 下方，跟随它们对齐，没有独立的位置设置。若要按 panel 放置 legend，请使用 `Legend.PER_PANEL`。
 

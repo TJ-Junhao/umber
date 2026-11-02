@@ -25,6 +25,8 @@ pub(crate) struct FigureCaption {
     pub text: Option<TextBlock>,
     /// The height the caption takes: its lines and the gap above them; 0 without a caption.
     room: f64,
+    /// The top of its first line's box; text drawn on the figure must end above it.
+    top: f64,
 }
 
 impl FigureCaption {
@@ -65,12 +67,18 @@ impl FigureCaption {
         Ok(FigureCaption {
             text: Some(block),
             room: CAPTION_GAP + height,
+            top,
         })
     }
 
     /// The height the layout reserves above the bottom padding: the gap and the lines.
     pub fn room(&self) -> f64 {
         self.room
+    }
+
+    /// The top of the caption's lines, `None` without a caption.
+    pub fn top(&self) -> Option<f64> {
+        self.text.as_ref().map(|_| self.top)
     }
 
     /// The height of the lines alone; 0 without a caption.

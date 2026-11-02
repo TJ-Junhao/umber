@@ -333,7 +333,8 @@ fn render_error(f: &Figure) -> Error {
 
 #[test]
 fn one_line_texts_refuse_line_breaks_when_rendered() {
-    let line_breaks = "line breaks are supported in titles, subtitles, text() and annotate().";
+    let line_breaks =
+        "line breaks are supported in titles, subtitles, captions, text() and annotate().";
     let mut f = single(Align::Left, "Title", "");
     f.single_axes_mut().xlabel("Hours\nUTC");
     let err = render_error(&f);
@@ -426,7 +427,8 @@ fn titles_refuse_other_control_characters_when_rendered() {
 
 #[test]
 fn checked_arguments_refuse_line_breaks_at_the_call() {
-    let line_breaks = "line breaks are supported in titles, subtitles, text() and annotate().";
+    let line_breaks =
+        "line breaks are supported in titles, subtitles, captions, text() and annotate().";
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
     let err = axes
@@ -804,7 +806,7 @@ fn a_system_family_name_is_one_line() {
             "DejaVu Sans\n",
             "Font.system(): family holds a line break at index 11; font family names are one \
              line.",
-            "line breaks are supported in titles, subtitles, text() and annotate().",
+            "line breaks are supported in titles, subtitles, captions, text() and annotate().",
         ),
         (
             "Inter\t",
