@@ -87,8 +87,11 @@ const BISECTION_STEPS: usize = 64;
 pub(crate) struct GridInput<'a> {
     /// The canvas width, in points.
     pub width: f64,
-    /// The canvas height, in points.
+    /// The canvas height the grid is laid out on, in points: the figure's less `caption`.
     pub height: f64,
+    /// The height under the grid that the figure caption takes, in points; 0 without one.
+    /// Errors name the figure's height, this included.
+    pub caption: f64,
     /// The top of the grid, below the figure header; the outer padding without a header.
     pub top: f64,
     /// The grid.
@@ -385,7 +388,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             .iter()
             .zip(bands)
             .map(|(panel, bands)| {
-                solve_single(panel, bands, canvas, input.top).map(|plot| PanelSlot {
+                solve_single(panel, bands, canvas, input.top, input.caption).map(|plot| PanelSlot {
                     plot,
                     aligned: plot,
                     header,
@@ -1248,7 +1251,12 @@ impl Rows {
             while whole > least && plot_height(whole - 1.0) >= least_plot {
                 whole -= 1.0;
             }
-            return Err(grid_too_short(input.context, input.height, whole, rows));
+            return Err(grid_too_short(
+                input.context,
+                input.height + input.caption,
+                whole + input.caption,
+                rows,
+            ));
         }
         let plot_height = plot_height(input.height);
         let mut row_top = Vec::with_capacity(rows);
@@ -3531,6 +3539,7 @@ mod tests {
             let input = GridInput {
                 width: 1000.0,
                 height: 1.0,
+                caption: 0.0,
                 top: PADDING,
                 grid: &grid,
                 theme: &theme,

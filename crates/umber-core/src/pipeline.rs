@@ -650,7 +650,8 @@ fn plan(
         .collect();
     let grid = GridInput {
         width: figure.width_in() * 72.0,
-        height: figure.height_in() * 72.0,
+        height: header.grid_height(figure),
+        caption: header.caption.room(),
         top: header.bottom,
         grid: figure.grid(),
         theme,
@@ -1858,7 +1859,8 @@ pub(crate) fn with_layout_input<R>(
         .collect();
     let grid = GridInput {
         width: figure.width_in() * 72.0,
-        height: figure.height_in() * 72.0,
+        height: header.grid_height(figure),
+        caption: header.caption.room(),
         top: header.bottom,
         grid: figure.grid(),
         theme: figure.theme(),
@@ -2749,6 +2751,7 @@ mod tests {
         let grid = GridInput {
             width: figure.width_in() * 72.0,
             height: figure.height_in() * 72.0,
+            caption: 0.0,
             top: figure_header(figure, &panels, lib).unwrap().bottom,
             grid: figure.grid(),
             theme,

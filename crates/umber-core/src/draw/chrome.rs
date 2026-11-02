@@ -50,7 +50,8 @@ pub(super) fn block_items(block: &TextBlock, color: Rgba) -> impl Iterator<Item 
     block.lines().map(move |line| text(line, color))
 }
 
-/// The figure title, subtitle and merged legend as one unclipped group, omitted when empty.
+/// The figure title, subtitle, merged legend and caption as one unclipped group, omitted when
+/// empty.
 pub(crate) fn figure_header(theme: &Theme, header: &crate::layout::FigureHeader) -> Option<Item> {
     let mut items = Vec::new();
     if let Some(title) = &header.title {
@@ -60,6 +61,9 @@ pub(crate) fn figure_header(theme: &Theme, header: &crate::layout::FigureHeader)
         items.extend(block_items(subtitle, theme.muted_color()));
     }
     super::legend::row(theme, header.legend.entries(), &mut items);
+    if let Some(caption) = &header.caption.text {
+        items.extend(block_items(caption, theme.muted_color()));
+    }
     (!items.is_empty()).then_some(Item::Group { clip: None, items })
 }
 

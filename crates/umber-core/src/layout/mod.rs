@@ -21,6 +21,7 @@
 
 #[cfg(test)]
 mod cache_tests;
+mod caption;
 mod colorbar;
 mod grid;
 mod inset;
@@ -34,6 +35,7 @@ mod program;
 mod title_tests;
 pub(crate) mod twin;
 
+pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
@@ -1178,11 +1180,15 @@ fn figure_height_hint(
 ///   hint names
 ///   the figure header, when present, the header parts the axes have and any Bottom legend (see
 ///   [`figure_too_short`]).
+///
+/// `caption` is the height under `frame` that the figure caption takes; the errors name the
+/// figure's height with it.
 fn solve_single(
     input: &LayoutInput<'_>,
     bands: &panel::PanelBands,
     frame: Frame,
     top: f64,
+    caption: f64,
 ) -> Result<Area> {
     let LayoutInput {
         legend, context, ..
@@ -1359,8 +1365,8 @@ fn solve_single(
         }
         return Err(figure_too_short(
             context,
-            frame.height,
-            plot_top - frame.y + least + below,
+            frame.height + caption,
+            plot_top - frame.y + least + below + caption,
             bands
                 .heading
                 .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),

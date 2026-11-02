@@ -53,6 +53,16 @@ With `by=`, give no `color=` or `label=` (each group takes its own); `hist` need
 
 Marks with a non-empty `label=` appear in the legend. Choose the style with `ax.legend(ub.LegendStyle.HEADER | CHIPS | DIRECT | NONE)`; `position=ub.LegendPosition.TOP_LEFT | TOP_RIGHT | RIGHT | BOTTOM | BEST` applies to `HEADER` and `CHIPS` (omit it with `DIRECT`, which labels each line at its end). In a grid the Cartesian panels share one legend under the figure title (`ub.Legend.MERGED`, the default), so positions apply to single-panel figures and to `legend=ub.Legend.PER_PANEL`. A pie's legend always belongs to its own panel.
 
+## Footnotes
+
+Put a footnote under the chart with `fig.caption("…")`, not with `ax.text()` at data coordinates: the layout reserves its room, so it never covers the plot and does not move when the data changes. It follows the title alignment, `"\n"` breaks lines, and a line wider than the figure raises `StyleError`.
+
+```python
+ax = ub.Figure(6, 4).add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
+ax.figure.caption("Up to 1,000 epochs; patience 100.")
+svg = ax.figure.to_svg()
+```
+
 ## Colors, colormaps and color scales
 
 `ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.

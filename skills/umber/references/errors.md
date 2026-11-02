@@ -42,7 +42,7 @@ Common cases:
 - **Values that must be finite.** Drop or fill NaN and infinite values first, unless the method documents NaN as a gap (lines and areas break at NaN; points with NaN are left out).
 - **Log axes.** Every value on a log axis must be positive.
 - **Labels or legends that do not fit.** The error names the text and the room it needs, titles and axis labels included; make the figure larger, shorten the text, use a smaller `size=` or font scale, or move the legend.
-- **Line breaks and control characters.** `"\n"` is allowed only in titles, subtitles, `text` and `annotate`; elsewhere, and for `\t`, `\r` and other control characters anywhere, the call raises. Split the text into a title and a subtitle, or use spaces.
+- **Line breaks and control characters.** `"\n"` is allowed only in titles, subtitles, captions, `text` and `annotate`; elsewhere, and for `\t`, `\r` and other control characters anywhere, the call raises. Split the text into a title and a subtitle, or use spaces.
 - **Pie slices.** More slices than palette colors need `colors=`; small slices whose labels cannot be placed should be merged into "Other" or shown with `legend(ub.LegendStyle.HEADER)`.
 - **Fonts without bold.** Titles and direct legend labels are bold. Pass `bold=` to `ub.Font.from_file`, choose a family with a bold face, or create the font with `bold_fallback=True`.
 - **`by=` with `color=` or `label=`.** Each group already takes the next palette color and its name as the label; drop those arguments.
@@ -54,7 +54,7 @@ These errors cannot be found when the mark is added, because they depend on the 
 | Class | Raised when | Change |
 |---|---|---|
 | `ub.StyleError` | A fixed or percent tick format cannot label any value in the axis or colorbar range, such as `TickFormat.fixed(0)` on values between 0.1 and 0.2. | Use more decimals, or set the ticks explicitly. |
-| `ub.StyleError` | A title, subtitle, axis label, tick label, legend label or colorbar does not fit its room, or the figure is too small for the plot area. The message names the text and both widths. | Make the figure larger, shorten the text, or use a smaller `size=`. |
+| `ub.StyleError` | A title, subtitle, caption, axis label, tick label, legend label or colorbar does not fit its room, or the figure is too small for the plot area. The message names the text and both widths. | Make the figure larger, shorten the text, or use a smaller `size=`. |
 | `ub.StyleError` | Bubbles do not fit the plot space: a marker is as long as the plot. The message names a figure size that holds them. | Make the figure at least that large. |
 | `ub.StyleError` | Bubbles need limits beyond the supported numeric range. A larger figure does not help. | Set explicit `xlim()` and `ylim()`, which clip the bubbles. |
 | `ub.StyleError` | `text()` or `annotate()` is placed outside the axes limits, or an annotation reaches past the edge of the figure or has no room for its arrow. | Include the point in `xlim()` and `ylim()`, or change `offset=` and `align=`, or pass `arrow=False`. |

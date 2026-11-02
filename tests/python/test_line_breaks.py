@@ -278,6 +278,7 @@ def test_text_of_several_lines_refuses_other_control_characters(
         ("Axes.subtitle()", lambda: ub.Figure().add_axes().subtitle(bad)),
         ("Figure.title()", lambda: ub.Figure().title(bad)),
         ("Figure.subtitle()", lambda: ub.Figure().subtitle(bad)),
+        ("Figure.caption()", lambda: ub.Figure().caption(bad)),
         ("PieAxes.title()", lambda: ub.Figure().add_pie_axes().title(bad)),
         ("Axes.text()", lambda: ub.Figure().add_axes().text(bad, (0.5, 0.5))),
         ("Axes.annotate()", lambda: ub.Figure().add_axes().annotate(bad, (0.5, 0.5))),
