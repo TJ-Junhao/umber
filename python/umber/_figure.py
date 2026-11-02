@@ -313,6 +313,52 @@ class Figure:
             )
             return self
 
+    def caption(self, text: str, *, size: Size = Size.AUTO) -> Self:
+        r"""Set the figure caption, a note under everything else in the figure.
+
+        The caption sits below the bottom axis labels and any bottom legend or colorbar,
+        inside the figure's padding. The layout reserves its height, so the panels shrink to
+        make room for it and it never covers anything. Use it for footnotes that belong to
+        the figure rather than to a point in the data. A later call replaces the caption.
+
+        It aligns like the figure title, as set by ``Theme.with_title_align()``, and is
+        drawn in the theme's muted text color at the tick label size. ``Size.times(k)``
+        multiplies that size and ``Size.pt(p)`` uses exactly p points.
+
+        ``"\n"`` breaks the caption into lines, 1.2 sizes apart, each aligned by the theme's
+        title alignment; blank lines are kept.
+
+        Args:
+            text: The caption, at most 1,000 characters. An empty string removes it.
+            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
+                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+
+        Returns:
+            This figure.
+
+        Raises:
+            TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
+            StyleError: If ``text`` is too long, or holds a lone surrogate, a control
+                character other than ``"\n"`` (such as a tab) or a line or paragraph
+                separator. Rendering raises it if the widest line is wider than the figure's
+                room inside its padding, or if the figure is too short to hold the caption
+                and a plot.
+
+        Example:
+            >>> import umber as ub
+            >>> fig = ub.Figure().caption("Long: up to 1,000 epochs; patience 100.")
+            >>> fig.caption("Source: field survey") is fig
+            True
+        """
+        with api_call():
+            context = "Figure.caption()"
+            _args.require_text(context, "text", text)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.figure_caption(
+                _args.multiline_text(context, "text", text), _size.native(size)
+            )
+            return self
+
     def add_axes(
         self,
         *,

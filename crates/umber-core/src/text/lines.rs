@@ -1,6 +1,6 @@
 //! The characters drawn text may hold, and where it breaks into lines.
 //!
-//! Only `"\n"` breaks a line, and only in titles, subtitles and the text of
+//! Only `"\n"` breaks a line, and only in titles, subtitles, captions and the text of
 //! [`AxesMut::text`](crate::AxesMut::text) and [`AxesMut::annotate`](crate::AxesMut::annotate);
 //! every other text is one line. No text holds another control character (U+0000 to U+001F,
 //! U+007F to U+009F) or a line or paragraph separator (U+2028, U+2029): fonts have no glyphs
@@ -10,7 +10,7 @@ use crate::Error;
 
 /// The hint of the error for a line break in text that is one line.
 const LINE_BREAK_HINT: &str =
-    "line breaks are supported in titles, subtitles, text() and annotate().";
+    "line breaks are supported in titles, subtitles, captions, text() and annotate().";
 
 /// Whether a text may break into lines at `"\n"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

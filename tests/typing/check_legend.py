@@ -10,6 +10,8 @@ import umber as ub
 fig = ub.Figure()
 assert_type(fig.title("Stations"), ub.Figure)
 assert_type(fig.subtitle("Daily measurements"), ub.Figure)
+assert_type(fig.caption("Up to 1,000 epochs"), ub.Figure)
+assert_type(fig.caption("Up to 1,000 epochs", size=ub.Size.pt(9)), ub.Figure)
 assert_type(ub.Theme.PIGMENT.with_title_align(ub.Align.CENTER), ub.Theme)
 assert_type(ub.Theme.PIGMENT.with_legend_position(ub.LegendPosition.RIGHT), ub.Theme)
 
@@ -36,3 +38,4 @@ ub.Theme.PIGMENT.with_legend_position(ub.AUTO)  # type: ignore[arg-type]  # pyri
 ub.Theme.PIGMENT.with_legend_position("right")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 fig.title(42)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 fig.subtitle(None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+fig.caption(None)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

@@ -40,16 +40,27 @@ const ARROW_ROOM: f64 = TEXT_GAP + POINT_GAP + HEAD_LENGTH;
 /// The hint of an annotation whose point lies outside the limits.
 const LIMITS_HINT: &str = "set xlim/ylim to include it, or move the point.";
 
-/// The scene items of `annotations` on the axes `resolved` laid out as `layout`, on a canvas
-/// `canvas` (width, height) points large: for each annotation in order, its arrow, if any, then
-/// its text. `None` without annotations.
+/// The canvas annotations must stay on: its size in points, and the top of the figure caption
+/// when it has one, which they may not reach into.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Canvas {
+    /// The width.
+    pub width: f64,
+    /// The height.
+    pub height: f64,
+    /// The top of the caption's first line; `None` without a caption.
+    pub caption_top: Option<f64>,
+}
+
+/// The scene items of `annotations` on the axes `resolved` laid out as `layout`, on `canvas`:
+/// for each annotation in order, its arrow, if any, then its text. `None` without annotations.
 ///
 /// # Errors
 ///
 /// For the first annotation, in order, that cannot be drawn, under `context`:
 /// - `Error::Data` when its point is at a category no mark of the axes has;
 /// - `Error::Style` when its point lies outside the limits of either axis, when its text
-///   reaches past an edge of the canvas, or when less than [`ARROW_ROOM`] lies between its
+///   reaches past an edge of the canvas or down into the caption, or when less than [`ARROW_ROOM`] lies between its
 ///   text and its point for an arrow;
 /// - as [`annotation_text`] when its text cannot be laid out.
 pub(crate) fn items(
@@ -58,7 +69,7 @@ pub(crate) fn items(
     resolved: &Resolved,
     layout: &Layout,
     annotations: &[Annotation],
-    canvas: (f64, f64),
+    canvas: Canvas,
     context: &'static str,
 ) -> Result<Option<Item>> {
     if annotations.is_empty() {
@@ -208,22 +219,28 @@ fn anchor((dx, dy): (f64, f64)) -> (f64, f64) {
     SIDES[sector as usize % SIDES.len()]
 }
 
-/// Checks that the box of `placed` lies on the canvas `(width, height)`: `Error::Style` under
-/// `context` naming the edge it reaches furthest past, and by how much.
+/// Checks that the box of `placed` lies on the canvas and above its caption: `Error::Style`
+/// under `context` naming the edge it reaches furthest past, or the caption it reaches into
+/// instead of the bottom edge, and by how much.
 fn check_canvas(
     annotation: &Annotation,
     placed: &Placed,
-    (width, height): (f64, f64),
+    canvas: Canvas,
     context: &'static str,
 ) -> Result<()> {
     let [left, top, right, bottom] = placed.bounds;
+    // The caption lies above the bottom edge: the box may not reach its first line.
+    let (floor, floor_name) = match canvas.caption_top {
+        Some(caption_top) => (caption_top, "into the caption"),
+        None => (canvas.height, "past the bottom edge of the figure"),
+    };
     let past = [
-        (-left, "left"),
-        (-top, "top"),
-        (right - width, "right"),
-        (bottom - height, "bottom"),
+        (-left, "past the left edge of the figure"),
+        (-top, "past the top edge of the figure"),
+        (right - canvas.width, "past the right edge of the figure"),
+        (bottom - floor, floor_name),
     ];
-    let Some((reach, edge)) = past
+    let Some((reach, place)) = past
         .into_iter()
         .filter(|(reach, _)| *reach > 0.0)
         .max_by(|a, b| a.0.total_cmp(&b.0))
@@ -233,7 +250,7 @@ fn check_canvas(
     Err(Error::style(
         context,
         format!(
-            "{} reaches {} pt past the {edge} edge of the figure.",
+            "{} reaches {} pt {place}.",
             name(annotation),
             number((reach * 10.0).ceil() / 10.0)
         ),

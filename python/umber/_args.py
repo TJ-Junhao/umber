@@ -7,8 +7,8 @@ encoded as UTF-8 or holds a character text cannot hold raises ``StyleError``. Ev
 carries the parameter name and a hint. Range checks on the values themselves belong to the
 core library, not to these functions.
 
-Only ``"\n"`` breaks a line, and only in titles, subtitles and the text of ``Axes.text()`` and
-``Axes.annotate()`` (``multiline_text``); all other text is one line (``text``,
+Only ``"\n"`` breaks a line, and only in titles, subtitles, captions and the text of
+``Axes.text()`` and ``Axes.annotate()`` (``multiline_text``); all other text is one line (``text``,
 ``checked_text``). No text may hold another control character (U+0000 to U+001F, U+007F to
 U+009F) or a line or paragraph separator (U+2028, U+2029).
 """
@@ -56,7 +56,9 @@ _TOO_LONG_HINT: Final = "shorten the text; it would not fit the figure."
 _SURROGATE_HINT: Final = (
     'remove the character, or replace it: value.encode("utf-8", "replace").decode().'
 )
-_LINE_BREAK_HINT: Final = "line breaks are supported in titles, subtitles, text() and annotate()."
+_LINE_BREAK_HINT: Final = (
+    "line breaks are supported in titles, subtitles, captions, text() and annotate()."
+)
 _SEPARATORS: Final = "\u2028\u2029"
 # What a refused character is, after its code point, where its code point alone does not say.
 _CHARACTER_NAMES: Final = {
@@ -374,7 +376,7 @@ def text(context: str, name: str, value: object, *, one_line: str, hint: str = _
 def multiline_text(context: str, name: str, value: object) -> str:
     r"""Check a text argument that ``"\n"`` breaks into lines and return it as a plain ``str``.
 
-    Titles, subtitles and the text of ``Axes.text()`` and ``Axes.annotate()`` take lines.
+    Titles, subtitles, captions and the text of ``Axes.text()`` and ``Axes.annotate()`` take lines.
 
     Args:
         context: The API call, such as ``"Axes.title()"``.

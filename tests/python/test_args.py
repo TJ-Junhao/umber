@@ -167,7 +167,7 @@ def test_checked_text_uses_the_given_label_and_class() -> None:
     )
 
 
-LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, text() and annotate()."
+LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, captions, text() and annotate()."
 
 
 def test_text_of_one_line_refuses_a_line_break() -> None:

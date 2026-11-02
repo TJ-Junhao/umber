@@ -51,6 +51,8 @@
 //!   source.
 //! - Figures with several axes on a grid, and the errors of the grid calls (in
 //!   `corpus/grid.rs`).
+//! - Figure captions under a single axes, a grid with bottom legends, a bottom colorbar and a
+//!   pie, in each title alignment, and the errors of a caption (in `corpus/caption.rs`).
 //!
 //! Not covered:
 //!
@@ -96,6 +98,7 @@ mod corpus {
     pub mod r#box;
     pub mod bubbles;
     pub mod by;
+    pub mod caption;
     pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
@@ -218,6 +221,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::contour::cases(&lib, &mut sink);
     corpus::twin_y::cases(&lib, &mut sink);
     corpus::line_breaks::cases(&lib, &mut sink);
+    corpus::caption::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
