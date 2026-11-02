@@ -959,7 +959,7 @@ impl Theme {
     }
 
     /// The marker diameter, as drawn, of a scatter mark that asks for `size`, and of its legend
-    /// dot: `size` resolved against the marker size (see [`SizeSpec`]), finite and within
+    /// marker: `size` resolved against the marker size (see [`SizeSpec`]), finite and within
     /// `0..=MAX_MARKER_SIZE`. The end dots of direct labels take [`SizeSpec::Auto`].
     pub(crate) fn drawn_marker_size(&self, size: SizeSpec) -> f32 {
         drawn_size(size.resolve(self.marker_size), MAX_MARKER_SIZE)

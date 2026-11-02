@@ -74,6 +74,39 @@ fn dot(x: f64, y: f64, diameter: f64, color: Rgba) -> Item {
     }
 }
 
+/// A filled `marker` of nominal `diameter`, drawn as in a plot and fitted to the square of side
+/// `diameter` centered on `(x, y)`: a shape that extends beyond that square, like a triangle or a
+/// diamond, is shrunk to fit, and every shape is centered on its bounding box.
+fn marker_swatch(marker: Marker, x: f64, y: f64, diameter: f64, color: Rgba) -> Item {
+    if marker == Marker::Circle {
+        return dot(x, y, diameter, color);
+    }
+    // The extent of a marker shape: its bounds and its longer side; none for an empty path.
+    let extent = |shape: &Path| {
+        shape
+            .bounds()
+            .map(|(min, max)| (min, max, (max.x - min.x).max(max.y - min.y)))
+    };
+    let Some((_, _, side)) = extent(&marker_shape(marker, diameter as f32)) else {
+        return dot(x, y, diameter, color);
+    };
+    let fit = (diameter as f32 / side).min(1.0);
+    let shape = marker_shape(marker, diameter as f32 * fit);
+    let Some((min, max, _)) = extent(&shape) else {
+        return dot(x, y, diameter, color);
+    };
+    let center = point(x, y);
+    let path = shape.translated(
+        center.x - (min.x + max.x) / 2.0,
+        center.y - (min.y + max.y) / 2.0,
+    );
+    Item::Fill {
+        path,
+        paint: Paint::Solid(color),
+        rule: FillRule::NonZero,
+    }
+}
+
 /// The pill of a chip, filling the box `pill`: a rounded rectangle whose radius is half its height,
 /// filled with [`chip_tint`] of the series `color`.
 fn chip(pill: Area, color: Rgba) -> Item {
@@ -90,7 +123,7 @@ fn chip_tint(color: Rgba) -> Rgba {
     color.scale_alpha(CHIP_TINT)
 }
 
-/// The swatch of `entry` inside its box. Fills, dots and bubble references are in the swatch's
+/// The swatch of `entry` inside its box. Fills, markers and bubble references are in the swatch's
 /// fill color, which is the series color for marks without a translucent fill (see
 /// [`SwatchBox::fill`](crate::layout::SwatchBox::fill)); lines, area edges, error bars and the
 /// outlines of boxes and violins are in the series color, dash and width.
@@ -138,7 +171,9 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 ],
             }
         }
-        Swatch::Dot { .. } => dot(b.x + b.width / 2.0, b.center_y, b.width, b.fill),
+        Swatch::Dot { marker, .. } => {
+            marker_swatch(marker, b.x + b.width / 2.0, b.center_y, b.width, b.fill)
+        }
         Swatch::ErrorBar { vertical, width } => {
             // Each end cap reaches half a stroke beyond its centre line along the bar.
             let inset = f64::from(width) / 2.0;
@@ -350,6 +385,107 @@ mod tests {
         assert!((f64::from(x0) - dot.x).abs() < 1e-3);
         assert!((f64::from(x1 - x0) - dot.width).abs() < 1e-3);
         assert!((f64::from(y0 + y1) / 2.0 - dot.center_y).abs() < 1e-3);
+    }
+
+    /// A figure with one labelled scatter of `marker`, 10 pt across, in `theme`.
+    fn marker_layout(theme: Theme, marker: Marker) -> (Theme, Layout) {
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .scatter(
+                AxisData::Numbers(vec![0.5]),
+                &[1.5],
+                ScatterOptions {
+                    label: "Points".to_owned(),
+                    marker,
+                    size: crate::SizeSpec::pt(10.0).unwrap(),
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        (
+            theme,
+            crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global()).1,
+        )
+    }
+
+    /// The vertices of a polygon path.
+    fn vertices(path: &Path) -> Vec<crate::geometry::Point> {
+        path.verbs()
+            .iter()
+            .filter_map(|v| match v {
+                crate::geometry::PathVerb::MoveTo(p) | crate::geometry::PathVerb::LineTo(p) => {
+                    Some(*p)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The marker swatch of the only row entry, and the entry.
+    fn only_swatch<'a>(items: &'a [Item], layout: &'a Layout) -> (&'a Item, &'a RowEntry) {
+        let entry = &layout.legend.entries()[0];
+        (&items[usize::from(entry.chip.is_some())], entry)
+    }
+
+    #[test]
+    fn marker_swatches_take_the_marker_shape_in_every_legend_style() {
+        // Pigment lists the entry in a header row, Midnight in chips, Graphite in a row too.
+        for theme in [Theme::pigment(), Theme::midnight(), Theme::graphite()] {
+            for marker in [
+                Marker::Square,
+                Marker::Triangle,
+                Marker::Diamond,
+                Marker::Cross,
+            ] {
+                let (theme, layout) = marker_layout(theme.clone(), marker);
+                let Some(Item::Group { items, .. }) = legend(&theme, &layout) else {
+                    panic!("a legend group");
+                };
+                let (item, entry) = only_swatch(&items, &layout);
+                let b = entry.swatch;
+                assert!(matches!(item, Item::Fill { paint: Paint::Solid(c), .. } if *c == b.fill));
+                let Item::Fill { path, .. } = item else {
+                    unreachable!()
+                };
+                // The swatch fits its box and is centered in it.
+                let (x0, y0, x1, y1) = bounds(item);
+                let (w, h) = (f64::from(x1 - x0), f64::from(y1 - y0));
+                assert!(w <= b.width + 1e-3 && h <= b.height + 1e-3, "{marker:?}");
+                assert!((f64::from(x0 + x1) / 2.0 - (b.x + b.width / 2.0)).abs() < 1e-3);
+                assert!((f64::from(y0 + y1) / 2.0 - b.center_y).abs() < 1e-3);
+                // Its outline is the marker the plot draws, scaled: same vertices about the
+                // center of the bounds.
+                let plot = marker_shape(marker, b.width as f32);
+                let (lo, hi) = plot.bounds().unwrap();
+                let scale = (y1 - y0) / (hi.y - lo.y);
+                let (swatch, plot) = (vertices(path), vertices(&plot));
+                assert_eq!(swatch.len(), plot.len());
+                for (s, p) in swatch.iter().zip(&plot) {
+                    let (px, py) = (
+                        (p.x - (lo.x + hi.x) / 2.0) * scale,
+                        (p.y - (lo.y + hi.y) / 2.0) * scale,
+                    );
+                    assert!((s.x - (b.x + b.width / 2.0) as f32 - px).abs() < 1e-3);
+                    assert!((s.y - b.center_y as f32 - py).abs() < 1e-3);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn circle_swatches_are_unchanged() {
+        for theme in [Theme::pigment(), Theme::midnight(), Theme::graphite()] {
+            let (theme, layout) = marker_layout(theme, Marker::Circle);
+            let Some(Item::Group { items, .. }) = legend(&theme, &layout) else {
+                panic!("a legend group");
+            };
+            let (item, entry) = only_swatch(&items, &layout);
+            let b = entry.swatch;
+            let expected = marker_shape(Marker::Circle, b.width as f32)
+                .translated((b.x + b.width / 2.0) as f32, b.center_y as f32);
+            assert!(matches!(item, Item::Fill { path, .. } if *path == expected));
+        }
     }
 
     #[test]
@@ -809,7 +945,8 @@ mod tests {
         assert_eq!(
             row[0].swatch.kind,
             Swatch::Dot {
-                diameter: theme.marker_size()
+                diameter: theme.marker_size(),
+                marker: Marker::Circle,
             }
         );
         let direct = &layout.direct;
