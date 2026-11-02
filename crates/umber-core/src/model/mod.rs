@@ -48,7 +48,9 @@ pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 #[cfg(test)]
 mod share_tests;
 
-pub use annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions};
+pub use annotation::{
+    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
+};
 pub use axes::Axes;
 pub use axes_mut::{AxesMut, BaselineVisibility, ColorbarOptions};
 pub use axis_data::AxisData;

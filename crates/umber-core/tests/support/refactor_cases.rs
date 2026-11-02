@@ -53,6 +53,8 @@
 //!   `corpus/grid.rs`).
 //! - Figure captions under a single axes, a grid with bottom legends, a bottom colorbar and a
 //!   pie, in each title alignment, and the errors of a caption (in `corpus/caption.rs`).
+//! - Text at positions in the plot, in each corner and pinned to an annotation's arrow (in
+//!   `corpus/in_plot.rs`).
 //!
 //! Not covered:
 //!
@@ -114,6 +116,7 @@ mod corpus {
     pub mod hist;
     pub mod hist_variants;
     pub mod horizontal;
+    pub mod in_plot;
     pub mod inputs;
     pub mod kde;
     pub mod legend;
@@ -222,6 +225,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::twin_y::cases(&lib, &mut sink);
     corpus::line_breaks::cases(&lib, &mut sink);
     corpus::caption::cases(&lib, &mut sink);
+    corpus::in_plot::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

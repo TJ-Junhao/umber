@@ -4,7 +4,9 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use super::annotation::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions};
+use super::annotation::{
+    AnnotateOptions, Annotation, AnnotationPlacement, TextOptions, TextPosition,
+};
 use super::axes::Axes;
 use super::axes::LabelSource;
 use super::axis_data::{AxisData, SharedValues, XySeries};
@@ -36,7 +38,9 @@ use super::validation::{
 };
 use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
-use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat};
+use crate::{
+    Align, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat,
+};
 
 /// Whether an axes draws its baseline, independently of any shared axis settings.
 /// This changes drawing only, not the baseline position or the marks that grow from it.
@@ -3498,12 +3502,14 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
-    /// Writes `text` at the point `at`, x then y, each in the values of its axis: a number on a
-    /// linear or log axis, a category name (at the category's centre) on a category axis, a
-    /// time on a time axis. The aligned edge of the text, or its centre, is at the point, and so
-    /// is the vertical centre of the text. The text is drawn over the marks in the theme's text
-    /// color at its body size unless `options` say otherwise, and changes neither the limits nor
-    /// the layout; overlap with other elements is not checked.
+    /// Writes `text` at the position `at`: a data point, x then y, each in the values of its
+    /// axis (a number on a linear or log axis, a category name, at the category's centre, on a
+    /// category axis, a time on a time axis), or an [`InPlot`](crate::InPlot) position as
+    /// fractions of the plot area, which ignores the scales and the limits and, on twin axes,
+    /// is the shared plot area. The aligned edge of the text, or its centre, is at the
+    /// position, and so is the vertical centre of the text. The text is drawn over the marks in
+    /// the theme's text color at its body size unless `options` say otherwise, and changes
+    /// neither the limits nor the layout; overlap with other elements is not checked.
     ///
     /// `"\n"` breaks the text into lines: the first line is placed as a text of one line, each
     /// further line 1.2 sizes below the one before it, and each line is aligned on the point by
@@ -3511,29 +3517,31 @@ impl<'a> AxesMut<'a> {
     ///
     /// Errors leave the axes unchanged: an empty `text` is `Error::Usage`; a control character
     /// other than `"\n"`, or a line or paragraph separator (U+2028, U+2029), in `text` is
-    /// `Error::Style`, naming `text`; a coordinate that does
+    /// `Error::Style`, naming `text`; a coordinate of a data point that does
     /// not suit its axis, or is not finite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not
     /// positive on a log axis, is `Error::Data`, naming `at`. Rendering fails with
-    /// `Error::Style` when the point lies outside the limits or the text reaches past the
-    /// figure, and with `Error::Data` when no mark of the axes has the category of the point.
+    /// `Error::Style` when a data point lies outside the limits or the text reaches past the
+    /// figure or down into the caption, and with `Error::Data` when no mark of the axes has the
+    /// category of the point.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{Align, AxisValue, Figure, ScaleKind, TextOptions, Theme};
+    /// use umber_core::{Align, AxisValue, Figure, InPlot, ScaleKind, TextOptions, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let options = TextOptions { align: Align::Center, ..TextOptions::default() };
     /// axes.text("centre", (AxisValue::Number(0.5), AxisValue::Number(0.5)), options)?;
-    /// assert_eq!(axes.annotations().len(), 1);
+    /// axes.text("corner", InPlot::new(0.02, 0.96)?, TextOptions::default())?;
+    /// assert_eq!(axes.annotations().len(), 2);
     /// assert!(axes.text("", (AxisValue::Number(0.5), AxisValue::Number(0.5)), options).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn text(
         &mut self,
         text: &str,
-        at: (AxisValue, AxisValue),
+        at: impl Into<TextPosition>,
         options: TextOptions,
     ) -> Result<&mut Self> {
         let axes = self.axes_mut();
@@ -3541,7 +3549,7 @@ impl<'a> AxesMut<'a> {
             "Axes.text()",
             (axes.x, axes.y),
             text,
-            at,
+            at.into(),
             AnnotationPlacement::At(options.align),
             options.size,
             options.color,
@@ -3552,7 +3560,13 @@ impl<'a> AxesMut<'a> {
 
     /// Writes `text` `options.offset` points away from the point `at` (x to the right, y
     /// upwards), on the side the offset points to, and with `options.arrow` an arrow from the
-    /// text to the point. The point is given as for [`AxesMut::text`].
+    /// text to the point. The point is given as for [`AxesMut::text`], as a data point.
+    ///
+    /// With `options.text_at`, an [`InPlot`](crate::InPlot) position, the text is instead written
+    /// there, as fractions of the plot area: the centre of the text, and so its vertical centre,
+    /// is at that position, and the arrow, if any, runs from the text to the data point. The
+    /// arrow is routed as for an offset. The offset must then be the default, `(0, 12)`: giving
+    /// both is an error, since they choose the position of the text in different ways.
     ///
     /// The direction of the offset, in eight sectors of 45°, decides which part of the text is
     /// at the offset point: going round from above, the bottom centre, bottom left, middle left,
@@ -3568,15 +3582,16 @@ impl<'a> AxesMut<'a> {
     /// it points left, centred when it points straight up or down. The arrow starts at the box
     /// around all lines.
     ///
-    /// Errors leave the axes unchanged: those of [`AxesMut::text`], then an offset that is not
-    /// finite or is zero is `Error::Style`, naming `offset`. Rendering fails as for
+    /// Errors leave the axes unchanged: those of [`AxesMut::text`], then a `text_at` together
+    /// with an offset other than the default is `Error::Usage`, naming `text_at`, and an offset
+    /// that is not finite or is zero is `Error::Style`, naming `offset`. Rendering fails as for
     /// [`AxesMut::text`], and with `Error::Style` when less than 10 pt lie between the text and
     /// the point for an arrow.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{AnnotateOptions, AxisValue, Figure, ScaleKind, Theme};
+    /// use umber_core::{AnnotateOptions, AxisValue, Figure, InPlot, ScaleKind, Theme};
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
@@ -3584,8 +3599,12 @@ impl<'a> AxesMut<'a> {
     /// let options = AnnotateOptions { offset: (24.0, 18.0), ..AnnotateOptions::default() };
     /// axes.annotate("Peak", at.clone(), options)?;
     /// let still = AnnotateOptions { offset: (0.0, 0.0), ..options };
-    /// assert!(axes.annotate("Peak", at, still).is_err());
-    /// assert_eq!(axes.annotations().len(), 1);
+    /// assert!(axes.annotate("Peak", at.clone(), still).is_err());
+    /// let pinned = AnnotateOptions { text_at: Some(InPlot::new(0.9, 0.9)?), ..Default::default() };
+    /// axes.annotate("Peak", at.clone(), pinned)?;
+    /// let both = AnnotateOptions { offset: (24.0, 18.0), ..pinned };
+    /// assert!(axes.annotate("Peak", at, both).is_err());
+    /// assert_eq!(axes.annotations().len(), 2);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn annotate(
@@ -3594,20 +3613,29 @@ impl<'a> AxesMut<'a> {
         at: (AxisValue, AxisValue),
         options: AnnotateOptions,
     ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.annotate()";
         let axes = self.axes_mut();
-        let placement = AnnotationPlacement::Offset {
-            offset: options.offset,
-            arrow: options.arrow,
+        let placement = match options.text_at {
+            None => AnnotationPlacement::Offset {
+                offset: options.offset,
+                arrow: options.arrow,
+            },
+            Some(text_at) => AnnotationPlacement::InPlot {
+                at: text_at,
+                align: options.align.unwrap_or(Align::Center),
+                arrow: options.arrow,
+            },
         };
         let annotation = Annotation::new(
-            "Axes.annotate()",
+            CONTEXT,
             (axes.x, axes.y),
             text,
-            at,
+            at.into(),
             placement,
             options.size,
             options.color,
         )?;
+        options.check_text_at(CONTEXT)?;
         axes.annotations.push(annotation);
         Ok(self)
     }

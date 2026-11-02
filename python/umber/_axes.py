@@ -48,6 +48,7 @@ from umber._enums import (
     Step,
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError, details, new_error
+from umber._in_plot import InPlot
 from umber._report import api_call
 from umber._scale import Scale
 from umber._series import Distribution, Series
@@ -127,6 +128,7 @@ _FORMAT_HINT: Final = (
 _ALIGN_HINT: Final = _members_hint(Align)
 _AT_HINT: Final = "pass a tuple (x, y) of values of the axes, such as (2.0, 7.5)."
 _OFFSET_HINT: Final = "pass a tuple (dx, dy) of points, such as (0.0, 12.0)."
+_TEXT_AT_HINT: Final = "pass ub.InPlot(x, y), such as ub.InPlot(0.9, 0.9), or leave it out."
 
 
 @final
@@ -3290,17 +3292,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def text(
         self,
         text: str,
-        at: tuple[X, Y],
+        at: tuple[X, Y] | InPlot,
         *,
         align: Align = Align.LEFT,
         size: Size = Size.AUTO,
         color: Color = Color.AUTO,
     ) -> Self:
-        r"""Write text at a data position.
+        r"""Write text at a data position, or at a position in the plot.
 
         The aligned edge of the text, or its centre, is at the point, and so is the vertical
         centre of the text. The text is drawn over the marks and changes neither the limits nor
         the layout; overlap with other elements is not checked.
+
+        With ``at=InPlot(x, y)`` the point is a fraction of the plot area, whatever the scales
+        and limits are, so a note stays in its corner when the data range changes. Such text
+        works the same on category, log and time axes, and on twin axes the plot area is the
+        shared one. It must still lie inside the figure and above the caption.
 
         ``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
         each further line 1.2 sizes below the one before it, and each line is aligned on the
@@ -3310,7 +3317,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             text: The text, at least one and at most 1,000 characters.
             at: The point ``(x, y)``, each in the values of its axis: a number on a linear or
                 log axis, a category name (the category's centre) on a category axis, a time
-                on a time axis.
+                on a time axis. Or an ``InPlot`` position, as fractions of the plot area.
             align: Which edge of the text, or its centre, is at the point.
             size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
                 after font scaling, and ``Size.pt(p)`` uses points without font scaling.
@@ -3321,13 +3328,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type, including ``at`` when it is not a
-                pair or a coordinate does not suit its axis.
+                pair or an ``InPlot``, or a coordinate does not suit its axis.
             DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
                 positive on a log axis. Rendering raises it when no mark of these axes has the
                 category of the point.
             StyleError: If ``text`` is too long, or holds a control character other than
                 ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-                when the point lies outside the limits or the text reaches past the figure.
+                when a data point lies outside the limits or the text reaches past the figure
+                or down into the caption.
             UsageError: If ``text`` is empty.
 
         Example:
@@ -3336,16 +3344,28 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.text("Target", (5, 5), align=ub.Align.CENTER)
             >>> bars = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [3, 5])
             >>> bars = bars.text("Best", ("Q2", 5.5))
+            >>> ax = ax.text("n = 5 folds", ub.InPlot(0.02, 0.96))
         """
         with api_call():
             context = "Axes.text()"
             _args.require_text(context, "text", text)
-            pair = self._point_types(context, at)
+            position = at if isinstance(at, InPlot) else self._point_types(context, at)
             style = instance(context, "align", align, Align, _ALIGN_HINT)
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
-            point = self._point(context, pair)
             content = _args.multiline_text(context, "text", text)
+            if isinstance(position, InPlot):
+                self._native.text_in_plot(
+                    self._target,
+                    self._col,
+                    content,
+                    (position.x, position.y),
+                    style.value,
+                    _size.native(size),
+                    spec,
+                )
+                return self
+            point = self._point(context, position)
             self._native.text(
                 self._target, self._col, content, point, style.value, _size.native(size), spec
             )
@@ -3357,6 +3377,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         at: tuple[X, Y],
         *,
         offset: tuple[float, float] = (0.0, 12.0),
+        text_at: InPlot | Auto = AUTO,
+        align: Align | Auto = AUTO,
         arrow: bool = True,
         size: Size = Size.AUTO,
         color: Color = Color.AUTO,
@@ -3377,11 +3399,23 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         right-aligned when it points left, centred when it points straight up or down. The
         arrow starts at the box around all lines.
 
+        With ``text_at=InPlot(x, y)`` the text is instead written at that position in the plot,
+        as for ``text()`` with ``align`` (the centre by default): the aligned edge of the
+        text, or its centre, is at it, and the arrow, if any, runs from the text to the data
+        point ``at``, routed as for an offset. Use it for a note in a
+        fixed place of the plot that points to a point of the data.
+
         Args:
             text: The text, at least one and at most 1,000 characters.
-            at: The point ``(x, y)``, given as for ``text()``.
+            at: The point ``(x, y)``, given as for ``text()``; always a data point.
             offset: Where the text is from the point, in points: x to the right, y upwards.
                 It must not be ``(0, 0)``.
+            text_at: ``Auto`` places the text by ``offset``. An ``InPlot`` position places it
+                there, as fractions of the plot area; ``offset`` must then be left at its
+                default.
+            align: With ``text_at``, which edge of the text, or its centre, is at that
+                position, and how its lines are aligned; ``Auto`` centres it. Without
+                ``text_at`` the direction of ``offset`` decides, and an ``align`` is an error.
             arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
                 between them.
             size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
@@ -3399,26 +3433,44 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             StyleError: If ``text`` is too long or holds a character ``text()`` refuses, or
                 ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
                 when less than 10 pt lie between the text and the point for an arrow.
-            UsageError: If ``text`` is empty.
+            UsageError: If ``text`` is empty, or ``text_at`` is given together with an
+                ``offset`` other than the default, or ``align`` is given without ``text_at``.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes().line([0, 1, 2, 3], [2, 5, 3, 4])
             >>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
             >>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
+            >>> ax = ax.annotate("Best", (1, 5), text_at=ub.InPlot(0.8, 0.9))
+            >>> ax = ax.annotate("Top", (1, 5), text_at=ub.InPlot(0.98, 0.95), align=ub.Align.RIGHT)
         """
         with api_call():
             context = "Axes.annotate()"
             _args.require_text(context, "text", text)
             pair = self._point_types(context, at)
             shift = _offset_argument(context, offset)
+            placed = (
+                None
+                if text_at is AUTO
+                else instance(context, "text_at", text_at, InPlot, _TEXT_AT_HINT)
+            )
+            edge = None if align is AUTO else instance(context, "align", align, Align, _ALIGN_HINT)
             drawn = _args.boolean(context, "arrow", arrow)
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
             point = self._point(context, pair)
             content = _args.multiline_text(context, "text", text)
             self._native.annotate(
-                self._target, self._col, content, point, shift, drawn, _size.native(size), spec
+                self._target,
+                self._col,
+                content,
+                point,
+                shift,
+                None if placed is None else (placed.x, placed.y),
+                None if edge is None else edge.value,
+                drawn,
+                _size.native(size),
+                spec,
             )
             return self
 

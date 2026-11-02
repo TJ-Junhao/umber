@@ -104,6 +104,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/hist.rs
   crates/umber-core/tests/support/corpus/hist_variants.rs
   crates/umber-core/tests/support/corpus/horizontal.rs
+  crates/umber-core/tests/support/corpus/in_plot.rs
   crates/umber-core/tests/support/corpus/inputs.rs
   crates/umber-core/tests/support/corpus/kde.rs
   crates/umber-core/tests/support/corpus/legend.rs

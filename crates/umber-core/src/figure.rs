@@ -29,7 +29,8 @@
 //! ```
 
 pub use crate::model::{
-    AnnotateOptions, Annotation, AnnotationPlacement, TextOptions, ValueLabels,
+    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
+    ValueLabels,
 };
 pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,

@@ -130,7 +130,7 @@ True
 ### `umber.Axes.annotate`
 
 ```text
-Axes.annotate(self, text: str, at: tuple[X, Y], *, offset: tuple[float, float]=(0.0, 12.0), arrow: bool=True, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
+Axes.annotate(self, text: str, at: tuple[X, Y], *, offset: tuple[float, float]=(0.0, 12.0), text_at: InPlot | Auto=AUTO, align: Align | Auto=AUTO, arrow: bool=True, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
 ```
 
 Write text a fixed distance from a data position, with an arrow to it.
@@ -149,11 +149,23 @@ of the text that faces the point: left-aligned when the offset points right,
 right-aligned when it points left, centred when it points straight up or down. The
 arrow starts at the box around all lines.
 
+With ``text_at=InPlot(x, y)`` the text is instead written at that position in the plot,
+as for ``text()`` with ``align`` (the centre by default): the aligned edge of the
+text, or its centre, is at it, and the arrow, if any, runs from the text to the data
+point ``at``, routed as for an offset. Use it for a note in a
+fixed place of the plot that points to a point of the data.
+
 Args:
     text: The text, at least one and at most 1,000 characters.
-    at: The point ``(x, y)``, given as for ``text()``.
+    at: The point ``(x, y)``, given as for ``text()``; always a data point.
     offset: Where the text is from the point, in points: x to the right, y upwards.
         It must not be ``(0, 0)``.
+    text_at: ``Auto`` places the text by ``offset``. An ``InPlot`` position places it
+        there, as fractions of the plot area; ``offset`` must then be left at its
+        default.
+    align: With ``text_at``, which edge of the text, or its centre, is at that
+        position, and how its lines are aligned; ``Auto`` centres it. Without
+        ``text_at`` the direction of ``offset`` decides, and an ``align`` is an error.
     arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
         between them.
     size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
@@ -171,7 +183,8 @@ Raises:
     StyleError: If ``text`` is too long or holds a character ``text()`` refuses, or
         ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
         when less than 10 pt lie between the text and the point for an arrow.
-    UsageError: If ``text`` is empty.
+    UsageError: If ``text`` is empty, or ``text_at`` is given together with an
+        ``offset`` other than the default, or ``align`` is given without ``text_at``.
 
 Example:
 
@@ -180,6 +193,8 @@ Example:
 >>> ax = ub.Figure().add_axes().line([0, 1, 2, 3], [2, 5, 3, 4])
 >>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
 >>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
+>>> ax = ax.annotate("Best", (1, 5), text_at=ub.InPlot(0.8, 0.9))
+>>> ax = ax.annotate("Top", (1, 5), text_at=ub.InPlot(0.98, 0.95), align=ub.Align.RIGHT)
 ```
 
 ### `umber.Axes.area`
@@ -1807,14 +1822,19 @@ Example:
 ### `umber.Axes.text`
 
 ```text
-Axes.text(self, text: str, at: tuple[X, Y], *, align: Align=Align.LEFT, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
+Axes.text(self, text: str, at: tuple[X, Y] | InPlot, *, align: Align=Align.LEFT, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
 ```
 
-Write text at a data position.
+Write text at a data position, or at a position in the plot.
 
 The aligned edge of the text, or its centre, is at the point, and so is the vertical
 centre of the text. The text is drawn over the marks and changes neither the limits nor
 the layout; overlap with other elements is not checked.
+
+With ``at=InPlot(x, y)`` the point is a fraction of the plot area, whatever the scales
+and limits are, so a note stays in its corner when the data range changes. Such text
+works the same on category, log and time axes, and on twin axes the plot area is the
+shared one. It must still lie inside the figure and above the caption.
 
 ``"\n"`` breaks the text into lines: the first line is placed as a text of one line,
 each further line 1.2 sizes below the one before it, and each line is aligned on the
@@ -1824,7 +1844,7 @@ Args:
     text: The text, at least one and at most 1,000 characters.
     at: The point ``(x, y)``, each in the values of its axis: a number on a linear or
         log axis, a category name (the category's centre) on a category axis, a time
-        on a time axis.
+        on a time axis. Or an ``InPlot`` position, as fractions of the plot area.
     align: Which edge of the text, or its centre, is at the point.
     size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
         after font scaling, and ``Size.pt(p)`` uses points without font scaling.
@@ -1835,13 +1855,14 @@ Returns:
 
 Raises:
     TypeError: If an argument has the wrong type, including ``at`` when it is not a
-        pair or a coordinate does not suit its axis.
+        pair or an ``InPlot``, or a coordinate does not suit its axis.
     DataError: If a coordinate is not finite, beyond 1e300 in magnitude or not
         positive on a log axis. Rendering raises it when no mark of these axes has the
         category of the point.
     StyleError: If ``text`` is too long, or holds a control character other than
         ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-        when the point lies outside the limits or the text reaches past the figure.
+        when a data point lies outside the limits or the text reaches past the figure
+        or down into the caption.
     UsageError: If ``text`` is empty.
 
 Example:
@@ -1852,6 +1873,7 @@ Example:
 >>> ax = ax.text("Target", (5, 5), align=ub.Align.CENTER)
 >>> bars = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [3, 5])
 >>> bars = bars.text("Best", ("Q2", 5.5))
+>>> ax = ax.text("n = 5 folds", ub.InPlot(0.02, 0.96))
 ```
 
 ### `umber.Axes.title`
@@ -4316,6 +4338,61 @@ Hist.STEP
 The outline of the bars only, as one stepped line in the theme's line width: up the
 first bin's low edge, along the top of every bin, and down the last bin's high edge. With
 groups, each group's outline is normalized on its own.
+
+## `umber.InPlot`
+
+```text
+InPlot(x: float, y: float)
+```
+
+An immutable position in the plot, given as fractions of the plot area.
+
+``InPlot(0, 0)`` is the lower left corner of the plot area and ``InPlot(1, 1)`` the upper
+right, whatever the scales and limits of the axes are, so text placed there stays in its
+corner when the data range changes. Pass it as ``at`` to ``Axes.text()``, or as
+``text_at`` to ``Axes.annotate()``. Positions compare equal when both fractions are equal.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.InPlot(0.02, 0.96)
+InPlot(0.02, 0.96)
+>>> ub.InPlot(1, 0) == ub.InPlot(1.0, 0.0)
+True
+```
+
+### `umber.InPlot.x`
+
+```text
+InPlot.x(self) -> float
+```
+
+The fraction of the plot's width, from the left edge.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.InPlot(0.25, 0.75).x
+0.25
+```
+
+### `umber.InPlot.y`
+
+```text
+InPlot.y(self) -> float
+```
+
+The fraction of the plot's height, from the bottom edge.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.InPlot(0.25, 0.75).y
+0.75
+```
 
 ## `umber.Legend`
 

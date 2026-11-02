@@ -243,7 +243,7 @@ left.figure.save_png("weather.png")
 
 ## 文字与标注
 
-`ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。
+`ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。`at=ub.InPlot(x, y)` 改用绘图区的比例位置，数据变化时文字仍留在原来的角落；`annotate(..., text_at=ub.InPlot(x, y))` 把文字写在该位置，箭头仍指向数据位置。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。
 
 在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。
 

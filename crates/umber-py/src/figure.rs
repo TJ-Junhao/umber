@@ -27,7 +27,7 @@ use crate::cmap::Cmap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyInt};
 use umber_core::HeatmapOptions;
-use umber_core::{Align, AnnotateOptions, TextOptions, ValueLabels};
+use umber_core::{Align, AnnotateOptions, InPlot, TextOptions, ValueLabels};
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
@@ -2004,8 +2004,34 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Writes `text` at the position `(x, y)` in the plot, fractions of its width and height from
+    /// its lower left corner.
+    fn text_in_plot(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        text: &str,
+        at: (f64, f64),
+        align: i64,
+        size: SizeArg,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let options = TextOptions {
+            align: enum_value::<Align>(align)?,
+            size: size_spec(size)?,
+            color: color_spec(color)?,
+            ..Default::default()
+        };
+        let at = InPlot::new(at.0, at.1).map_err(core_error)?;
+        self.axes(row, col)?
+            .text(text, at, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Writes `text` `offset` points away from the point `(x, y)`, given as for `text`, with an
-    /// arrow to the point when `arrow` holds.
+    /// arrow to the point when `arrow` holds; with `text_at`, the position `(x, y)` in the plot
+    /// as for `text_in_plot`, it writes the text there instead, aligned by `align` (the centre without one).
     fn annotate(
         &mut self,
         row: AxesRow,
@@ -2013,14 +2039,22 @@ impl Figure {
         text: &str,
         at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
         offset: (f64, f64),
+        text_at: Option<(f64, f64)>,
+        align: Option<i64>,
         arrow: bool,
         size: SizeArg,
         color: ColorArg,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.annotate()";
         let at = (coordinate(CONTEXT, &at.0)?, coordinate(CONTEXT, &at.1)?);
+        let text_at = text_at
+            .map(|(x, y)| InPlot::new(x, y))
+            .transpose()
+            .map_err(core_error)?;
         let options = AnnotateOptions {
             offset,
+            text_at,
+            align: align.map(enum_value::<Align>).transpose()?,
             arrow,
             size: size_spec(size)?,
             color: color_spec(color)?,

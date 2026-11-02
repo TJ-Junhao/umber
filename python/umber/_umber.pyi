@@ -63,6 +63,7 @@ __all__ = [
     "kde_curve",
     "ecdf_steps",
     "check_alpha",
+    "check_in_plot",
     "check_log_base",
     "check_palette_index",
     "check_size_points",
@@ -138,6 +139,7 @@ def check_log_base(base: float) -> None: ...
 # the factor) and 2 is Size.pt() (value: the points).
 type _SizeArg = tuple[int, float]
 
+def check_in_plot(x: float, y: float) -> None: ...
 def check_size_times(factor: float) -> None: ...
 def check_size_points(points: float) -> None: ...
 
@@ -790,6 +792,18 @@ class Figure:
         size: _SizeArg,
         color: _ColorArg,
     ) -> None: ...
+    # `at` is a position in the plot: fractions of its width and height from its lower left corner.
+    def text_in_plot(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        text: str,
+        at: tuple[float, float],
+        align: int,
+        size: _SizeArg,
+        color: _ColorArg,
+    ) -> None: ...
+    # `text_at` is a position in the plot for the text instead of `offset`; `align`: None is centre.
     def annotate(
         self,
         row: int | TwinAxes,
@@ -797,6 +811,8 @@ class Figure:
         text: str,
         at: tuple[float | str | int, float | str | int],
         offset: tuple[float, float],
+        text_at: tuple[float, float] | None,
+        align: int | None,
         arrow: bool,
         size: _SizeArg,
         color: _ColorArg,
