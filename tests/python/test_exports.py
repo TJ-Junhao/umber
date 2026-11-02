@@ -29,6 +29,7 @@ EXPECTED = [
     "Font",
     "GridLines",
     "Hist",
+    "InPlot",
     "Legend",
     "LegendPosition",
     "LegendStyle",

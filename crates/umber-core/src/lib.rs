@@ -86,9 +86,9 @@
 //!   [`StripOptions`], [`SwarmMark`] and [`SwarmOptions`];
 //! - panel kinds: [`Panel`] distinguishes Cartesian axes from [`PiePanel`]; circular panels
 //!   are edited with [`PieAxesMut`] and [`PieOptions`];
-//! - text at data positions: [`TextOptions`], [`AnnotateOptions`], the read-only
-//!   [`Annotation`] with its [`AnnotationPlacement`] that [`Axes::annotations`] returns, and the
-//!   [`ValueLabels`] written on bars;
+//! - text at data positions or in the plot: [`TextOptions`], [`AnnotateOptions`], [`InPlot`],
+//!   [`TextPosition`], the read-only [`Annotation`] with its [`AnnotationPlacement`] that
+//!   [`Axes::annotations`] returns, and the [`ValueLabels`] written on bars;
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -169,7 +169,10 @@ pub use downsample::m4_indices;
 pub use error::{Error, ErrorMessage, Result};
 pub use figure::StackedAreaMark;
 pub use figure::pdf_pages;
-pub use figure::{AnnotateOptions, Annotation, AnnotationPlacement, TextOptions, ValueLabels};
+pub use figure::{
+    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
+    ValueLabels,
+};
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,

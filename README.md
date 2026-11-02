@@ -243,7 +243,7 @@ left.figure.save_png("weather.png")
 
 ## Text and annotations
 
-`ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. Text and annotations never change the axis limits. `"\n"` breaks them into lines: the first line sits where a single line would, and the others follow below it.
+`ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. `at=ub.InPlot(x, y)` places text at fractions of the plot area instead, so a note stays in its corner when the data changes, and `annotate(..., text_at=ub.InPlot(x, y))` writes the text there with the arrow still pointing at the data position. Text and annotations never change the axis limits. `"\n"` breaks them into lines: the first line sits where a single line would, and the others follow below it.
 
 `annotate=True` on `bar`, `grouped_bar` and `stacked_bar` writes each bar's value; automatic limits grow so that every value fits, and `format=` chooses how values are written. With explicit limits, a value that does not fit raises `StyleError` naming the bar.
 

@@ -13,6 +13,7 @@ mod enums;
 mod errors;
 mod figure;
 mod font;
+mod in_plot;
 mod scale;
 mod size;
 mod test_support;
@@ -58,6 +59,7 @@ fn _umber(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(color::check_alpha, m)?)?;
     m.add_function(wrap_pyfunction!(color::check_palette_index, m)?)?;
     m.add_function(wrap_pyfunction!(scale::check_log_base, m)?)?;
+    m.add_function(wrap_pyfunction!(in_plot::check_in_plot, m)?)?;
     m.add_function(wrap_pyfunction!(size::check_size_times, m)?)?;
     m.add_function(wrap_pyfunction!(size::check_size_points, m)?)?;
     m.add_function(wrap_pyfunction!(ticks::check_tick_format, m)?)?;

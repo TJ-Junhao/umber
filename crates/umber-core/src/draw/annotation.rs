@@ -1,5 +1,5 @@
-//! Text at data positions: where [`Annotation`]s sit, their arrows, and the checks that keep
-//! them on their axes and on the figure.
+//! Text at data positions and positions in the plot: where [`Annotation`]s sit, their arrows,
+//! and the checks that keep them on their axes and on the figure.
 //!
 //! An annotation's first line is placed by its line box, its advance width by the ascent and
 //! descent of its font. Text of [`AnnotationPlacement::At`] has the line's aligned edge, or its
@@ -11,17 +11,23 @@
 //! point for `Offset` (left-aligned when the offset points right, right-aligned when it points
 //! left, centred when it points straight up or down). The arrow runs from [`TEXT_GAP`] beyond
 //! the text box's edge to [`POINT_GAP`] short of the point.
+//!
+//! A position in the plot is given as fractions of the plot area, from its lower left corner
+//! (see [`in_plot`]); no scale or limit applies to it. Text of `At` at such a position is placed
+//! as at a data point. Text of [`AnnotationPlacement::InPlot`] is placed as `At` with a centred
+//! alignment at its position, and its arrow, routed as for `Offset`, runs to the data point of
+//! the annotation.
 
 use super::chrome::{block_items, segment};
 use super::mapping::{AxisMap, AxisMaps, axis_position, point};
 use crate::error::{number, quoted};
 use crate::geometry::Path;
-use crate::layout::{Layout, TextBlock, annotation_text};
-use crate::model::{Annotation, AnnotationPlacement, AxisValue};
+use crate::layout::{Area, Layout, TextBlock, annotation_text};
+use crate::model::{Annotation, AnnotationPlacement, AxisValue, InPlot, TextPosition};
 use crate::resolve::{AxisScale, Resolved, ResolvedAxis};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle};
 use crate::text::SceneFonts;
-use crate::{ColorSpec, Error, Result, Rgba, Theme};
+use crate::{Align, ColorSpec, Error, Result, Rgba, Theme};
 
 /// The width of an arrow's shaft, in points.
 const SHAFT_WIDTH: f32 = 0.75;
@@ -59,9 +65,9 @@ pub(crate) struct Canvas {
 ///
 /// For the first annotation, in order, that cannot be drawn, under `context`:
 /// - `Error::Data` when its point is at a category no mark of the axes has;
-/// - `Error::Style` when its point lies outside the limits of either axis, when its text
-///   reaches past an edge of the canvas or down into the caption, or when less than [`ARROW_ROOM`] lies between its
-///   text and its point for an arrow;
+/// - `Error::Style` when its data point lies outside the limits of either axis, when its text
+///   reaches past an edge of the canvas or down into the caption, or when less than
+///   [`ARROW_ROOM`] lies between its text and its point for an arrow;
 /// - as [`annotation_text`] when its text cannot be laid out.
 pub(crate) fn items(
     theme: &Theme,
@@ -78,11 +84,13 @@ pub(crate) fn items(
     let maps = AxisMaps::new(&resolved.x, &resolved.y, layout.plot);
     let mut items = Vec::new();
     for annotation in annotations {
-        let (x, y) = annotation.at();
-        let at = (
-            position(annotation, "x", &resolved.x, maps.x, x, context)?,
-            position(annotation, "y", &resolved.y, maps.y, y, context)?,
-        );
+        let at = match annotation.at() {
+            TextPosition::Data(x, y) => (
+                position(annotation, "x", &resolved.x, maps.x, x, context)?,
+                position(annotation, "y", &resolved.y, maps.y, y, context)?,
+            ),
+            TextPosition::InPlot(at) => in_plot(layout.plot, *at),
+        };
         let block = annotation_text(
             lib,
             theme,
@@ -90,10 +98,17 @@ pub(crate) fn items(
             annotation.text(),
             annotation.size(),
         )?;
-        let placed = place(annotation.placement(), block, at);
+        let placement = annotation.placement();
+        let spot = match placement {
+            AnnotationPlacement::InPlot { at: text_at, .. } => in_plot(layout.plot, text_at),
+            AnnotationPlacement::At(_) | AnnotationPlacement::Offset { .. } => at,
+        };
+        let placed = place(placement, block, spot);
         check_canvas(annotation, &placed, canvas, context)?;
         let color = text_color(theme, annotation.color());
-        if let AnnotationPlacement::Offset { arrow: true, .. } = annotation.placement() {
+        if let AnnotationPlacement::Offset { arrow: true, .. }
+        | AnnotationPlacement::InPlot { arrow: true, .. } = placement
+        {
             arrow(annotation, &placed, at, color, context, &mut items)?;
         }
         items.extend(block_items(&placed.block, color));
@@ -101,11 +116,20 @@ pub(crate) fn items(
     Ok(Some(Item::Group { clip: None, items }))
 }
 
+/// The plot coordinates of the position `at` in the plot `plot`: its fractions of the width from
+/// the left edge and of the height from the bottom edge, so `(0, 0)` is the lower left corner.
+fn in_plot(plot: Area, at: InPlot) -> (f64, f64) {
+    (
+        plot.x + at.x() * plot.width,
+        plot.bottom() - at.y() * plot.height,
+    )
+}
+
 /// How errors name `annotation`: as the text of `text()` or the annotation of `annotate()`.
 fn name(annotation: &Annotation) -> String {
     let kind = match annotation.placement() {
         AnnotationPlacement::At(_) => "text",
-        AnnotationPlacement::Offset { .. } => "annotation",
+        AnnotationPlacement::Offset { .. } | AnnotationPlacement::InPlot { .. } => "annotation",
     };
     format!("the {kind} {}", quoted(annotation.text()))
 }
@@ -157,8 +181,9 @@ struct Placed {
     bounds: [f64; 4],
 }
 
-/// The text `block` of an annotation placed as `placement` for its point `(x, y)`, in plot
-/// points: its first line where a text of one line would be, further lines below it.
+/// The text `block` of an annotation placed as `placement` for `(x, y)`, in plot points: its
+/// first line where a text of one line would be, further lines below it. `(x, y)` is the point
+/// of the annotation for `Offset`, and the position of the text for `At` and `InPlot`.
 fn place(placement: AnnotationPlacement, mut block: TextBlock, (x, y): (f64, f64)) -> Placed {
     let width = block.width();
     let first = block.first();
@@ -167,27 +192,31 @@ fn place(placement: AnnotationPlacement, mut block: TextBlock, (x, y): (f64, f64
         f64::from(first.layout.descent()),
     );
     let height = ascent + descent;
-    let (left, top) = match placement {
-        AnnotationPlacement::At(align) => {
-            let top = y - height / 2.0;
-            block.place(top + ascent, |line| align.position(line, x, x));
-            (align.position(width, x, x), top)
-        }
-        AnnotationPlacement::Offset { offset, .. } => {
-            let (share_x, share_y) = anchor(offset);
-            let left = x + offset.0 - share_x * width;
-            let top = y - offset.1 - share_y * height;
-            // Each line is aligned on the side of the box that faces the point.
-            block.place(top + ascent, |line| {
-                let slack = width - line;
-                if slack > 0.0 {
-                    left + share_x * slack
-                } else {
-                    left
-                }
-            });
-            (left, top)
-        }
+    let (left, top) = if let AnnotationPlacement::Offset { offset, .. } = placement {
+        let (share_x, share_y) = anchor(offset);
+        let left = x + offset.0 - share_x * width;
+        let top = y - offset.1 - share_y * height;
+        // Each line is aligned on the side of the box that faces the point.
+        block.place(top + ascent, |line| {
+            let slack = width - line;
+            if slack > 0.0 {
+                left + share_x * slack
+            } else {
+                left
+            }
+        });
+        (left, top)
+    } else {
+        // Text in the plot with an arrow is centred on its position.
+        let align = match placement {
+            AnnotationPlacement::At(align) => align,
+            AnnotationPlacement::Offset { .. } | AnnotationPlacement::InPlot { .. } => {
+                Align::Center
+            }
+        };
+        let top = y - height / 2.0;
+        block.place(top + ascent, |line| align.position(line, x, x));
+        (align.position(width, x, x), top)
     };
     let bottom = top + height + block.below_first();
     Placed {
@@ -255,7 +284,18 @@ fn check_canvas(
             number((reach * 10.0).ceil() / 10.0)
         ),
     )
-    .with_hint("change align or offset."))
+    .with_hint(canvas_hint(annotation)))
+}
+
+/// The hint of an annotation whose text reaches past the canvas: what moves the text.
+fn canvas_hint(annotation: &Annotation) -> &'static str {
+    match (annotation.placement(), annotation.at()) {
+        (AnnotationPlacement::At(_), TextPosition::InPlot(_)) => "change align or at.",
+        (AnnotationPlacement::InPlot { .. }, _) => "change text_at.",
+        (AnnotationPlacement::At(_) | AnnotationPlacement::Offset { .. }, _) => {
+            "change align or offset."
+        }
+    }
 }
 
 /// Pushes the arrow of `annotation` from the box of `placed` to its point `at`, in `color`:
@@ -288,7 +328,14 @@ fn arrow(
                 number(ARROW_ROOM)
             ),
         )
-        .with_hint("pass a larger offset, or arrow=False."));
+        .with_hint(match annotation.placement() {
+            AnnotationPlacement::InPlot { .. } => {
+                "move text_at away from the point, or pass arrow=False."
+            }
+            AnnotationPlacement::At(_) | AnnotationPlacement::Offset { .. } => {
+                "pass a larger offset, or arrow=False."
+            }
+        }));
     }
     let at = |distance: f64| (centre.0 + ux * distance, centre.1 + uy * distance);
     let start = at(edge + TEXT_GAP);

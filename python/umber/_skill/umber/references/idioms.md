@@ -63,6 +63,8 @@ ax.figure.caption("Up to 1,000 epochs; patience 100.")
 svg = ax.figure.to_svg()
 ```
 
+For text at a fixed place in the plot, use `at=ub.InPlot(x, y)`, not data coordinates: `x` and `y` are fractions of the plot area (0, 0 is the lower left corner), so a note such as `ax.text("n = 5 folds", at=ub.InPlot(0.02, 0.96))` stays put when the data range changes. `ax.annotate("best", (x, y), text_at=ub.InPlot(0.9, 0.9))` writes its text there, with the arrow to the data point.
+
 ## Colors, colormaps and color scales
 
 `ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.

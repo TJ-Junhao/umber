@@ -1886,9 +1886,10 @@ pub(crate) fn with_layout_input<R>(
 /// - the colorbar of the axes, when it has one of its own.
 ///
 /// The shared colorbars and the figure header follow the panels. Last, over everything else,
-/// comes the text each axes writes at data positions, with its arrows, as one unclipped group
-/// per axes that has any, in the order of the axes ([`draw::annotations`]): it may reach past
-/// its cells, and no later panel, colorbar or header covers it.
+/// comes the text each axes writes at data positions or positions in the plot, with its
+/// arrows, as one unclipped group per axes that has any, in the order of the axes
+/// ([`draw::annotations`]): it may reach past its cells, and no later panel, colorbar or header
+/// covers it.
 ///
 /// The scene's fonts are the figure's ([`layout::figure_fonts`]): the theme's title font, then
 /// its body font.
