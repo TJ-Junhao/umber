@@ -47,6 +47,7 @@ pub struct Figure {
     grid: Grid,
     title: String,
     subtitle: String,
+    caption: String,
     /// The placed axes, in row-major order of their top-left cells. No two cover one cell.
     panels: Vec<PanelIndex>,
     /// Kind-specific storage keeps mutable handles independent of row-major insertion.
@@ -60,9 +61,10 @@ pub struct Figure {
     color_groups: BTreeMap<usize, share::ColorGroup>,
     /// Settings of every shared colorbar.
     colorbar: super::ColorbarOptions,
-    /// The figure title and subtitle's per-call sizes.
+    /// The figure title, subtitle and caption's per-call sizes.
     title_size: SizeSpec,
     subtitle_size: SizeSpec,
+    caption_size: SizeSpec,
 }
 
 impl Figure {
@@ -106,6 +108,7 @@ impl Figure {
             grid,
             title: String::new(),
             subtitle: String::new(),
+            caption: String::new(),
             panels: Vec::new(),
             axes: Vec::new(),
             pies: Vec::new(),
@@ -115,6 +118,7 @@ impl Figure {
             colorbar: super::ColorbarOptions::default(),
             title_size: SizeSpec::Auto,
             subtitle_size: SizeSpec::Auto,
+            caption_size: SizeSpec::Auto,
         })
     }
 
@@ -227,6 +231,33 @@ impl Figure {
         self.subtitle_sized(text, SizeSpec::Auto)
     }
 
+    /// Sets the figure caption, a note under everything else in the figure: below the bottom
+    /// axis labels and any bottom legend or colorbar, inside the outer padding. A later call
+    /// replaces the caption.
+    ///
+    /// The layout reserves the caption's height, so the panels shrink to make room for it.
+    /// The caption aligns like the figure title, by the theme's title alignment, and is set in
+    /// the muted text color at the tick label size. `"\n"` breaks the text into lines, 1.2
+    /// sizes apart, each aligned on its own. An empty text removes it.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
+    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.caption("Up to 1,000 epochs; patience 100.");
+    /// assert_eq!(figure.caption_text(), "Up to 1,000 epochs; patience 100.");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn caption(&mut self, text: &str) -> &mut Self {
+        self.caption_sized(text, SizeSpec::Auto)
+    }
+
     /// The figure title; empty when none is set.
     ///
     /// # Examples
@@ -257,6 +288,22 @@ impl Figure {
     #[must_use]
     pub fn subtitle_text(&self) -> &str {
         &self.subtitle
+    }
+
+    /// The figure caption; empty when none is set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Theme};
+    ///
+    /// let figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// assert_eq!(figure.caption_text(), "");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn caption_text(&self) -> &str {
+        &self.caption
     }
 
     /// The grid.
@@ -1100,6 +1147,24 @@ impl Figure {
         self
     }
 
+    /// Sets the figure caption and its size, relative to the theme's tick label size or in
+    /// points. See [`Figure::caption`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// figure.caption_sized("Source: field survey", SizeSpec::pt(9.0)?);
+    /// assert_eq!(figure.caption_text(), "Source: field survey");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn caption_sized(&mut self, text: &str, size: SizeSpec) -> &mut Self {
+        self.caption = text.to_owned();
+        self.caption_size = size;
+        self
+    }
+
     /// The figure title's per-call size.
     pub(crate) fn title_size(&self) -> SizeSpec {
         self.title_size
@@ -1108,6 +1173,11 @@ impl Figure {
     /// The figure subtitle's per-call size.
     pub(crate) fn subtitle_size(&self) -> SizeSpec {
         self.subtitle_size
+    }
+
+    /// The figure caption's per-call size.
+    pub(crate) fn caption_size(&self) -> SizeSpec {
+        self.caption_size
     }
 
     /// Whether the grid shows one figure-wide legend instead of panel legends.

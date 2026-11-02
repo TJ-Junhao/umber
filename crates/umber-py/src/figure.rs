@@ -516,6 +516,12 @@ impl Figure {
         Ok(())
     }
 
+    /// Sets the figure caption under everything else in the figure.
+    fn figure_caption(&mut self, text: &str, size: SizeArg) -> PyResult<()> {
+        self.0.caption_sized(text, size_spec(size)?);
+        Ok(())
+    }
+
     /// Adds the numeric right-hand y axes without occupying another grid cell.
     fn twin_y(&mut self, row: AxesRow, col: i64, kind: i64, base: f64) -> PyResult<TwinAxes> {
         let scale = scale_kind(kind, base)?;

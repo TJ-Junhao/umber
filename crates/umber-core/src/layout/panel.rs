@@ -312,6 +312,7 @@ pub(super) fn text_size_hint(size: crate::SizeSpec) -> &'static str {
 pub(super) enum TextKind {
     Title,
     Subtitle,
+    Caption,
     XLabel,
     YLabel,
     LeftYLabel,
@@ -319,10 +320,25 @@ pub(super) enum TextKind {
 }
 
 impl TextKind {
+    /// The remedy for this text too wide: a caption, which is prose, can also be broken into
+    /// lines.
+    fn size_hint(self, size: crate::SizeSpec) -> &'static str {
+        match (self, size) {
+            (Self::Caption, crate::SizeSpec::Auto | crate::SizeSpec::Times(_)) => {
+                "break the line with \"\\n\", make the figure wider or lower the font scale with Theme.with_font_scale()."
+            }
+            (Self::Caption, crate::SizeSpec::Points(_)) => {
+                "break the line with \"\\n\", make the figure wider or pass a smaller size=."
+            }
+            _ => text_size_hint(size),
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Self::Title => "title",
             Self::Subtitle => "subtitle",
+            Self::Caption => "caption",
             Self::XLabel => "x axis label",
             Self::YLabel => "y axis label",
             Self::LeftYLabel => "left y axis label",
@@ -361,7 +377,7 @@ pub(super) fn check_text_width(
         && label.width > room + super::inset::CONTAINMENT_TOLERANCE
     {
         let (width, room) = super::widths(label.width, room);
-        let hint = text_size_hint(size);
+        let hint = kind.size_hint(size);
         let name = kind.name();
         let container = container.name();
         return Err(crate::Error::style(
@@ -419,6 +435,8 @@ pub(crate) struct FigureHeader {
     pub title: Option<TextBlock>,
     /// The subtitle in the body style.
     pub subtitle: Option<TextBlock>,
+    /// The caption under the grid, placed against the bottom padding.
+    pub caption: super::FigureCaption,
     /// The merged legend, with each wrapped row aligned with the figure title.
     pub legend: LegendRow,
     /// Where the grid starts, including the gap below a non-empty header.
@@ -464,6 +482,7 @@ impl FigureHeader {
         Ok(FigureHeader {
             title: placed.title,
             subtitle: placed.subtitle,
+            caption: super::FigureCaption::measure(figure, lib)?,
             legend: row
                 .aligned(box_.left, box_.right, theme.title_align())
                 .placed(placed.row),
@@ -471,7 +490,13 @@ impl FigureHeader {
         })
     }
 
-    /// Checks that titles and merged entries fit the inner canvas width. A figure without
+    /// The height of the canvas the grid is laid out on: the figure's, less the room the
+    /// caption takes under it.
+    pub fn grid_height(&self, figure: &Figure) -> f64 {
+        figure.height_in() * 72.0 - self.caption.room()
+    }
+
+    /// Checks that titles, the caption and merged entries fit the inner canvas width. A figure without
     /// panels must still have room for its header and the bottom padding.
     pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
         let room = figure.width_in() * 72.0 - 2.0 * PADDING;
@@ -481,6 +506,11 @@ impl FigureHeader {
                 self.subtitle.as_ref(),
                 figure.subtitle_size(),
                 TextKind::Subtitle,
+            ),
+            (
+                self.caption.text.as_ref(),
+                figure.caption_size(),
+                TextKind::Caption,
             ),
         ] {
             check_text_width(
@@ -493,14 +523,15 @@ impl FigureHeader {
             )?;
         }
         self.legend.check_width(room, context)?;
+        let needed = self.bottom + self.caption.height() + PADDING;
         if figure.panels().next().is_none()
-            && self.bottom > PADDING
-            && self.bottom + PADDING > figure.height_in() * 72.0
+            && (self.bottom > PADDING || self.caption.text.is_some())
+            && needed > figure.height_in() * 72.0
         {
             return Err(super::figure_too_short(
                 context,
                 figure.height_in() * 72.0,
-                self.bottom + PADDING,
+                needed,
                 figure_height_hint(
                     self.title.is_some(),
                     self.subtitle.is_some(),

@@ -72,6 +72,7 @@ mod tests;
 mod violin;
 pub(crate) use strip::check as check_points;
 
+pub(crate) use annotation::Canvas as AnnotationCanvas;
 pub(crate) use annotation::items as annotations;
 pub(crate) use chrome::{baseline, chrome, figure_header};
 pub(crate) use heatmap::annotations as heatmap_annotations;
