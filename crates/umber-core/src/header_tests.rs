@@ -3,7 +3,9 @@
 use super::*;
 use crate::layout::PADDING;
 use crate::legend::Swatch;
-use crate::{Align, AxisData, BarOptions, Grid, GridIndex, LineOptions, Placement, ScaleKind};
+use crate::{
+    Align, AxisData, BarOptions, Grid, GridIndex, LineOptions, Marker, Placement, ScaleKind,
+};
 
 #[test]
 fn every_existing_mark_exposes_its_legend_swatch() {
@@ -304,6 +306,7 @@ fn stems_share_label_slots_before_unlabelled_colors_and_merge_marker_swatches() 
             entry.swatch(),
             Swatch::Dot {
                 diameter: f.theme().marker_size(),
+                marker: Marker::Circle,
             }
         );
     }

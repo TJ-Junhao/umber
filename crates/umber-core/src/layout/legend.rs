@@ -25,7 +25,7 @@ use super::{
 use crate::legend::{Legend, RowStyle, Swatch};
 use crate::resolve::{Anchor, AnchorX, AxisScale, EndKind, NormalizedPos, Resolved, ResolvedAxis};
 use crate::text::SceneFonts;
-use crate::{Align, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
+use crate::{Align, Marker, Result, Rgba, SizeSpec, TextStyle, Theme, Weight};
 
 /// The gap between a swatch and its label, in both row styles.
 const SWATCH_GAP: f64 = 4.0;
@@ -90,7 +90,8 @@ pub(crate) struct SwatchBox {
 /// them.
 #[derive(Debug, Clone)]
 pub(crate) struct RowEntry {
-    /// The swatch; a dot in a chips row, except for true-size bubble references.
+    /// The swatch; a marker of the series' shape in a chips row, except for true-size bubble
+    /// references.
     pub swatch: SwatchBox,
     /// The label, in the body style, to the right of the swatch.
     pub label: Label,
@@ -141,8 +142,8 @@ impl MeasuredRow {
     /// A plain entry is its swatch, a 4 pt gap and its label, and entries are 12 pt apart.
     /// Swatches are sized as their series are drawn: a line as tall as the series' drawn line
     /// width (at most `0.8 ×` the label size, the side of a square swatch, and at most the
-    /// swatch's length), a dot of the
-    /// series' drawn marker diameter, a square of `0.8 ×` the label size. A
+    /// swatch's length), a marker of the
+    /// series' shape and drawn diameter, a square of `0.8 ×` the label size. A
     /// line swatch is always `10 ×` the theme's drawn line width long, so every line swatch has
     /// the same length and only its thickness follows the series; a thick dashed line shows
     /// fewer dash cycles. Plain rows are one body line tall (`1.35 ×` the label size), or as
@@ -783,7 +784,18 @@ fn swatch_size(
         }
         (RowStyle::Chips, _) => {
             let d = CHIP_DOT * size;
-            (Swatch::Dot { diameter: d as f32 }, d, d)
+            let marker = match swatch {
+                Swatch::Dot { marker, .. } => marker,
+                _ => Marker::Circle,
+            };
+            (
+                Swatch::Dot {
+                    diameter: d as f32,
+                    marker,
+                },
+                d,
+                d,
+            )
         }
         (RowStyle::Plain, Swatch::Line { dash, width }) => {
             let length = LINE_SWATCH_LENGTH * f64::from(theme.drawn_line_width(SizeSpec::Auto));
@@ -804,7 +816,7 @@ fn swatch_size(
             };
             (capped, length, side)
         }
-        (RowStyle::Plain, Swatch::Dot { diameter }) => {
+        (RowStyle::Plain, Swatch::Dot { diameter, .. }) => {
             let d = f64::from(diameter);
             (swatch, d, d)
         }

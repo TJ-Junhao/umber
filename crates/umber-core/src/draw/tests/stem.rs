@@ -304,7 +304,13 @@ fn stems_use_scatter_padding_and_row_legend_entries() {
         } else {
             assert_eq!(legend.row().len(), 1);
             assert_eq!(legend.row()[0].label(), "Response");
-            assert_eq!(legend.row()[0].swatch(), Swatch::Dot { diameter: 9.0 });
+            assert_eq!(
+                legend.row()[0].swatch(),
+                Swatch::Dot {
+                    diameter: 9.0,
+                    marker: Marker::Diamond,
+                }
+            );
         }
     }
 }

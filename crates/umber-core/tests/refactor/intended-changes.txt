@@ -1,1 +1,21 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Legend swatches of point marks show the marks' marker shape.
+bubbles-shared-scale-graphite
+bubbles-shared-scale-midnight
+bubbles-shared-scale-pigment
+by-scatter-graphite
+by-scatter-midnight
+by-scatter-pigment
+fig-scatter-markers
+fig-size-category-chips
+fig-size-header-graphite
+fig-size-header-midnight
+fig-size-header-pigment
+fig-size-points-graphite
+fig-size-points-midnight
+fig-size-points-pigment
+fig-size-theme-legend-graphite
+fig-size-theme-legend-midnight
+fig-size-theme-legend-pigment
+stem-markers-graphite
+stem-markers-midnight
+stem-markers-pigment

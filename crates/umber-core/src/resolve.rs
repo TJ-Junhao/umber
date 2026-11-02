@@ -2754,15 +2754,36 @@ impl<'a> ResolvedMark<'a> {
             ),
             ResolvedMark::Scatter {
                 mark, color, size, ..
-            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Dot {
+                    diameter: size,
+                    marker: mark.options().marker,
+                },
+            ),
             ResolvedMark::Bubbles {
                 mark, color, size, ..
-            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Dot {
+                    diameter: size,
+                    marker: mark.options().marker,
+                },
+            ),
             // A heatmap has no legend entry; the colorbar explains its colors.
             ResolvedMark::Heatmap { .. } => Vec::new(),
             ResolvedMark::Stem {
                 mark, color, size, ..
-            } => one(&mark.options().label, color, Swatch::Dot { diameter: size }),
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Dot {
+                    diameter: size,
+                    marker: mark.options().marker,
+                },
+            ),
             ResolvedMark::Bar { mark, color, .. } => {
                 one(&mark.options().label, color, Swatch::Square)
             }
@@ -2847,7 +2868,14 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Events { .. } => Vec::new(),
             ResolvedMark::Points {
                 label, color, size, ..
-            } => one(label, color, Swatch::Dot { diameter: size }),
+            } => one(
+                label,
+                color,
+                Swatch::Dot {
+                    diameter: size,
+                    marker: Marker::Circle,
+                },
+            ),
             ResolvedMark::Ecdf {
                 mark, color, width, ..
             } => one(
