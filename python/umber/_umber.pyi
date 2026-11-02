@@ -803,7 +803,7 @@ class Figure:
         size: _SizeArg,
         color: _ColorArg,
     ) -> None: ...
-    # `text_at`, when given, is a position in the plot for the text instead of `offset`.
+    # `text_at` is a position in the plot for the text instead of `offset`; `align`: None is centre.
     def annotate(
         self,
         row: int | TwinAxes,
@@ -812,6 +812,7 @@ class Figure:
         at: tuple[float | str | int, float | str | int],
         offset: tuple[float, float],
         text_at: tuple[float, float] | None,
+        align: int | None,
         arrow: bool,
         size: _SizeArg,
         color: _ColorArg,

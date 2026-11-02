@@ -14,7 +14,7 @@
 //!
 //! A position in the plot is given as fractions of the plot area, from its lower left corner
 //! (see [`in_plot`]); no scale or limit applies to it. Text of `At` at such a position is placed
-//! as at a data point. Text of [`AnnotationPlacement::InPlot`] is placed as `At` with a centred
+//! as at a data point. Text of [`AnnotationPlacement::InPlot`] is placed as `At` with its own
 //! alignment at its position, and its arrow, routed as for `Offset`, runs to the data point of
 //! the annotation.
 
@@ -207,12 +207,9 @@ fn place(placement: AnnotationPlacement, mut block: TextBlock, (x, y): (f64, f64
         });
         (left, top)
     } else {
-        // Text in the plot with an arrow is centred on its position.
         let align = match placement {
-            AnnotationPlacement::At(align) => align,
-            AnnotationPlacement::Offset { .. } | AnnotationPlacement::InPlot { .. } => {
-                Align::Center
-            }
+            AnnotationPlacement::At(align) | AnnotationPlacement::InPlot { align, .. } => align,
+            AnnotationPlacement::Offset { .. } => Align::Center,
         };
         let top = y - height / 2.0;
         block.place(top + ascent, |line| align.position(line, x, x));

@@ -57,12 +57,19 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             )
             .unwrap();
         let at = (AxisValue::Number(3.0), AxisValue::Number(6.0));
-        for (text, text_at, arrow) in [
-            ("best so far\nat step 3", (0.78, 0.86), true),
-            ("floor", (0.5, 0.1), false),
+        for (text, text_at, align, arrow) in [
+            ("best so far\nat step 3", (0.78, 0.86), None, true),
+            ("floor", (0.5, 0.1), None, false),
+            (
+                "top right,\nright-aligned",
+                (0.98, 0.96),
+                Some(Align::Right),
+                true,
+            ),
         ] {
             let options = AnnotateOptions {
                 text_at: Some(InPlot::new(text_at.0, text_at.1).unwrap()),
+                align,
                 arrow,
                 ..AnnotateOptions::default()
             };

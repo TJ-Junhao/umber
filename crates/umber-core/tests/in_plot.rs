@@ -628,3 +628,121 @@ fn a_plot_position_matches_the_data_point_at_the_same_place() {
         .unwrap();
     assert_eq!(render(&by_data), render(&by_fraction));
 }
+
+fn aligned(align: Option<Align>, text_at: InPlot, arrow: bool) -> AnnotateOptions {
+    AnnotateOptions {
+        align,
+        ..pinned(Some(text_at), arrow)
+    }
+}
+
+#[test]
+fn a_pinned_annotation_aligns_its_text_like_text_does() {
+    let spot = at(0.8, 0.85);
+    for align in [Align::Left, Align::Center, Align::Right] {
+        for content in ["note", "two\nlines of text"] {
+            let mut annotated = lined();
+            axes(&mut annotated)
+                .annotate(
+                    content,
+                    (number(2.0), number(2.0)),
+                    aligned(Some(align), spot, true),
+                )
+                .unwrap();
+            let mut written = lined();
+            axes(&mut written)
+                .text(
+                    content,
+                    spot,
+                    TextOptions {
+                        align,
+                        ..TextOptions::default()
+                    },
+                )
+                .unwrap();
+            let (annotated, written) = (render(&annotated), render(&written));
+            for line in content.split('\n') {
+                let (a, w) = (text(&annotated, line), text(&written, line));
+                assert!(
+                    close(f64::from(a.origin.x), f64::from(w.origin.x))
+                        && close(f64::from(a.origin.y), f64::from(w.origin.y)),
+                    "{align:?} {line:?}: {:?} vs {:?}",
+                    a.origin,
+                    w.origin
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_right_aligned_pinned_annotation_fits_near_the_right_edge() {
+    let mut f = lined();
+    axes(&mut f)
+        .annotate(
+            "a long note near the edge",
+            (number(2.0), number(2.0)),
+            aligned(Some(Align::Right), at(1.0, 0.9), true),
+        )
+        .unwrap();
+    let scene = render(&f);
+    let [_, _, right, _] = text_box(&scene, text(&scene, "a long note near the edge"));
+    assert!(close(right, plot(&scene)[2]));
+    // Centred or left-aligned at the same position, the text reaches past the figure.
+    for align in [None, Some(Align::Left)] {
+        let mut f = lined();
+        axes(&mut f)
+            .annotate(
+                "a long note near the edge",
+                (number(2.0), number(2.0)),
+                aligned(align, at(1.0, 0.9), true),
+            )
+            .unwrap();
+        assert!(f.to_scene(FontLibrary::global()).is_err());
+    }
+}
+
+#[test]
+fn an_automatic_align_is_the_centre_and_offset_annotations_are_unchanged() {
+    let build = |align: Option<Align>| {
+        let mut f = lined();
+        axes(&mut f)
+            .annotate(
+                "note",
+                (number(2.0), number(2.0)),
+                aligned(align, at(0.8, 0.85), true),
+            )
+            .unwrap();
+        render(&f)
+    };
+    assert_eq!(build(None), build(Some(Align::Center)));
+    // Without text_at the options of an offset annotation are as before.
+    let mut f = lined();
+    axes(&mut f)
+        .annotate("n", (number(5.0), number(5.0)), AnnotateOptions::default())
+        .unwrap();
+    assert!(matches!(
+        axes(&mut f).annotations()[0].placement(),
+        AnnotationPlacement::Offset { .. }
+    ));
+}
+
+#[test]
+fn an_align_without_text_at_is_refused() {
+    let mut f = lined();
+    let options = AnnotateOptions {
+        align: Some(Align::Right),
+        ..AnnotateOptions::default()
+    };
+    let err = axes(&mut f)
+        .annotate("note", (number(1.0), number(1.0)), options)
+        .map(drop)
+        .unwrap_err();
+    assert!(matches!(err, Error::Usage { .. }), "{err}");
+    assert_eq!(err.parameter(), Some("align"));
+    assert_eq!(
+        err.hint(),
+        Some("the direction of offset decides the alignment; pass text_at to use align.")
+    );
+    assert!(axes(&mut f).annotations().is_empty());
+}

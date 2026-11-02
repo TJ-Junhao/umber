@@ -130,7 +130,7 @@ True
 ### `umber.Axes.annotate`
 
 ```text
-Axes.annotate(self, text: str, at: tuple[X, Y], *, offset: tuple[float, float]=(0.0, 12.0), text_at: InPlot | Auto=AUTO, arrow: bool=True, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
+Axes.annotate(self, text: str, at: tuple[X, Y], *, offset: tuple[float, float]=(0.0, 12.0), text_at: InPlot | Auto=AUTO, align: Align | Auto=AUTO, arrow: bool=True, size: Size=Size.AUTO, color: Color=Color.AUTO) -> Self
 ```
 
 Write text a fixed distance from a data position, with an arrow to it.
@@ -150,8 +150,9 @@ right-aligned when it points left, centred when it points straight up or down. T
 arrow starts at the box around all lines.
 
 With ``text_at=InPlot(x, y)`` the text is instead written at that position in the plot,
-as for ``text()``: the centre of the text is at it, and the arrow, if any, runs from
-the text to the data point ``at``, routed as for an offset. Use it for a note in a
+as for ``text()`` with ``align`` (the centre by default): the aligned edge of the
+text, or its centre, is at it, and the arrow, if any, runs from the text to the data
+point ``at``, routed as for an offset. Use it for a note in a
 fixed place of the plot that points to a point of the data.
 
 Args:
@@ -162,6 +163,9 @@ Args:
     text_at: ``Auto`` places the text by ``offset``. An ``InPlot`` position places it
         there, as fractions of the plot area; ``offset`` must then be left at its
         default.
+    align: With ``text_at``, which edge of the text, or its centre, is at that
+        position, and how its lines are aligned; ``Auto`` centres it. Without
+        ``text_at`` the direction of ``offset`` decides, and an ``align`` is an error.
     arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
         between them.
     size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
@@ -180,7 +184,7 @@ Raises:
         ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
         when less than 10 pt lie between the text and the point for an arrow.
     UsageError: If ``text`` is empty, or ``text_at`` is given together with an
-        ``offset`` other than the default.
+        ``offset`` other than the default, or ``align`` is given without ``text_at``.
 
 Example:
 
@@ -190,6 +194,7 @@ Example:
 >>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
 >>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
 >>> ax = ax.annotate("Best", (1, 5), text_at=ub.InPlot(0.8, 0.9))
+>>> ax = ax.annotate("Top", (1, 5), text_at=ub.InPlot(0.98, 0.95), align=ub.Align.RIGHT)
 ```
 
 ### `umber.Axes.area`

@@ -38,7 +38,9 @@ use super::validation::{
 };
 use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
-use crate::{Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat};
+use crate::{
+    Align, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat,
+};
 
 /// Whether an axes draws its baseline, independently of any shared axis settings.
 /// This changes drawing only, not the baseline position or the marks that grow from it.
@@ -3620,6 +3622,7 @@ impl<'a> AxesMut<'a> {
             },
             Some(text_at) => AnnotationPlacement::InPlot {
                 at: text_at,
+                align: options.align.unwrap_or(Align::Center),
                 arrow: options.arrow,
             },
         };

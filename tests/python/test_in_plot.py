@@ -242,3 +242,49 @@ def test_png_svg_and_pdf_draw_text_in_the_plot() -> None:
     plain = numeric().figure
     assert figure.to_png() != plain.to_png()
     assert figure.to_pdf() != plain.to_pdf()
+
+
+@pytest.mark.parametrize("align", list(ub.Align))
+def test_annotate_aligns_pinned_text_like_text(align: ub.Align) -> None:
+    spot = ub.InPlot(0.8, 0.85)
+    annotated = numeric().annotate("n", (2, 2), text_at=spot, align=align)
+    written = numeric().text("n", spot, align=align)
+    assert position(annotated, "n") == pytest.approx(position(written, "n"), abs=0.01)
+
+
+def test_a_right_aligned_pinned_annotation_fits_near_the_right_edge() -> None:
+    note = "a long note near the edge"
+    right = numeric().annotate(note, (2, 2), text_at=ub.InPlot(1, 0.9), align=ub.Align.RIGHT)
+    assert right.figure.to_svg()
+    left = numeric().annotate(note, (2, 2), text_at=ub.InPlot(1, 0.9), align=ub.Align.LEFT)
+    with pytest.raises(ub.StyleError):
+        left.figure.to_svg()
+
+
+def test_auto_align_is_the_centre_and_leaves_offset_annotations_alone() -> None:
+    spot = ub.InPlot(0.8, 0.85)
+    auto = numeric().annotate("n", (2, 2), text_at=spot, align=ub.AUTO)
+    centred = numeric().annotate("n", (2, 2), text_at=spot, align=ub.Align.CENTER)
+    assert auto.figure.to_svg() == centred.figure.to_svg()
+    plain = numeric().annotate("n", (2, 2), offset=(24, 18))
+    explicit = numeric().annotate("n", (2, 2), offset=(24, 18), align=ub.AUTO)
+    assert plain.figure.to_svg() == explicit.figure.to_svg()
+
+
+def test_align_without_text_at_is_a_usage_error() -> None:
+    ax = numeric().annotate("first", (5, 5))
+    before = ax.figure.to_svg()
+    with pytest.raises(ub.UsageError) as caught:
+        ax.annotate("n", (2, 2), offset=(24, 18), align=ub.Align.RIGHT)
+    assert str(caught.value) == (
+        "Axes.annotate(): align applies to text written with text_at, and there is no text_at."
+    )
+    assert details(caught.value) == (
+        "align",
+        "the direction of offset decides the alignment; pass text_at to use align.",
+    )
+    assert ax.figure.to_svg() == before
+    with pytest.raises(TypeError) as wrong:
+        call(ax.annotate)("n", (2, 2), text_at=ub.InPlot(0.8, 0.8), align="right")
+    info = details(wrong.value)
+    assert info is not None and info[0] == "align"

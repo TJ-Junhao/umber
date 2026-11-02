@@ -3378,6 +3378,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         *,
         offset: tuple[float, float] = (0.0, 12.0),
         text_at: InPlot | Auto = AUTO,
+        align: Align | Auto = AUTO,
         arrow: bool = True,
         size: Size = Size.AUTO,
         color: Color = Color.AUTO,
@@ -3399,8 +3400,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         arrow starts at the box around all lines.
 
         With ``text_at=InPlot(x, y)`` the text is instead written at that position in the plot,
-        as for ``text()``: the centre of the text is at it, and the arrow, if any, runs from
-        the text to the data point ``at``, routed as for an offset. Use it for a note in a
+        as for ``text()`` with ``align`` (the centre by default): the aligned edge of the
+        text, or its centre, is at it, and the arrow, if any, runs from the text to the data
+        point ``at``, routed as for an offset. Use it for a note in a
         fixed place of the plot that points to a point of the data.
 
         Args:
@@ -3411,6 +3413,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             text_at: ``Auto`` places the text by ``offset``. An ``InPlot`` position places it
                 there, as fractions of the plot area; ``offset`` must then be left at its
                 default.
+            align: With ``text_at``, which edge of the text, or its centre, is at that
+                position, and how its lines are aligned; ``Auto`` centres it. Without
+                ``text_at`` the direction of ``offset`` decides, and an ``align`` is an error.
             arrow: Whether an arrow runs from the text to the point; it needs at least 10 pt
                 between them.
             size: ``Size.AUTO`` uses the theme's body size, ``Size.times(k)`` multiplies it
@@ -3429,7 +3434,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 ``offset`` is not finite or is zero. Rendering raises it as for ``text()``, and
                 when less than 10 pt lie between the text and the point for an arrow.
             UsageError: If ``text`` is empty, or ``text_at`` is given together with an
-                ``offset`` other than the default.
+                ``offset`` other than the default, or ``align`` is given without ``text_at``.
 
         Example:
             >>> import umber as ub
@@ -3437,6 +3442,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.annotate("Peak", (1, 5), offset=(24, 12))
             >>> ax = ax.annotate("Dip", (2, 3), offset=(18, -22), arrow=False)
             >>> ax = ax.annotate("Best", (1, 5), text_at=ub.InPlot(0.8, 0.9))
+            >>> ax = ax.annotate("Top", (1, 5), text_at=ub.InPlot(0.98, 0.95), align=ub.Align.RIGHT)
         """
         with api_call():
             context = "Axes.annotate()"
@@ -3448,6 +3454,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 if text_at is AUTO
                 else instance(context, "text_at", text_at, InPlot, _TEXT_AT_HINT)
             )
+            edge = None if align is AUTO else instance(context, "align", align, Align, _ALIGN_HINT)
             drawn = _args.boolean(context, "arrow", arrow)
             instance(context, "size", size, Size, _SIZE_HINT)
             spec = _color_argument(context, color)
@@ -3460,6 +3467,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 point,
                 shift,
                 None if placed is None else (placed.x, placed.y),
+                None if edge is None else edge.value,
                 drawn,
                 _size.native(size),
                 spec,

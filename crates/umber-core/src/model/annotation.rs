@@ -168,6 +168,10 @@ pub struct AnnotateOptions {
     /// arrow, if any, running to the point (see [`AnnotationPlacement::InPlot`]); `None` places
     /// the text by `offset`.
     pub text_at: Option<InPlot>,
+    /// Which edge of the text, or its centre, is at the `text_at` position, as for
+    /// [`TextOptions::align`]; `None` centres it. Without `text_at` the offset's direction
+    /// decides the alignment and an `align` is an error.
+    pub align: Option<Align>,
     /// Whether an arrow runs from the text to the point.
     pub arrow: bool,
     /// The text size; [`SizeSpec::Auto`] for the theme's body size.
@@ -181,6 +185,7 @@ impl Default for AnnotateOptions {
         AnnotateOptions {
             offset: DEFAULT_OFFSET,
             text_at: None,
+            align: None,
             arrow: true,
             size: SizeSpec::Auto,
             color: ColorSpec::AUTO,
@@ -191,8 +196,18 @@ impl Default for AnnotateOptions {
 impl AnnotateOptions {
     /// Checks that `text_at` and `offset` do not both place the text: `Error::Usage` under
     /// `context`, parameter `text_at`, for a `text_at` together with an offset other than the
-    /// default.
+    /// default, and `Error::Usage`, parameter `align`, for an `align` without `text_at`.
     pub(super) fn check_text_at(&self, context: &'static str) -> Result<()> {
+        if self.text_at.is_none() && self.align.is_some() {
+            return Err(Error::usage(
+                context,
+                "align applies to text written with text_at, and there is no text_at.",
+            )
+            .with_parameter("align")
+            .with_hint(
+                "the direction of offset decides the alignment; pass text_at to use align.",
+            ));
+        }
         if self.text_at.is_some() && self.offset != DEFAULT_OFFSET {
             return Err(Error::usage(
                 context,
@@ -234,13 +249,16 @@ pub enum AnnotationPlacement {
         /// Whether an arrow runs from the text to the point.
         arrow: bool,
     },
-    /// At a position in the plot, away from the data point of the annotation: the centre of the
-    /// text, and so its vertical centre, is at `at`, with an arrow from the text to the data
+    /// At a position in the plot, away from the data point of the annotation: the aligned edge
+    /// of the text, or its centre, and so its vertical centre, is at `at`, as for
+    /// [`AnnotationPlacement::At`], with an arrow from the text to the data
     /// point when `arrow` holds. Made by [`AxesMut::annotate`](super::AxesMut::annotate) with
     /// [`AnnotateOptions::text_at`].
     InPlot {
         /// The position of the text in the plot.
         at: InPlot,
+        /// Which edge of the text, or its centre, is at `at`.
+        align: Align,
         /// Whether an arrow runs from the text to the data point.
         arrow: bool,
     },

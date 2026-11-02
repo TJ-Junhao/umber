@@ -2031,7 +2031,7 @@ impl Figure {
 
     /// Writes `text` `offset` points away from the point `(x, y)`, given as for `text`, with an
     /// arrow to the point when `arrow` holds; with `text_at`, the position `(x, y)` in the plot
-    /// as for `text_in_plot`, it writes the text there instead.
+    /// as for `text_in_plot`, it writes the text there instead, aligned by `align` (the centre without one).
     fn annotate(
         &mut self,
         row: AxesRow,
@@ -2040,6 +2040,7 @@ impl Figure {
         at: (Bound<'_, PyAny>, Bound<'_, PyAny>),
         offset: (f64, f64),
         text_at: Option<(f64, f64)>,
+        align: Option<i64>,
         arrow: bool,
         size: SizeArg,
         color: ColorArg,
@@ -2053,6 +2054,7 @@ impl Figure {
         let options = AnnotateOptions {
             offset,
             text_at,
+            align: align.map(enum_value::<Align>).transpose()?,
             arrow,
             size: size_spec(size)?,
             color: color_spec(color)?,
