@@ -78,8 +78,9 @@ def to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> bytes:
         TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, or an item is
             not a figure or the axes of one.
         DataError: If ``figures`` is empty.
-        StyleError: If a figure cannot be rendered (see ``Figure.to_pdf()``). The message
-            names the figure as ``figures[i]``, counting from 0.
+        DataError, StyleError: If a figure cannot be rendered (see ``Figure.to_pdf()``). The
+            error keeps the class the figure's own render raises, and its message begins with
+            ``figures[i]: ``, where ``i`` counts from 0.
 
     Example:
         >>> import umber as ub
@@ -110,8 +111,9 @@ def save_pdf(
             ``figures`` is a single ``Figure`` or not a list or tuple, or an item is not a
             figure or the axes of one.
         DataError: If ``figures`` is empty.
-        StyleError: If a figure cannot be rendered; the message names it as ``figures[i]``,
-            counting from 0.
+        DataError, StyleError: If a figure cannot be rendered. The error keeps the class the
+            figure's own render raises, and its message begins with ``figures[i]: ``, where
+            ``i`` counts from 0.
         OSError: If the file cannot be written.
 
     Example:
