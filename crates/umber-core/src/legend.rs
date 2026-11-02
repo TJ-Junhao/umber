@@ -212,7 +212,8 @@ impl<'a> DirectEntry<'a> {
 pub(crate) enum RowStyle {
     /// Each entry is its swatch and its label.
     Plain,
-    /// Each entry is a tinted pill holding a dot and the label.
+    /// Each entry is a tinted pill holding a mark and the label; point series keep their marker
+    /// shape.
     Chips,
 }
 

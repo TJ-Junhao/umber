@@ -154,8 +154,8 @@ impl MeasuredRow {
     /// As [`measure`], for the first label that cannot be laid out; labels are measured
     /// before the metrics of their style, so the error names the label.
     ///
-    /// A chip is a pill one body line plus `2 × 3` pt tall, holding a dot of `0.6 ×` the label
-    /// size, a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
+    /// A chip is a pill one body line plus `2 × 3` pt tall, holding a mark of `0.6 ×` the label
+    /// size (a series' marker shape, or a circle), a 4 pt gap and the label, with 7 pt of padding at each end; chips are 6 pt apart.
     /// Bubble references have no pill or horizontal padding and retain their true circle size,
     /// including the outline. Both row styles grow to contain the tallest reference circle.
     pub fn measure(
