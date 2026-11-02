@@ -36,7 +36,7 @@ mod paint;
 mod text;
 mod write;
 
-use pdf_writer::{Chunk, Filter, Finish, Pdf, Rect as PdfRect, TextStr};
+use pdf_writer::{Chunk, Filter, Finish, Pdf, Rect as PdfRect, Ref, TextStr};
 
 use super::normalize::clip_is_valid;
 use crate::error::number;
@@ -84,52 +84,122 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 /// # Ok::<(), umber_core::Error>(())
 /// ```
 pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>> {
-    let (width, height) = page_size(scene)?;
-    let fonts = fonts_of(scene, (width, height));
-    let (content, resources) = page_content(scene, &fonts, (width, height));
+    let size = page_size(scene)?;
+    Ok(document(&[(scene, size)]))
+}
 
-    // Objects 1 to 5 are the catalog, the page tree, the page, its content and the document
-    // information; the resources follow in the order the content first uses them.
+/// Writes `scenes` as one PDF document with a page for each, in order.
+///
+/// Every page is the size of its scene and is painted exactly as [`render_pdf`] paints that
+/// scene. A font used on several pages is embedded once, as a subset of the glyphs of all the
+/// pages that use it; raster images stay with their page. Nothing is written unless every
+/// scene can be a page. The same scenes always give the same bytes, and one scene gives the
+/// bytes of [`render_pdf`].
+///
+/// # Errors
+///
+/// [`Error::Style`] with context `"Figure.to_pdf()"` when the width or height of a scene is
+/// not finite, below 0.001 pt or above 14,400 pt (200 in); the message begins with
+/// `scenes[i]: `, where `i` is the 0-based index of the first such scene.
+/// [`Error::Data`] with the same context when `scenes` is empty, as a document needs a page.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::render::render_pdf_pages;
+/// use umber_core::{Rgba, Scene};
+///
+/// let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
+/// let (wide, tall) = (Scene::new(432.0, 288.0, white), Scene::new(288.0, 432.0, white));
+/// let pdf = render_pdf_pages(&[&wide, &tall])?;
+/// let text = String::from_utf8_lossy(&pdf);
+/// assert!(text.contains("/MediaBox [0 0 432 288]"));
+/// assert!(text.contains("/MediaBox [0 0 288 432]"));
+/// assert!(render_pdf_pages(&[]).is_err());
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+pub fn render_pdf_pages(scenes: &[&Scene]) -> Result<Vec<u8>> {
+    if scenes.is_empty() {
+        return Err(Error::data(
+            CONTEXT,
+            "a PDF document needs at least one page.",
+        ));
+    }
+    let pages = scenes
+        .iter()
+        .enumerate()
+        .map(|(index, scene)| {
+            let size = page_size(scene)
+                .map_err(|err| err.with_message_prefix(&format!("scenes[{index}]: ")))?;
+            Ok((*scene, size))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(document(&pages))
+}
+
+/// The PDF document of `pages`, each a scene with its page size from [`page_size`].
+///
+/// Objects are numbered in this order: the catalog, the page tree, each page with its content,
+/// the document information, then the resources of each page in the order its content first
+/// uses them, and last the fonts, which the pages share.
+fn document(pages: &[(&Scene, (f32, f32))]) -> Vec<u8> {
+    let fonts = fonts_of(pages);
+    let contents: Vec<_> = pages
+        .iter()
+        .map(|&(scene, size)| page_content(scene, &fonts, size))
+        .collect();
+
     let mut refs = Refs::new();
-    let (catalog, pages, page_ref, content_ref, info) = (
-        refs.next(),
-        refs.next(),
-        refs.next(),
-        refs.next(),
-        refs.next(),
-    );
+    let (catalog, tree) = (refs.next(), refs.next());
+    let page_refs: Vec<(Ref, Ref)> = pages.iter().map(|_| (refs.next(), refs.next())).collect();
+    let info = refs.next();
     let mut chunk = Chunk::new();
-    let names = resources.write(&mut chunk, &mut refs, &fonts);
+    let mut names: Vec<_> = contents
+        .iter()
+        .map(|(_, resources)| resources.write(&mut chunk, &mut refs))
+        .collect();
+    let font_refs = fonts.write(&mut chunk, &mut refs);
+    for page_names in &mut names {
+        page_names.set_fonts(&font_refs);
+    }
 
     let mut pdf = Pdf::new();
-    pdf.catalog(catalog).pages(pages);
-    pdf.pages(pages).kids([page_ref]).count(1);
-    let mut page_dict = pdf.page(page_ref);
-    page_dict
-        .parent(pages)
-        .media_box(PdfRect::new(0.0, 0.0, width, height))
-        .contents(content_ref);
-    names.write_into(&mut page_dict.resources());
-    page_dict.finish();
-    let compressed = compress(&content);
-    pdf.stream(content_ref, &compressed)
-        .filter(Filter::FlateDecode);
+    pdf.catalog(catalog).pages(tree);
+    pdf.pages(tree)
+        .kids(page_refs.iter().map(|&(page, _)| page))
+        .count(i32::try_from(pages.len()).unwrap_or(i32::MAX));
+    for ((&(page_ref, content_ref), &(_, (width, height))), ((content, _), page_names)) in
+        page_refs.iter().zip(pages).zip(contents.iter().zip(&names))
+    {
+        let mut page_dict = pdf.page(page_ref);
+        page_dict
+            .parent(tree)
+            .media_box(PdfRect::new(0.0, 0.0, width, height))
+            .contents(content_ref);
+        page_names.write_into(&mut page_dict.resources());
+        page_dict.finish();
+        let compressed = compress(content);
+        pdf.stream(content_ref, &compressed)
+            .filter(Filter::FlateDecode);
+    }
     pdf.document_info(info)
         .producer(TextStr(&format!("umber {}", crate::VERSION)));
     pdf.extend(&chunk);
     let id = document_id(pdf.as_bytes());
     pdf.set_file_id((id.clone(), id));
-    Ok(pdf.finish())
+    pdf.finish()
 }
 
-/// The fonts of the text that `scene` draws on a page of `size`, subset to the glyphs drawn.
-fn fonts_of(scene: &Scene, (width, height): (f32, f32)) -> Fonts {
+/// The fonts of the text that `pages` draw, subset to the glyphs drawn on any of them.
+fn fonts_of(pages: &[(&Scene, (f32, f32))]) -> Fonts {
     let mut fonts = FontSet::default();
-    walk_page(scene, (width, height), &mut |item, _| {
-        if let Item::Text(text) | Item::RotatedText { text, .. } = item {
-            fonts.collect(text);
-        }
-    });
+    for &(scene, size) in pages {
+        walk_page(scene, size, &mut |item, _| {
+            if let Item::Text(text) | Item::RotatedText { text, .. } = item {
+                fonts.collect(text);
+            }
+        });
+    }
     fonts.embed()
 }
 
@@ -149,7 +219,7 @@ fn page_content<'s>(
 }
 
 /// The page width and height in points, rounded as the document writes them.
-fn page_size(scene: &Scene) -> Result<(f32, f32)> {
+pub(crate) fn page_size(scene: &Scene) -> Result<(f32, f32)> {
     let valid = |side: f32| (MIN_PAGE_SIDE..=MAX_PAGE_SIDE).contains(&side);
     if valid(scene.width) && valid(scene.height) {
         Ok((rounded(scene.width), rounded(scene.height)))
@@ -311,7 +381,7 @@ mod tests {
     /// The content stream of `scene`, as text.
     fn content(scene: &Scene) -> String {
         let size = page_size(scene).unwrap();
-        let fonts = fonts_of(scene, size);
+        let fonts = fonts_of(&[(scene, size)]);
         let (content, _) = page_content(scene, &fonts, size);
         String::from_utf8(content).unwrap()
     }
@@ -565,10 +635,10 @@ mod tests {
             }),
             rule: FillRule::NonZero,
         });
-        let fonts = fonts_of(&scene, (120.0, 80.0));
+        let fonts = fonts_of(&[(&scene, (120.0, 80.0))]);
         let (stream, resources) = page_content(&scene, &fonts, (120.0, 80.0));
         let mut chunk = Chunk::new();
-        resources.write(&mut chunk, &mut Refs::new(), &fonts);
+        resources.write(&mut chunk, &mut Refs::new());
         for bytes in [stream.as_slice(), chunk.as_bytes()] {
             let text = String::from_utf8_lossy(bytes);
             for token in text.split(|c: char| c.is_whitespace() || c == '[' || c == ']') {
@@ -681,7 +751,7 @@ mod tests {
             .unwrap();
         let size = page_size(&scene).unwrap();
         // Inter is font 0 and the fallback font 1.
-        let fonts = fonts_of(&scene, size).without(1);
+        let fonts = fonts_of(&[(&scene, size)]).without(1);
         let (content, _) = page_content(&scene, &fonts, size);
         let text = String::from_utf8(content).unwrap();
         let ops = operators(&text);
@@ -784,7 +854,7 @@ mod tests {
             angle: 90.0,
         });
         let size = page_size(&scene).unwrap();
-        let fonts = fonts_of(&scene, size).without(1);
+        let fonts = fonts_of(&[(&scene, size)]).without(1);
         let (bytes, _) = page_content(&scene, &fonts, size);
         let text = String::from_utf8(bytes).unwrap();
         assert!(operators(&text).contains(&"TJ"), "{text}");

@@ -165,6 +165,28 @@ pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usiz
     Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
 }
 
+/// Renders `figures` as one PDF with the interpreter released. Errors are reported in the
+/// context of `save_pdf()` when `file` is set, and of `to_pdf()` otherwise.
+#[pyfunction]
+pub(crate) fn pdf_pages<'py>(
+    py: Python<'py>,
+    figures: Vec<Bound<'py, Figure>>,
+    file: bool,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let snapshots = figures
+        .iter()
+        .map(Figure::snapshot)
+        .collect::<PyResult<Vec<_>>>()?;
+    let context = if file { "save_pdf()" } else { "to_pdf()" };
+    let pdf = py
+        .detach(move || {
+            let figures: Vec<&umber_core::Figure> = snapshots.iter().collect();
+            umber_core::pdf_pages(&figures)
+        })
+        .map_err(|err| core_error(err.with_context(context)))?;
+    Ok(PyBytes::new(py, &pdf))
+}
+
 /// An explicit handle to the right-hand y axis at a panel's top-left cell.
 #[derive(Clone, Copy)]
 #[pyclass(frozen, from_py_object, module = "umber._umber")]

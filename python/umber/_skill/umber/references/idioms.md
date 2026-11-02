@@ -102,3 +102,11 @@ fig.add_axes().scatter([1, 2, 3], [2.0, 1.0, 3.0])
 pdf = fig.to_pdf()
 assert pdf.startswith(b"%PDF-")
 ```
+
+For a multi-page PDF, one figure per page at its own size, use `ub.save_pdf(path, [fig1, fig2])` or `ub.to_pdf([fig1, fig2])` instead of merging single-page files with another tool. Fonts shared by pages are embedded once, and no file is written if any figure fails to render.
+
+```python
+other = ub.Figure(3, 5)
+other.add_axes().line([1, 2, 3], [2.0, 1.0, 3.0])
+assert ub.to_pdf([fig, other]).startswith(b"%PDF-")
+```

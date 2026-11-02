@@ -154,11 +154,25 @@ pub struct Raster {
     rgb: Vec<u8>,
 }
 
-/// The page rasterized by `pdftoppm` at `dpi`, as RGB.
+/// The first page rasterized by `pdftoppm` at `dpi`, as RGB.
 pub fn poppler_raster(path: &FsPath, dpi: u32) -> Raster {
+    poppler_page_raster(path, dpi, 1)
+}
+
+/// Page `page` (counting from 1) rasterized by `pdftoppm` at `dpi`, as RGB.
+pub fn poppler_page_raster(path: &FsPath, dpi: u32, page: u32) -> Raster {
     let prefix = path.with_extension("");
+    let page = page.to_string();
     let out = Command::new("pdftoppm")
-        .args(["-r", &dpi.to_string(), "-singlefile"])
+        .args([
+            "-r",
+            &dpi.to_string(),
+            "-f",
+            &page,
+            "-l",
+            &page,
+            "-singlefile",
+        ])
         .arg(path)
         .arg(&prefix)
         .output()

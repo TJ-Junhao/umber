@@ -608,9 +608,10 @@ impl<'s> Resources<'s> {
         format!("X{}", self.xobjects.len() - 1)
     }
 
-    /// Writes every resource and the page's `fonts` into `chunk`, numbering objects with
-    /// `refs`, and returns the names the content uses for them.
-    pub(super) fn write(&self, chunk: &mut Chunk, refs: &mut Refs, fonts: &Fonts) -> Names {
+    /// Writes every resource but the fonts into `chunk`, numbering objects with `refs`, and
+    /// returns the names the content uses for them. The fonts are shared by the pages of a
+    /// document, so they are written once and named with [`Names::set_fonts`].
+    pub(super) fn write(&self, chunk: &mut Chunk, refs: &mut Refs) -> Names {
         let states = self
             .states
             .iter()
@@ -650,7 +651,7 @@ impl<'s> Resources<'s> {
             states,
             shadings,
             xobjects,
-            fonts: fonts.write(chunk, refs),
+            fonts: Vec::new(),
         }
     }
 
@@ -701,6 +702,11 @@ pub(super) struct Names {
 }
 
 impl Names {
+    /// Makes `fonts`, the resource name and object of each embedded font, the fonts of the page.
+    pub(super) fn set_fonts(&mut self, fonts: &[(String, Ref)]) {
+        self.fonts = fonts.to_vec();
+    }
+
     /// Writes the names into a resource dictionary, leaving out kinds the page does not use.
     pub(super) fn write_into(&self, resources: &mut pdf_writer::writers::Resources<'_>) {
         let entries = |dict: &mut Dict<'_>, names: &[(String, Ref)]| {

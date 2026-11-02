@@ -328,7 +328,7 @@ Titles and direct legend labels are set in bold. A font without a bold face rais
 
 ## Output
 
-`fig.save_png(path, dpi=...)`, `fig.save_svg(path)` and `fig.save_pdf(path)` write a file; `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead. PNG output is antialiased at the chosen resolution. SVG text is drawn as outlines by default, so it looks the same everywhere; `text=ub.SvgText.EDITABLE` keeps it as text, which the viewer then draws with its own copy of the font. PDF output is vector, one page at the figure's size, with the fonts it uses embedded as subsets, so its text can be selected and searched; large cell grids stay images, as in SVG.
+`fig.save_png(path, dpi=...)`, `fig.save_svg(path)` and `fig.save_pdf(path)` write a file; `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead. PNG output is antialiased at the chosen resolution. SVG text is drawn as outlines by default, so it looks the same everywhere; `text=ub.SvgText.EDITABLE` keeps it as text, which the viewer then draws with its own copy of the font. PDF output is vector, one page at the figure's size, with the fonts it uses embedded as subsets, so its text can be selected and searched; large cell grids stay images, as in SVG. `ub.save_pdf(path, [fig1, fig2])` writes several figures as one PDF, a page for each at its own size, and `ub.to_pdf([fig1, fig2])` returns the bytes.
 
 ### Jupyter and `show()`
 
