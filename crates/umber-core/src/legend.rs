@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
 use crate::model::Figure;
 use crate::resolve::{Anchor, AxisLimits, Limits, ResolvedMark, SeriesKey, SeriesKind};
-use crate::{Dash, FillStyle, LegendStyle, Rgba, ScaleKind, Theme, TickFormat};
+use crate::{Dash, FillStyle, LegendStyle, Marker, Rgba, ScaleKind, Theme, TickFormat};
 
 /// What the fill of a legend swatch shows: a mark's fill as drawn, composited over the plot
 /// background, or the plain series color for marks drawn without a translucent fill. A
@@ -74,10 +74,12 @@ pub(crate) enum Swatch {
         /// The stroke width the series is drawn at, in points.
         width: f32,
     },
-    /// A dot, for point series.
+    /// A marker, for point series.
     Dot {
         /// The marker diameter the series is drawn at, in points.
         diameter: f32,
+        /// The marker shape the series is drawn with.
+        marker: Marker,
     },
     /// A square, for filled bars.
     Square,
@@ -113,14 +115,17 @@ impl Swatch {
     }
 
     /// The swatch of a series drawn as `kind`: a line in its dash and width, a filled rectangle
-    /// under such a line, a dot of its marker diameter, a square, or a bar with caps.
+    /// under such a line, a marker of its shape and diameter, a square, or a bar with caps.
     fn of(kind: SeriesKind) -> Swatch {
         match kind {
             SeriesKind::Line { dash, width } | SeriesKind::Rule { dash, width } => {
                 Swatch::Line { dash, width }
             }
             SeriesKind::Area { dash, width } => Swatch::Area { dash, width },
-            SeriesKind::Points { size, .. } => Swatch::Dot { diameter: size },
+            SeriesKind::Points { marker, size } => Swatch::Dot {
+                diameter: size,
+                marker,
+            },
             SeriesKind::Bar | SeriesKind::Span => Swatch::Square,
             SeriesKind::Box { width } => Swatch::Box { width },
             SeriesKind::Violin { width } => Swatch::Violin { width },
@@ -207,7 +212,8 @@ impl<'a> DirectEntry<'a> {
 pub(crate) enum RowStyle {
     /// Each entry is its swatch and its label.
     Plain,
-    /// Each entry is a tinted pill holding a dot and the label.
+    /// Each entry is a tinted pill holding a mark and the label; point series keep their marker
+    /// shape.
     Chips,
 }
 
@@ -477,7 +483,10 @@ mod tests {
     }
 
     /// The dot swatch of a pigment scatter at the theme's marker size.
-    const PIGMENT_DOT: Swatch = Swatch::Dot { diameter: 6.0 };
+    const PIGMENT_DOT: Swatch = Swatch::Dot {
+        diameter: 6.0,
+        marker: Marker::Triangle,
+    };
 
     #[test]
     fn swatch_follows_series_kind() {
@@ -498,7 +507,10 @@ mod tests {
                 marker: Marker::Cross,
                 size: 4.5,
             }),
-            Swatch::Dot { diameter: 4.5 }
+            Swatch::Dot {
+                diameter: 4.5,
+                marker: Marker::Cross,
+            }
         );
     }
 
@@ -560,8 +572,14 @@ mod tests {
                     dash: Dash::Solid,
                     width: 0.5,
                 },
-                Swatch::Dot { diameter: 2.8 },
-                Swatch::Dot { diameter: 12.0 },
+                Swatch::Dot {
+                    diameter: 2.8,
+                    marker: Marker::Triangle,
+                },
+                Swatch::Dot {
+                    diameter: 12.0,
+                    marker: Marker::Triangle,
+                },
                 Swatch::Line {
                     dash: Dash::Solid,
                     width: 1.8,
@@ -576,8 +594,14 @@ mod tests {
         assert_eq!(
             row,
             [
-                Swatch::Dot { diameter: 2.8 },
-                Swatch::Dot { diameter: 12.0 }
+                Swatch::Dot {
+                    diameter: 2.8,
+                    marker: Marker::Triangle,
+                },
+                Swatch::Dot {
+                    diameter: 12.0,
+                    marker: Marker::Triangle,
+                }
             ]
         );
     }
