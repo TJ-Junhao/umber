@@ -32,7 +32,12 @@ fn grouped_xy_calls_are_atomic() {
         for bad in [true, false] {
             let result = match method {
                 "line" => axes.grouped_line(groups(bad), Dash::Solid, SizeSpec::Auto),
-                "scatter" => axes.grouped_scatter(groups(bad), Marker::Circle, SizeSpec::Auto),
+                "scatter" => axes.grouped_scatter(
+                    groups(bad),
+                    Marker::Circle,
+                    SizeSpec::Auto,
+                    umber_core::PointLabels::default(),
+                ),
                 "step" => axes.grouped_step(groups(bad), Step::Post, Dash::Solid, SizeSpec::Auto),
                 "area" => axes.grouped_area(groups(bad), Dash::Solid, SizeSpec::Auto),
                 _ => unreachable!(),

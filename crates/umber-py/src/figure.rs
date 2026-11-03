@@ -27,7 +27,7 @@ use crate::cmap::Cmap;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyInt};
 use umber_core::HeatmapOptions;
-use umber_core::{Align, AnnotateOptions, InPlot, TextOptions, ValueLabels};
+use umber_core::{Align, AnnotateOptions, InPlot, Place, PointLabels, TextOptions, ValueLabels};
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
@@ -139,6 +139,22 @@ fn value_labels(
         annotate,
         format: format.map(tick_format).transpose()?,
         size: size_spec(size)?,
+    })
+}
+
+/// The values written next to scatter points: `annotate`, a `format` of `None` for the Python
+/// facade's `AUTO`, the value axis's tick format, the text size and the place.
+fn point_labels(
+    annotate: bool,
+    format: Option<TickFormatArg>,
+    size: SizeArg,
+    place: i64,
+) -> PyResult<PointLabels> {
+    Ok(PointLabels {
+        annotate,
+        format: format.map(tick_format).transpose()?,
+        size: size_spec(size)?,
+        place: enum_value::<Place>(place)?,
     })
 }
 
@@ -772,6 +788,10 @@ impl Figure {
         color: &Bound<'_, PyAny>,
         marker: i64,
         size: SizeArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        label_size: SizeArg,
+        place: i64,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.scatter()";
         let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
@@ -780,7 +800,7 @@ impl Figure {
             color: point_color(color)?,
             marker: enum_value::<Marker>(marker)?,
             size: size_spec(size)?,
-            ..Default::default()
+            labels: point_labels(annotate, format, label_size, place)?,
         };
         self.axes(row, col)?
             .scatter_shared(x, y, options)
@@ -2108,11 +2128,16 @@ impl Figure {
         groups: XyGroupArgs<'_>,
         marker: i64,
         size: SizeArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+        label_size: SizeArg,
+        place: i64,
     ) -> PyResult<()> {
         let groups = xy_groups("Axes.scatter()", groups)?;
         let (marker, size) = (enum_value::<Marker>(marker)?, size_spec(size)?);
+        let labels = point_labels(annotate, format, label_size, place)?;
         self.axes(row, col)?
-            .grouped_scatter(groups, marker, size)
+            .grouped_scatter(groups, marker, size, labels)
             .map(drop)
             .map_err(core_error)
     }

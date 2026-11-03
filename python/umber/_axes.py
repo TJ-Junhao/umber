@@ -43,6 +43,7 @@ from umber._enums import (
     LegendPosition,
     LegendStyle,
     Marker,
+    Place,
     Render,
     Stat,
     Step,
@@ -107,6 +108,7 @@ def _members_hint(cls: type[Enum]) -> str:
 
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
+_PLACE_HINT: Final = _members_hint(Place)
 _STEP_HINT: Final = _members_hint(Step)
 _HIST_HINT: Final = _members_hint(Hist)
 _STAT_HINT: Final = _members_hint(Stat)
@@ -1012,6 +1014,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
         by: Values[str] | Auto = AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+        label_size: Size = Size.AUTO,
+        place: Place = Place.AUTO,
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
@@ -1020,6 +1026,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
         colors, fading to the background color as the Oklab distance grows. Single-color
         markers keep the theme's marker alpha and a 0.8 pt background-colored outline.
+
+        With ``annotate=True`` each drawn point shows its value next to it: x on a category y
+        axis and y otherwise, the time on a time axis. Points left out, and points outside
+        explicit limits, get no label. Labels take the series color at full opacity (each
+        group's with ``by``); a ``ColorBy`` scatter's labels take the theme's text color. A
+        fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, and
+        automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
+        and left, and takes the first position inside the plot that overlaps no mark of these
+        axes (markers, error bars, lines, bars, areas, bands, boxes and violins; not reference
+        lines, spans or color-mapped cells) and no value label placed before; it never grows
+        the limits. Labels are placed in call order, point by point, so the same data always
+        gives the same figure. Text from ``text()`` and ``annotate()`` is not avoided.
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1036,6 +1054,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 one series. Names supply legend labels and palette colors; do not pass
                 a non-empty ``label`` or an explicit ``color``. Missing or empty names
                 and an empty grouping column are refused. Column names are never read.
+            annotate: Whether each point shows its value next to it.
+            format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
+                format of the value axis, as for bar labels. On a time axis only
+                ``TickFormat.AUTO`` and ``TickFormat.iso()`` apply; each time is written down to
+                the finest unit the scatter's times need, such as ``Mar 3`` or ``2026-03-03``.
+            label_size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
+                label size, ``Size.times(k)`` multiplies it after font scaling, and
+                ``Size.pt(p)`` uses points without font scaling. (``size`` is the marker size.)
+            place: Where each value goes: ``Place.AUTO``, or a fixed side, ``Place.ABOVE``,
+                ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``.
 
         Returns:
             These axes.
@@ -1048,12 +1076,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 axes, or a ``ColorBy`` does not have one value per point.
                 It is also raised for a line break or other control character in a category name.
             StyleError: If ``label`` is too long or holds a line break or another control
-                character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
+                character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
+                ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
+                number format for times). Rendering raises it when a value label on a fixed
+                side does not fit inside the plot, and when no position is clear for a label
+                with ``Place.AUTO``; the message names the series (its label, or ``scatter 2``
+                for the second scatter of the axes) and the value.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
                 ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
-                marks of these axes.
+                marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
+                without ``annotate``.
 
         Example:
             >>> import umber as ub
@@ -1063,6 +1097,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
             >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
             >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+            >>> scores = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> scores = scores.scatter([71.2, 74.8], ["Base", "Gate"], annotate=True)
+            >>> fixed = ub.Figure().add_axes().scatter(
+            ...     [1, 2], [0.25, 0.5], annotate=True, format=ub.TickFormat.percent(0),
+            ...     place=ub.Place.RIGHT,
+            ... )
         """
         with api_call():
             context = "Axes.scatter()"
@@ -1072,6 +1112,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
+            shows, labelled, text_size, where = _point_labels(
+                context, annotate, format, label_size, place
+            )
             _group.call(
                 context,
                 by,
@@ -1087,6 +1130,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         color=spec,
                         marker=shape.value,
                         size=extent,
+                        annotate=shows,
+                        format=labelled,
+                        label_size=text_size,
+                        place=where,
                     ),
                     draw_groups=partial(
                         self._native.grouped_scatter,
@@ -1094,6 +1141,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         self._col,
                         marker=shape.value,
                         size=extent,
+                        annotate=shows,
+                        format=labelled,
+                        label_size=text_size,
+                        place=where,
                     ),
                 ),
             )
@@ -3703,6 +3754,24 @@ def _value_labels(
         else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
     )
     return shows, checked, _size.native(instance(context, "size", size, Size, _SIZE_HINT))
+
+
+def _point_labels(
+    context: str, annotate: object, format: object, label_size: object, place: object
+) -> tuple[bool, tuple[int, int, str, str] | None, tuple[int, float], int]:
+    """Check the value label arguments of ``scatter()`` and return their native form.
+
+    A ``format`` of ``AUTO`` is ``None``: the tick format of the value axis.
+    """
+    shows = _args.boolean(context, "annotate", annotate)
+    checked = (
+        None
+        if format is AUTO
+        else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+    )
+    size = _size.native(instance(context, "label_size", label_size, Size, _SIZE_HINT))
+    where = instance(context, "place", place, Place, _PLACE_HINT)
+    return shows, checked, size, where.value
 
 
 def _check_coordinate_type(context: str, scale: Scale[Any], value: object) -> None:

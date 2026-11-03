@@ -13,7 +13,7 @@ use super::chrome::text;
 use super::heatmap::text_color_on;
 use super::mapping::axis_value;
 use super::{MarkContext, mark_context};
-use crate::bubble_fit::EndReach;
+use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::error::{number, quoted};
 use crate::layout::{Area, Label, Layout, value_text};
 use crate::model::{Axes, ValueLabels};
@@ -175,7 +175,7 @@ impl BarLabels {
                 let forward = mark.log || label.value >= 0.0;
                 reaches.push(EndReach {
                     axis: mark.orientation.value_axis(),
-                    value: label.value,
+                    value: ReachFrom::Number(label.value),
                     low: if forward { 0.0 } else { reach },
                     high: if forward { reach } else { 0.0 },
                 });
@@ -241,7 +241,7 @@ impl<'a> Annotated<'a> {
 /// to [`SIGNIFICANT_DIGITS`] significant digits, as C's `%g` does (`42`, `28.4`, `0.12345`;
 /// scientific outside `1e-4 <= |v| < 1e6`, see [`ticks::format_each`]); the other formats write
 /// each value as they write ticks, and every format adds its prefix and suffix.
-fn value_texts(values: &[f64], format: &TickFormat) -> Vec<String> {
+pub(super) fn value_texts(values: &[f64], format: &TickFormat) -> Vec<String> {
     let ticks = values
         .iter()
         .zip(ticks::format_each(values, SIGNIFICANT_DIGITS))
@@ -254,8 +254,19 @@ fn value_texts(values: &[f64], format: &TickFormat) -> Vec<String> {
         .collect()
 }
 
-/// The scene items of the value labels `labels` of the marks `marks` of `axes`, resolved as
-/// `resolved` and laid out as `layout`, as one unclipped group; `None` without labels.
+/// The value labels written on the bars of one axes, placed: their scene items, as one
+/// unclipped group, and the box of each label (left, top, right and bottom), which value
+/// labels placed later keep clear of.
+#[derive(Debug, Clone)]
+pub(crate) struct PlacedLabels {
+    /// The labels' text items, as one unclipped group.
+    pub item: Item,
+    /// The box of each label, in drawing order.
+    pub boxes: Vec<[f64; 4]>,
+}
+
+/// The value labels `labels` of the marks `marks` of `axes`, resolved as `resolved` and laid
+/// out as `layout`, placed; `None` without labels.
 ///
 /// # Errors
 ///
@@ -271,12 +282,13 @@ pub(crate) fn items(
     marks: &[ResolvedMark<'_>],
     labels: &BarLabels,
     context: &'static str,
-) -> Result<Option<Item>> {
+) -> Result<Option<PlacedLabels>> {
     if labels.marks.is_empty() {
         return Ok(None);
     }
     let base = mark_context(theme, resolved, layout, marks);
     let mut items = Vec::new();
+    let mut boxes = Vec::new();
     for mark_labels in &labels.marks {
         let Some(mark) = marks.get(mark_labels.mark) else {
             continue;
@@ -292,9 +304,15 @@ pub(crate) fn items(
             explicit,
             error: context,
         };
-        drawing.mark(mark, mark_labels, &mut items)?;
+        for (item, bounds) in drawing.mark(mark, mark_labels)? {
+            items.push(item);
+            boxes.push(bounds);
+        }
     }
-    Ok(Some(Item::Group { clip: None, items }))
+    Ok(Some(PlacedLabels {
+        item: Item::Group { clip: None, items },
+        boxes,
+    }))
 }
 
 /// What placing the labels of one mark needs.
@@ -312,16 +330,13 @@ struct Drawing<'a> {
 }
 
 impl Drawing<'_> {
-    /// Pushes the placed labels of `mark`, measured as `labels`, onto `items`.
-    fn mark(
-        &self,
-        mark: &ResolvedMark<'_>,
-        labels: &MarkLabels,
-        items: &mut Vec<Item>,
-    ) -> Result<()> {
+    /// The placed labels of `mark`, measured as `labels`, each with its box, in the order
+    /// bars are drawn.
+    fn mark(&self, mark: &ResolvedMark<'_>, labels: &MarkLabels) -> Result<Vec<(Item, [f64; 4])>> {
+        let mut items = Vec::new();
         let (along, values) = self.resolved.along_and_values(labels.orientation);
         let AxisScale::Category(categories) = &along.scale else {
-            return Ok(());
+            return Ok(items);
         };
         let (names, colors, stacks): (&[String], Vec<Rgba>, _) = match mark {
             ResolvedMark::Bar { mark, color, .. } => (mark.categories(), vec![*color], None),
@@ -340,7 +355,7 @@ impl Drawing<'_> {
                 series.iter().map(|(_, color)| *color).collect(),
                 Some(stacks),
             ),
-            _ => return Ok(()),
+            _ => return Ok(items),
         };
         let series_names: Vec<&str> = match mark {
             ResolvedMark::Grouped { series, .. } | ResolvedMark::Stacked { series, .. } => {
@@ -400,7 +415,7 @@ impl Drawing<'_> {
                 }
             }
         }
-        Ok(())
+        Ok(items)
     }
 
     /// The label `value` of `bar` at the end of its bar, which spans `span` across and ends at
@@ -413,7 +428,7 @@ impl Drawing<'_> {
         (left, right): (f64, f64),
         end: f64,
         forward: bool,
-    ) -> Result<Item> {
+    ) -> Result<(Item, [f64; 4])> {
         let maps = self.context.maps;
         let (width, height) = value.size();
         let (across, along) = maps.in_frame((width, height));
@@ -442,7 +457,10 @@ impl Drawing<'_> {
             )
             .with_hint(hint));
         }
-        Ok(placed(value, bounds, self.context.theme.text_color()))
+        Ok((
+            placed(value, bounds, self.context.theme.text_color()),
+            bounds,
+        ))
     }
 
     /// The label `value` of `bar` centred in its stacked segment, which spans `span` across and
@@ -455,7 +473,7 @@ impl Drawing<'_> {
         (left, right): (f64, f64),
         (from, to): (f64, f64),
         fill: Rgba,
-    ) -> Result<Item> {
+    ) -> Result<(Item, [f64; 4])> {
         let maps = self.context.maps;
         let (x0, x1) = (maps.x.plot_at(left), maps.x.plot_at(right));
         let (y0, y1) = (maps.y.plot_at(from), maps.y.plot_at(to));
@@ -499,10 +517,13 @@ impl Drawing<'_> {
             centre.0 + width / 2.0,
             centre.1 + height / 2.0,
         ];
-        Ok(placed(
-            value,
+        Ok((
+            placed(
+                value,
+                bounds,
+                text_color_on(fill.over(self.context.theme.background())),
+            ),
             bounds,
-            text_color_on(fill.over(self.context.theme.background())),
         ))
     }
 }
@@ -541,7 +562,7 @@ fn in_scene(frame: Orientation, ((a0, a1), (v0, v1)): ((f64, f64), (f64, f64))) 
 
 /// Whether the box `bounds` (left, top, right, bottom) lies inside `plot`, up to
 /// [`FIT_TOLERANCE`].
-fn contains(plot: Area, [left, top, right, bottom]: [f64; 4]) -> bool {
+pub(super) fn contains(plot: Area, [left, top, right, bottom]: [f64; 4]) -> bool {
     left >= plot.x - FIT_TOLERANCE
         && top >= plot.y - FIT_TOLERANCE
         && right <= plot.right() + FIT_TOLERANCE

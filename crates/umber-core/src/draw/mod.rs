@@ -57,7 +57,9 @@ mod line;
 mod mapping;
 mod marker;
 mod mesh;
+mod obstacles;
 pub(crate) mod pie;
+pub(crate) mod point_labels;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};
@@ -150,14 +152,64 @@ pub(crate) fn marks(
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
 ) -> crate::Result<Option<Item>> {
+    drawn_marks(theme, fonts, resolved, layout, marks).map(DrawnMarks::into_item)
+}
+
+/// The scene items of the marks of one axes, as [`marks()`] draws them, before they are
+/// grouped: the items of each data mark can be read on their own
+/// ([`of_mark`](DrawnMarks::of_mark)).
+#[derive(Debug, Clone)]
+pub(crate) struct DrawnMarks {
+    /// The clip of the group, [`marks_clip`].
+    clip: Rect,
+    /// The items, in drawing order: the reference spans, the data marks, the reference lines.
+    items: Vec<Item>,
+    /// For each mark, by its index among the marks, the range of `items` that it drew; empty
+    /// for reference lines and spans, which are drawn in their own layers.
+    ranges: Vec<std::ops::Range<usize>>,
+}
+
+impl DrawnMarks {
+    /// The items as one group clipped to [`marks_clip`]; `None` when nothing is visible.
+    pub(crate) fn into_item(self) -> Option<Item> {
+        (!self.items.is_empty()).then_some(Item::Group {
+            clip: Some(self.clip),
+            items: self.items,
+        })
+    }
+
+    /// The items that the mark at `index` among the marks drew; none for a reference line or
+    /// span.
+    pub(crate) fn of_mark(&self, index: usize) -> &[Item] {
+        self.ranges
+            .get(index)
+            .and_then(|range| self.items.get(range.clone()))
+            .unwrap_or(&[])
+    }
+}
+
+/// The marks, drawn as [`marks()`] draws them, with the items of each mark kept apart.
+///
+/// # Errors
+///
+/// As [`marks()`].
+pub(crate) fn drawn_marks(
+    theme: &Theme,
+    fonts: &SceneFonts<'_>,
+    resolved: &Resolved,
+    layout: &Layout,
+    marks: &[ResolvedMark<'_>],
+) -> crate::Result<DrawnMarks> {
     let context = mark_context(theme, resolved, layout, marks);
     let mut items = Vec::new();
+    let mut ranges = Vec::with_capacity(marks.len());
     // Reference spans lie under the data marks and reference lines over them, whatever the order
     // of the calls; the data marks keep theirs.
     let clip = marks_clip(layout, marks);
     let layer_clip = rule::baseline_clip(&context, resolved, clip);
     rule::span_layer(&context, resolved, marks, layer_clip, &mut items);
     for mark in marks {
+        let start = items.len();
         match *mark {
             ResolvedMark::Line {
                 mark: line_mark,
@@ -441,15 +493,14 @@ pub(crate) fn marks(
                 kde::kde_items(&context, resolved, kde_mark, (color, width), &mut items);
             }
         }
+        ranges.push(start..items.len());
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);
-    if items.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Item::Group {
-        clip: Some(clip),
+    Ok(DrawnMarks {
+        clip,
         items,
-    }))
+        ranges,
+    })
 }
 
 /// Checks that every mark of `marks` that draws something and whose options draw its cells as

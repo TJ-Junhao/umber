@@ -88,7 +88,8 @@
 //!   are edited with [`PieAxesMut`] and [`PieOptions`];
 //! - text at data positions or in the plot: [`TextOptions`], [`AnnotateOptions`], [`InPlot`],
 //!   [`TextPosition`], the read-only [`Annotation`] with its [`AnnotationPlacement`] that
-//!   [`Axes::annotations`] returns, and the [`ValueLabels`] written on bars;
+//!   [`Axes::annotations`] returns, the [`ValueLabels`] written on bars, and the
+//!   [`PointLabels`] written next to scatter points with their [`Place`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -170,8 +171,8 @@ pub use error::{Error, ErrorMessage, Result};
 pub use figure::StackedAreaMark;
 pub use figure::pdf_pages;
 pub use figure::{
-    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
-    ValueLabels,
+    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, Place, PointLabels, TextOptions,
+    TextPosition, ValueLabels,
 };
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,

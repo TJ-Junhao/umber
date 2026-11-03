@@ -23,6 +23,7 @@ use super::hist::{GroupedHistOptions, HistGroupMark, HistMark, HistOptions};
 use super::kde::{GroupedKdeOptions, KdeMark, KdeOptions};
 use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
 use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
+use super::point_labels::PointLabels;
 use super::rule::{
     AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
 };
@@ -768,6 +769,14 @@ impl<'a> AxesMut<'a> {
     /// color as the Oklab distance grows. Uniform colors keep the theme's marker alpha and
     /// their 0.8 pt background-colored outline.
     ///
+    /// With [`PointLabels::annotate`] in `options.labels`, each drawn point shows its value
+    /// next to it, as [`PointLabels`] and [`Place`](crate::Place) describe: on a fixed side,
+    /// for which automatic limits grow so that the labels fit, or on the first clear side.
+    /// Rendering fails with `Error::Style` (see [`Figure::to_scene`](crate::Figure::to_scene))
+    /// for a fixed-side label that leaves the plot, and for an automatic label with no clear
+    /// side. A format, size or place without `annotate`, or a format that does not suit the
+    /// value axis, is refused (see [`PointLabels`]).
+    ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
     ///
@@ -824,6 +833,7 @@ impl<'a> AxesMut<'a> {
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         check_point_color(CONTEXT, axes, &options.color, series.x().len())?;
         check_scatter_label(CONTEXT, &options.color, &options.label)?;
+        options.labels.check(CONTEXT, axes.x, axes.y)?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
         self.axes_mut().add_marks(
@@ -3797,17 +3807,18 @@ impl<'a> AxesMut<'a> {
 
     /// Adds one scatter per named pair of columns, in order with palette colors.
     /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
-    /// All groups use the same marker and size. A failed call adds nothing.
+    /// All groups use the same marker, size and value labels; each group's labels take its
+    /// color. A failed call adds nothing.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{AxisData, Figure, Marker, ScaleKind, SizeSpec, Theme};
+    /// use umber_core::{AxisData, Figure, Marker, PointLabels, ScaleKind, SizeSpec, Theme};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
     ///     AxisData::Numbers(vec![2.0, 3.0]))];
-    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto)?;
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, PointLabels::default())?;
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -3816,9 +3827,11 @@ impl<'a> AxesMut<'a> {
         groups: Vec<(String, AxisData, AxisData)>,
         marker: crate::Marker,
         size: crate::SizeSpec,
+        labels: PointLabels,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         check_not_two_categories(CONTEXT, self.x, self.y)?;
+        labels.check(CONTEXT, self.x, self.y)?;
         self.grouped_xy(CONTEXT, groups, SCATTER_GAP_HINT, |label, series| {
             Ok(Mark::scatter(
                 series,
@@ -3826,6 +3839,7 @@ impl<'a> AxesMut<'a> {
                     label,
                     marker,
                     size,
+                    labels: labels.clone(),
                     ..ScatterOptions::default()
                 },
             ))

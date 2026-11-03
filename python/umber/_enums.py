@@ -177,6 +177,37 @@ class Marker(Enum):
 
 
 @unique
+class Place(Enum):
+    """Where the value label of a scatter point goes, with ``Axes.scatter(annotate=True)``.
+
+    A fixed side puts every label of the scatter 3 pt beyond the marker's drawn edge, outline
+    included, and never moves it; automatic limits grow so that the labels fit inside the plot.
+    ``AUTO`` takes the first clear side and never grows the limits.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes().scatter([1, 2], [3.0, 4.5], annotate=True)
+        >>> ax = ax.scatter([1, 2], [1.0, 2.0], annotate=True, place=ub.Place.BELOW)
+    """
+
+    AUTO = 0
+    """Try above, right, below and left, in that order, and take the first position that lies
+    inside the plot and overlaps no mark and no label placed before."""
+
+    ABOVE = 1
+    """Above the point, centred horizontally."""
+
+    BELOW = 2
+    """Below the point, centred horizontally."""
+
+    LEFT = 3
+    """Left of the point, centred vertically."""
+
+    RIGHT = 4
+    """Right of the point, centred vertically."""
+
+
+@unique
 class LegendStyle(Enum):
     """How a legend is laid out.
 

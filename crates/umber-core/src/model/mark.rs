@@ -10,6 +10,7 @@ use super::color_by::PointColor;
 use super::error_bars::ErrorBarMark;
 use super::heatmap::HeatmapMark;
 use super::hist::HistMark;
+use super::point_labels::PointLabels;
 use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::stacked_area::StackedAreaMark;
 use super::stem::StemMark;
@@ -85,6 +86,7 @@ pub type AreaOptions = LineOptions;
 /// assert_eq!((&options.color, options.marker), (&PointColor::AUTO, Marker::Circle));
 /// assert_eq!(options.size, SizeSpec::Auto);
 /// assert!(options.label.is_empty());
+/// assert!(!options.labels.annotate);
 ///
 /// let small = ScatterOptions { size: SizeSpec::pt(3.0)?, ..ScatterOptions::default() };
 /// assert_ne!(small, options);
@@ -101,6 +103,8 @@ pub struct ScatterOptions {
     pub marker: Marker,
     /// The marker diameter; [`SizeSpec::Auto`] for the theme's marker size.
     pub size: SizeSpec,
+    /// The values written next to the points; none by default.
+    pub labels: PointLabels,
 }
 
 impl Default for ScatterOptions {
@@ -110,6 +114,7 @@ impl Default for ScatterOptions {
             color: PointColor::AUTO,
             marker: Marker::Circle,
             size: SizeSpec::Auto,
+            labels: PointLabels::default(),
         }
     }
 }
@@ -508,7 +513,7 @@ impl ScatterMark {
         self.series.y()
     }
 
-    /// Label, color, marker shape and size.
+    /// Label, color, marker shape and size, and the values written next to the points.
     #[must_use]
     pub fn options(&self) -> &ScatterOptions {
         &self.options

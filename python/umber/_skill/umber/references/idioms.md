@@ -65,6 +65,22 @@ svg = ax.figure.to_svg()
 
 For text at a fixed place in the plot, use `at=ub.InPlot(x, y)`, not data coordinates: `x` and `y` are fractions of the plot area (0, 0 is the lower left corner), so a note such as `ax.text("n = 5 folds", at=ub.InPlot(0.02, 0.96))` stays put when the data range changes. `ax.annotate("best", (x, y), text_at=ub.InPlot(0.9, 0.9))` writes its text there, with the arrow to the data point.
 
+## Values next to points
+
+Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color, and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
+
+```python
+models = ["Baseline", "Gate", "Gate + aug"]
+ax = ub.Figure(6, 3).add_axes(y=ub.Scale.category())
+ax.x_error_bars(models, [65.8, 70.9, 72.4], [67.2, 72.3, 73.7])
+ax.scatter(
+    [66.5, 71.6, 73.1], models, label="80 epochs", annotate=True, format=ub.TickFormat.fixed(1)
+)
+svg = ax.figure.to_svg()
+```
+
+`AUTO` never grows the limits: a point at the edge of the data with lines on both sides may have no clear side, which raises `StyleError` when the figure is rendered. Fix the side with `place=`, or leave room with `ylim()` or a larger figure. Text from `ax.text()` and `ax.annotate()` is not avoided.
+
 ## Colors, colormaps and color scales
 
 `ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.

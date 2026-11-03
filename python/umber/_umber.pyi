@@ -405,6 +405,10 @@ class Figure:
         color: _ColorArg | ColorBy,
         marker: int,
         size: _SizeArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+        label_size: _SizeArg,
+        place: int,
     ) -> None: ...
     def bubbles(
         self,
@@ -850,6 +854,10 @@ class Figure:
         groups: list[tuple[str, _SeriesValues, _SeriesValues]],
         marker: int,
         size: _SizeArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+        label_size: _SizeArg,
+        place: int,
     ) -> None: ...
     def grouped_step(
         self,

@@ -8,6 +8,7 @@
 use crate::bubble_fit::BubbleFits;
 use crate::color_scale::ResolvedColorScale;
 use crate::draw::bar_labels::{self, BarLabels};
+use crate::draw::point_labels::{self, ScatterLabels};
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -36,6 +37,8 @@ struct Panel<'a> {
     color: Option<ResolvedColorScale>,
     /// The values written on the axes' bars, measured.
     labels: BarLabels,
+    /// The values written next to the axes' scatter points, measured.
+    points: ScatterLabels,
 }
 
 /// The records of every panel of `figure`, in the order of [`Figure::panels`]. The legend uses
@@ -94,6 +97,7 @@ fn panels<'a>(
                 legend,
                 color: None,
                 labels,
+                points: ScatterLabels::default(),
             })
         })
         .collect::<Result<_>>()?;
@@ -107,6 +111,13 @@ fn panels<'a>(
         }
     }
     resolve_colors(figure, &mut panels, groups);
+    // Which color-mapped points are drawn, and so labelled, depends on the color scale.
+    for panel in &mut panels {
+        if let Some(axes) = panel.axes.cartesian() {
+            panel.points =
+                ScatterLabels::measure(theme, lib, axes, &panel.marks, panel.color.as_ref())?;
+        }
+    }
     Ok(panels)
 }
 
@@ -726,7 +737,9 @@ fn plan(
         .iter()
         .map(|panel| match panel.axes {
             Layer::Primary(crate::Panel::Cartesian { .. }) | Layer::Twin { .. } => {
-                panel.labels.end_reaches()
+                let mut ends = panel.labels.end_reaches();
+                ends.extend(panel.points.end_reaches());
+                ends
             }
             Layer::Primary(crate::Panel::Pie(_)) => Vec::new(),
         })
@@ -1880,6 +1893,8 @@ pub(crate) fn with_layout_input<R>(
 ///   to the plot area;
 /// - the values written on annotated bars, when there are any, as one unclipped group
 ///   ([`bar_labels::items`]);
+/// - the values written next to annotated scatter points, when there are any, as one
+///   unclipped group ([`point_labels::items`]);
 /// - the legend, when it has row entries or direct labels, as one unclipped group;
 /// - the baseline, as an unclipped group of its own, when the axes hold a mark that grows
 ///   from zero, unless overridden by `AxesMut::baseline` (see [`Resolved::draws_baseline`]);
@@ -1965,11 +1980,8 @@ fn scene_with_labels(
         draw::check_points(resolved, layout, &panel.marks, context)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
-        let marks = draw::marks(theme, fonts, resolved, layout, &panel.marks)
+        let drawn = draw::drawn_marks(theme, fonts, resolved, layout, &panel.marks)
             .map_err(|err| in_cell(figure, panel.axes, err))?;
-        if let Some(marks) = marks {
-            scene.push(marks);
-        }
         let notes = draw::heatmap_annotations(
             theme,
             fonts,
@@ -1979,9 +1991,6 @@ fn scene_with_labels(
             (axes.y_tick_format(), context),
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
-        if let Some(notes) = notes {
-            scene.push(notes);
-        }
         let values = bar_labels::items(
             theme,
             resolved,
@@ -1992,8 +2001,25 @@ fn scene_with_labels(
             context,
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
-        if let Some(values) = values {
-            scene.push(values);
+        let boxes = values.as_ref().map_or(&[][..], |values| &values.boxes[..]);
+        let points = point_labels::items(
+            theme,
+            resolved,
+            layout,
+            &panel.marks,
+            &panel.points,
+            (&drawn, boxes),
+            context,
+        )
+        .map_err(|err| in_cell(figure, panel.axes, err))?;
+        let layers = [
+            drawn.into_item(),
+            notes,
+            values.map(|values| values.item),
+            points,
+        ];
+        for item in layers.into_iter().flatten() {
+            scene.push(item);
         }
         let legend = draw::legend::legend(theme, layout);
         match panel.axes {

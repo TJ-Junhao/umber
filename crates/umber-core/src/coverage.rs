@@ -10,7 +10,7 @@ use crate::layout::{Area, Frame};
 use crate::{FillRule, Item, Paint, Path, PathVerb, Point};
 
 /// A point in the final scene, widened to f64 for intersections.
-type XY = [f64; 2];
+pub(crate) type XY = [f64; 2];
 
 /// One filled path, whose contours share a winding rule.
 #[derive(Debug, Clone, PartialEq)]
@@ -186,7 +186,7 @@ fn inside(p: XY, b: &Frame) -> bool {
 }
 
 /// Slab intersection includes segments whose two endpoints lie outside the candidate.
-fn crosses([a, b]: [XY; 2], box_: &Frame) -> bool {
+pub(crate) fn crosses([a, b]: [XY; 2], box_: &Frame) -> bool {
     let (mut enter, mut leave) = (0.0_f64, 1.0_f64);
     for (axis, lo, hi) in [(0, box_.x, box_.right()), (1, box_.y, box_.bottom())] {
         let delta = b[axis] - a[axis];
@@ -208,7 +208,7 @@ fn crosses([a, b]: [XY; 2], box_: &Frame) -> bool {
 }
 
 /// Flatten only the curves used in filled bar corners; straight data segments stay unchanged.
-fn contours(path: &Path) -> Vec<Vec<XY>> {
+pub(crate) fn contours(path: &Path) -> Vec<Vec<XY>> {
     let mut all = Vec::new();
     let mut run = Vec::new();
     for verb in path.verbs() {
