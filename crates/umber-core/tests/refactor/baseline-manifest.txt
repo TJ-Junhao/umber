@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 3b7c64283b7cfc766a225eb415ee32a52f3bac25
+# revision: 72d4415c44577cadbc4ed015041da263c607eca8
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt
@@ -2578,9 +2578,9 @@ d14e4a2a369eee38a9c7ec45782bc24fafb3fecebaa73286e46083dbd8d4021e  scene/point-la
 f273f4f5203cd92c62dd92083c566ecf27e6d1af9c6c02fd43fc9ab548d956d6  scene/point-labels-fixed-sides-graphite.txt
 6f8906cbda606d18aa21ea3fb104bdac194d899679cff7153b8e5d63f86611de  scene/point-labels-fixed-sides-midnight.txt
 8d2709c1dda559aa1b0a6aa697b4ae8d834165f16d329a2b83b70b5fdb7b40f4  scene/point-labels-fixed-sides-pigment.txt
-5cbe13b9b33fa1a2cf5e5f1e6101fda2be1bafd3c45936d6ac66e3c63c5314ed  scene/point-labels-matched-folds-graphite.txt
-9cf5921a30eff7e37aa11ab4e3680ef29bf51ca410a8ed2ba7be11a8aaec3796  scene/point-labels-matched-folds-midnight.txt
-be7edff788f0986537d13fe5fec1a3f5c582cc386dc8a4ec4f67462b2ef13259  scene/point-labels-matched-folds-pigment.txt
+bc929d73c9ca369102258bfdfc96965847f5052c6e2727750ad13f2956203abd  scene/point-labels-matched-folds-graphite.txt
+917b2401f14f1b591383d70b3606e9d2a01038e6e7b9986e0edfbc62e5e25410  scene/point-labels-matched-folds-midnight.txt
+27066a3449cb05342d9812d430ac505792f6228f3edf369d6bb2d6be74cd8e37  scene/point-labels-matched-folds-pigment.txt
 933a7e25a29f94f0c187ba13c5745974495fe0f167444a6b1fbb84995a35304b  scene/rules-alone.txt
 3b3514a28b4c496c5f0011c353f12045464bb943158af4e6f8ba11a1c65213a5  scene/rules-category-added-later.txt
 bd838aec136f8990ae9ff312699c7acba318fdfd3f16ecc5937df7437726e32b  scene/rules-category-graphite.txt
@@ -4174,12 +4174,12 @@ c05f6eda0bc839ddbb29b0e0f733af51f98c39c6421b3b6f533a1d8c8375c04c  svg/point-labe
 f8a22aaa7921d96325759fb0476ba38d177e072abad361792f1b568f228f715a  svg/point-labels-fixed-sides-midnight.outlines.svg
 95c0c39b92969ab3f1912c5948bdd2860734271348e078910ab0066bfc223127  svg/point-labels-fixed-sides-pigment.editable.svg
 dd4ebf134cf05b42938d95e02831b579eadbde5c0cf9a073a7bcd675a13da1f5  svg/point-labels-fixed-sides-pigment.outlines.svg
-eadaf22938c9e32807b2d617e6da8deb4c1b783cb50c584e13600ab96a7951c7  svg/point-labels-matched-folds-graphite.editable.svg
-7ef5e0ed8f53eb74ca687d113288b5a506fb5305a4cd2f451d3a64f07e93009a  svg/point-labels-matched-folds-graphite.outlines.svg
-e20afa8b34823d83f31be3e658019ef1d824bc2bd6fef93ecf1f25c507b9cb64  svg/point-labels-matched-folds-midnight.editable.svg
-069ad73138446b0f9f2400a40c1c3d28b5d7697ae9c38b9817b5dc98d80498d4  svg/point-labels-matched-folds-midnight.outlines.svg
-1df6bb4bed4bea19f943159acd8372b1c29aace561fa26d656b7230332b5ad52  svg/point-labels-matched-folds-pigment.editable.svg
-0991fbbd3cd880798b4396eb0950f9756fa439125504dc38fdcdf768c4163d6f  svg/point-labels-matched-folds-pigment.outlines.svg
+a0e441110486c36ffcf20c8e0de67da742e431b23fe23f5c3a179cf7f0cf7e29  svg/point-labels-matched-folds-graphite.editable.svg
+c7273f90d5ecc077ce9e67f9ef1d146ae03d88674beb46a3978df5852844f77b  svg/point-labels-matched-folds-graphite.outlines.svg
+ea7f88a8fe6bb43bf6e9b348c69506320e9a58aa8d1256008c5c2ec5eaedd8eb  svg/point-labels-matched-folds-midnight.editable.svg
+c4bf2cf91d1ba0ec512cb4c1427f6f588171628d5f270dbf1ca6df3baf349f06  svg/point-labels-matched-folds-midnight.outlines.svg
+a167feb8c5d3efec1ba85bf4818fbc7ca11887c19e209905bf3738980489b179  svg/point-labels-matched-folds-pigment.editable.svg
+d5a5c79500fc274782732f20f7de70da7bca0a3bf98ea20ffaa2b7d93add9b1a  svg/point-labels-matched-folds-pigment.outlines.svg
 3cc930a944cdebc788829cd5986987cbd6afd119b3b4e512e453736f35867344  svg/rules-alone.editable.svg
 c9d9ab94c3f0626ffab1ed214f9838be110cf1fc2af81531011c76265b6b2c51  svg/rules-alone.outlines.svg
 f1df8c1839e0877410ba8416d057de894d4fa69f8a5a394a7bc94ca2e0b5a91a  svg/rules-category-added-later.editable.svg

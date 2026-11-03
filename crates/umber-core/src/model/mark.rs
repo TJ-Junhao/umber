@@ -591,7 +591,9 @@ struct OwnMarks {
 impl OwnMarks {
     /// The line and bars that `options` give the points `series`, on axes of the scale kinds
     /// `(x, y)`, after checking the bars' ends: each bar sits at the point's coordinate on the
-    /// other axis, and a point whose coordinate along the bar is missing has none.
+    /// other axis. A point that is not drawn ([`point_drawn`]) has no bar and breaks the line,
+    /// and a bar with a missing end is not drawn either, so its other end does not count in
+    /// the limits.
     fn new(
         context: &'static str,
         (x, y): (crate::ScaleKind, crate::ScaleKind),
@@ -599,22 +601,21 @@ impl OwnMarks {
         options: &ScatterOptions,
     ) -> crate::Result<OwnMarks> {
         let count = series.x().len();
+        let drawn = |i: usize| point_drawn(series, &options.color, i);
         // The bars of `range`, given as `parameter`, along `axis` of scale kind `kind`, at
-        // `positions`, for the points whose coordinates along the bars are `along`.
+        // `positions`.
         let bars = |range: &Option<ErrorRange>,
                     (parameter, axis, kind),
                     orientation,
-                    positions: &std::sync::Arc<AxisData>,
-                    along: &AxisData| {
+                    positions: &std::sync::Arc<AxisData>| {
             let Some(range) = range else {
                 return Ok(None);
             };
             super::validation::check_scatter_error(context, (parameter, axis), kind, count, range)?;
-            let (low, high) = range.limits();
             Ok::<_, crate::Error>(Some(ErrorBarMark::shared(
                 orientation,
                 std::sync::Arc::clone(positions),
-                (skip_gaps(low, along), skip_gaps(high, along)),
+                complete_rows(range.limits(), drawn),
                 ErrorBarOptions::default(),
             )))
         };
@@ -623,49 +624,68 @@ impl OwnMarks {
             ("x_error", super::share::SharedAxis::X, x),
             ErrorBarOrientation::Horizontal,
             series.shared_y(),
-            series.x(),
         )?;
         let y_bars = bars(
             &options.y_error,
             ("y_error", super::share::SharedAxis::Y, y),
             ErrorBarOrientation::Vertical,
             series.shared_x(),
-            series.y(),
         )?;
+        let line = options.connect.then(|| {
+            // A point hidden by its mapped value breaks the line as a missing one does.
+            let hidden = |i: usize| !drawn(i) && !series.has_gap(i);
+            let points = if (0..count).any(hidden) {
+                series.with_gaps(hidden)
+            } else {
+                series.clone()
+            };
+            LineMark::new(points, LineOptions::default())
+        });
         Ok(OwnMarks {
-            line: options
-                .connect
-                .then(|| LineMark::new(series.clone(), LineOptions::default())),
+            line,
             x_bars,
             y_bars,
         })
     }
 }
 
-/// The ends `ends` of the bars of the points whose coordinates along the bars are `along`, with
-/// no end where the point's coordinate is missing, so that a point that is not drawn has no
-/// bar; `ends` itself, shared, when every coordinate is present.
-fn skip_gaps(ends: SharedValues, along: &AxisData) -> SharedValues {
-    let missing = |i: usize| match along {
-        AxisData::Numbers(values) => values[i].is_nan(),
-        AxisData::Times(times) => times[i].is_none(),
-        AxisData::Categories(_) => false,
+/// Whether the point at `i` of the scatter `series` in `color` is drawn: both coordinates are
+/// present, and a color-mapped value is not NaN. A point that is not drawn has no marker, no
+/// value label and no error bar of its own, and breaks the scatter's own line.
+fn point_drawn(series: &XySeries, color: &PointColor, i: usize) -> bool {
+    let mapped = match color {
+        PointColor::Uniform(_) => true,
+        PointColor::By(by) => by.values.get(i).is_some_and(|v| !v.is_nan()),
     };
-    if !(0..ends.len()).any(|i| missing(i) && !ends.is_gap(i)) {
-        return ends;
+    mapped && !series.has_gap(i)
+}
+
+/// The ends `(low, high)` of the bars of a scatter's points, kept only on the complete rows:
+/// where the point is drawn (`drawn`) and both ends are present. Every other row has neither
+/// end, so that a bar that is not drawn does not count in the limits either. The ends
+/// themselves, shared, when every row with an end is complete.
+fn complete_rows(
+    (low, high): (SharedValues, SharedValues),
+    drawn: impl Fn(usize) -> bool,
+) -> (SharedValues, SharedValues) {
+    let complete = |i: usize| drawn(i) && !low.is_gap(i) && !high.is_gap(i);
+    let partial = (0..low.len()).any(|i| !complete(i) && !(low.is_gap(i) && high.is_gap(i)));
+    if !partial {
+        return (low, high);
     }
-    match ends {
+    let keep = |ends: &SharedValues| match ends {
         SharedValues::Numbers(values) => SharedValues::Numbers(
             (0..values.len())
-                .map(|i| if missing(i) { f64::NAN } else { values[i] })
+                .map(|i| if complete(i) { values[i] } else { f64::NAN })
                 .collect(),
         ),
         SharedValues::Times(times) => SharedValues::Times(
             (0..times.len())
-                .map(|i| if missing(i) { None } else { times[i] })
+                .map(|i| if complete(i) { times[i] } else { None })
                 .collect(),
         ),
-    }
+    };
+    (keep(&low), keep(&high))
 }
 
 impl ScatterMark {

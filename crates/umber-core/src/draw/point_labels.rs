@@ -6,8 +6,9 @@
 //! placement settles ([`fit_then_place`]).
 //!
 //! **Which points.** A point gets a label when it is drawn: both coordinates present (a finite
-//! number, a category, a time) and a fill (a color-mapped value that maps to a color), with its
-//! centre inside the plot. The label writes the point's coordinate on the value axis, x on a
+//! number, a category, a time) and a fill (a color-mapped value that maps to a color), within
+//! the explicit limits of either axis, with its centre inside the plot. A point outside explicit
+//! limits gets no label and adds no reach to the limit fits. The label writes the point's coordinate on the value axis, x on a
 //! category y axis and y otherwise, in the mark's format, else the value axis's tick format:
 //! numbers as bar labels write them ([`bar_labels::value_texts`]), times as [`time_texts`]
 //! writes them.
@@ -48,7 +49,10 @@
 //!
 //! Text written by `text()` and `annotate()` is drawn after the labels and is not an obstacle.
 //! Heatmap cell labels need two category axes, on which no scatter is drawn, so they never
-//! meet point labels. Each layer of a twin-axes panel places its labels against its own marks.
+//! meet point labels. The layers of a twin-axes panel share one plot, so they share its
+//! obstacles: the marks and bar labels of every layer, and the point labels placed so far.
+//! The layers place their labels in layer order, the left axes first, each with its own axes'
+//! mapping and the limit fits of its own axes.
 
 use super::bar_labels::{self, contains};
 use super::chrome::text;
@@ -143,6 +147,38 @@ impl Sides {
     }
 }
 
+/// The explicit limits of one axis, as the points to label are chosen within them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Limits {
+    /// Automatic limits, which grow to hold every point.
+    Automatic,
+    /// Explicit numeric limits, the lower first.
+    Numbers(f64, f64),
+    /// Explicit time limits, the earlier first.
+    Times(Instant, Instant),
+}
+
+impl Limits {
+    /// The limits of an axis with the explicit numeric limits `numbers` or time limits `times`.
+    fn new(numbers: Option<(f64, f64)>, times: Option<(Instant, Instant)>) -> Limits {
+        match (numbers, times) {
+            (Some((a, b)), _) => Limits::Numbers(a.min(b), a.max(b)),
+            (None, Some((a, b))) => Limits::Times(a.min(b), a.max(b)),
+            (None, None) => Limits::Automatic,
+        }
+    }
+
+    /// Whether the coordinate `at`, as the limit fits read it, lies within the limits; a
+    /// category (`None`) always does.
+    fn holds(self, at: Option<ReachFrom>) -> bool {
+        match (self, at) {
+            (Limits::Numbers(low, high), Some(ReachFrom::Number(v))) => (low..=high).contains(&v),
+            (Limits::Times(low, high), Some(ReachFrom::Time(t))) => (low..=high).contains(&t),
+            _ => true,
+        }
+    }
+}
+
 /// One point's label, measured.
 #[derive(Debug, Clone)]
 struct PointLabel {
@@ -219,6 +255,10 @@ impl ScatterLabels {
         } else {
             axes.y_tick_format()
         };
+        let within = [
+            Limits::new(axes.x_limits(), axes.x_time_limits()),
+            Limits::new(axes.y_limits(), axes.y_time_limits()),
+        ];
         let mut measured = Vec::new();
         let mut scatters = 0;
         for (index, mark) in marks.iter().enumerate() {
@@ -243,6 +283,8 @@ impl ScatterLabels {
                     present(data.x(), i)
                         && present(data.y(), i)
                         && has_fill(theme, scale, *color, mapped.as_ref(), i)
+                        && within[0].holds(coordinate(data.x(), i))
+                        && within[1].holds(coordinate(data.y(), i))
                 })
                 .collect();
             let format = labels.format.as_ref().unwrap_or(axis_format);
@@ -284,10 +326,7 @@ impl ScatterLabels {
                 points,
             });
         }
-        let explicit = [
-            axes.x_limits().is_some() || axes.x_time_limits().is_some(),
-            axes.y_limits().is_some() || axes.y_time_limits().is_some(),
-        ];
+        let explicit = within.map(|limits| limits != Limits::Automatic);
         Ok(ScatterLabels {
             marks: measured,
             explicit,
@@ -389,7 +428,7 @@ impl ScatterLabels {
 }
 
 /// The value labels of one axes, placed by [`items`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Placed {
     /// The labels, as one unclipped group; `None` without labels.
     pub item: Option<Item>,
@@ -469,7 +508,7 @@ pub(crate) fn items(
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
     labels: &ScatterLabels,
-    (drawn, placed): (&DrawnMarks, &[Bounds]),
+    obstacles: &mut Obstacles,
     context: &'static str,
 ) -> Result<Placed> {
     if labels.is_empty() {
@@ -480,15 +519,6 @@ pub(crate) fn items(
     }
     let plot = layout.plot;
     let maps = mark_context(theme, resolved, layout, marks).maps;
-    let mut obstacles = Obstacles::new(plot);
-    for (index, mark) in marks.iter().enumerate() {
-        if obstacle_marks(mark) {
-            obstacles.add_items(drawn.of_mark(index));
-        }
-    }
-    for &bounds in placed {
-        obstacles.add_box(bounds);
-    }
     let mut items = Vec::new();
     let mut sides = Vec::with_capacity(labels.marks.len());
     // The first automatic label, in placing order, that leaves the plot.
@@ -589,6 +619,30 @@ pub(crate) fn items(
             unsettled: unsettled.map(|label| labels.unsettled(label, context)),
         },
     })
+}
+
+/// The obstacles of the automatic value labels of the plot `plot`, empty; every layer of the
+/// panel adds its own ([`add_obstacles`]) before any label is placed ([`items`]).
+pub(crate) fn obstacles(plot: Area) -> Obstacles {
+    Obstacles::new(plot)
+}
+
+/// Adds to `obstacles` what the automatic value labels of a plot must stay clear of in one of
+/// its layers: the marks `marks` drawn as `drawn` ([`obstacle_marks`]) and the boxes `placed`
+/// of the bar labels the layer placed.
+pub(crate) fn add_obstacles(
+    obstacles: &mut Obstacles,
+    marks: &[ResolvedMark<'_>],
+    (drawn, placed): (&DrawnMarks, &[[f64; 4]]),
+) {
+    for (index, mark) in marks.iter().enumerate() {
+        if obstacle_marks(mark) {
+            obstacles.add_items(drawn.of_mark(index));
+        }
+    }
+    for &bounds in placed {
+        obstacles.add_box(bounds);
+    }
 }
 
 /// Whether the drawn items of `mark` are obstacles of automatic labels: every data mark, but

@@ -1010,6 +1010,78 @@ fn png_svg_and_pdf_render_labels_that_grew_the_limits() {
     assert_eq!(contents(&scene).iter().filter(|t| **t == "81.7").count(), 1);
 }
 
+// ---- Twin axes and explicit limits ---------------------------------------------------------
+
+/// A left axes from 0 to 10 and its twin from 0 to 100, each with an automatic label at the
+/// same place on the page; with `bars`, the twin also has an error bar through the left point.
+fn twin_labels(bars: bool) -> Figure {
+    let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+    let mut left = axes(&mut f);
+    left.xlim(0.0, 10.0)
+        .unwrap()
+        .ylim(0.0, 10.0)
+        .unwrap()
+        .scatter(nums(&[5.0]), &[5.25], options(Place::Auto))
+        .unwrap();
+    let mut right = left.twin_y(ScaleKind::Linear).unwrap();
+    right.ylim(0.0, 100.0).unwrap();
+    if bars {
+        right
+            .y_error_bars(nums(&[5.0]), &[40.0], &[70.0], ErrorBarOptions::default())
+            .unwrap();
+    } else {
+        right
+            .scatter(nums(&[5.0]), &[52.5], options(Place::Auto))
+            .unwrap();
+    }
+    f
+}
+
+fn overlap(a: [f64; 4], b: [f64; 4]) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+#[test]
+fn twin_layers_share_the_obstacles_of_their_labels() {
+    // The twin's label avoids the left label, placed first.
+    let scene = render(&twin_labels(false));
+    let (left, right) = (
+        text_box(&scene, text(&scene, "5.25")),
+        text_box(&scene, text(&scene, "52.5")),
+    );
+    assert!(!overlap(left, right), "{left:?} and {right:?}");
+    assert_eq!(side_of(&scene, "5.25", 0), Place::Above);
+    // The left label avoids the twin's error bar.
+    let scene = render(&twin_labels(true));
+    assert_eq!(side_of(&scene, "5.25", 0), Place::Right);
+}
+
+#[test]
+fn labels_outside_explicit_limits_do_not_grow_the_other_axis() {
+    let build = |annotate: bool| {
+        let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+        axes(&mut f)
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .scatter(nums(&[0.5]), &[0.0], ScatterOptions::default())
+            .unwrap()
+            .scatter(
+                nums(&[2.0]),
+                &[10.0],
+                if annotate {
+                    options(Place::Above)
+                } else {
+                    ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        render(&f)
+    };
+    let (plain, annotated) = (build(false), build(true));
+    assert_eq!(markers(&annotated), markers(&plain));
+    assert_eq!(contents(&annotated), contents(&plain));
+}
+
 // ---- Options and missing points ------------------------------------------------------------
 
 #[test]

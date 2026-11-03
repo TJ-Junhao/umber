@@ -151,6 +151,48 @@ impl XySeries {
         &self.y
     }
 
+    /// Whether the point at `i` has a missing coordinate: NaN, or a missing time.
+    pub(super) fn has_gap(&self, i: usize) -> bool {
+        let missing = |data: &AxisData| match data {
+            AxisData::Numbers(values) => values.get(i).is_none_or(|v| v.is_nan()),
+            AxisData::Times(times) => times.get(i).is_none_or(Option::is_none),
+            AxisData::Categories(names) => i >= names.len(),
+        };
+        missing(&self.x) || missing(&self.y)
+    }
+
+    /// The series with a gap at every point where `gap` holds: y is made NaN or a missing time
+    /// there, or x when y holds categories, which have no gap.
+    pub(super) fn with_gaps(&self, gap: impl Fn(usize) -> bool) -> XySeries {
+        let open = |data: &AxisData| match data {
+            AxisData::Numbers(values) => Some(AxisData::Numbers(
+                values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| if gap(i) { f64::NAN } else { v })
+                    .collect(),
+            )),
+            AxisData::Times(times) => Some(AxisData::Times(
+                times
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &t)| if gap(i) { None } else { t })
+                    .collect(),
+            )),
+            AxisData::Categories(_) => None,
+        };
+        match open(&self.y) {
+            Some(y) => XySeries {
+                x: Arc::clone(&self.x),
+                y: Arc::new(y),
+            },
+            None => XySeries {
+                x: open(&self.x).map_or_else(|| Arc::clone(&self.x), Arc::new),
+                y: Arc::clone(&self.y),
+            },
+        }
+    }
+
     /// The x values, shared with every mark built from the series.
     pub(super) fn shared_x(&self) -> &Arc<AxisData> {
         &self.x

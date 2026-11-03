@@ -95,7 +95,7 @@ impl Shape {
 
 /// The obstacles of one panel, indexed by a uniform grid over its plot.
 #[derive(Debug, Clone)]
-pub(super) struct Obstacles {
+pub(crate) struct Obstacles {
     /// The left and top edges of the grid: the plot's.
     origin: XY,
     /// The side of a cell, in points.

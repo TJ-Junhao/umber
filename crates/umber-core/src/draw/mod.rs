@@ -234,12 +234,13 @@ pub(crate) fn drawn_marks(
                 color,
                 size,
                 ref mapped,
+                width,
                 ..
             } => {
                 // The scatter's own line, then its own error bars, lie under its markers, all
                 // in its color at full opacity and the theme's line width, as a line and error
                 // bars of the automatic width are drawn.
-                let own = (solid(color), theme.drawn_line_width(crate::SizeSpec::Auto));
+                let own = (solid(color), width);
                 if let Some(line_mark) = scatter_mark.line() {
                     line_mark_items(&context, resolved, line_mark, own, &mut items);
                 }
@@ -627,8 +628,9 @@ pub(crate) fn marker_outline(mapped: bool) -> f32 {
 }
 
 /// The clip rectangle of the marks: the plot area, widened horizontally on each side by half of
-/// the widest stroke among the `marks` drawn along a line, each at its own drawn width
-/// ([`ResolvedMark::line_width`]); the plot area itself when there is no such mark.
+/// the widest stroke among the `marks` drawn along a line, a scatter's own line included, each
+/// at its own drawn width ([`ResolvedMark::stroke_width`]); the plot area itself when there is
+/// no such mark.
 ///
 /// The widening never takes more than the free room beside the plot area
 /// ([`Layout::room_left`], [`Layout::room_right`]): on the left it stops at the y tick labels
@@ -654,12 +656,12 @@ pub(super) fn marks_clip(layout: &Layout, marks: &[ResolvedMark<'_>]) -> Rect {
     }
 }
 
-/// The drawn stroke width of the widest of the `marks` drawn along a line
-/// ([`ResolvedMark::line_width`]), in points; 0 when there is no such mark. It widens the
+/// The drawn stroke width of the widest line among the `marks`, a scatter's own line included
+/// ([`ResolvedMark::stroke_width`]), in points; 0 when there is no such line. It widens the
 /// marks clip ([`marks_clip`]) and sets the smallest axis-space clip margin of every line.
 fn widest_line_width(marks: &[ResolvedMark<'_>]) -> f32 {
     marks
         .iter()
-        .filter_map(ResolvedMark::line_width)
+        .filter_map(ResolvedMark::stroke_width)
         .fold(0.0, f32::max)
 }

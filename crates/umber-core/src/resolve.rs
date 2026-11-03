@@ -1662,6 +1662,9 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
         /// color; `None` for one marker color.
         mapped: Option<MappedColors<'a>>,
+        /// The stroke width, as drawn in points, of the scatter's own line and error bars: the
+        /// theme's line width.
+        width: f32,
     },
     /// An area mark.
     Area {
@@ -2643,6 +2646,18 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. } => None,
             ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
+        }
+    }
+
+    /// The stroke width, as drawn, of the widest line the mark draws with round ends: its
+    /// [`line_width`](Self::line_width), or the width of a scatter's own connecting line. It
+    /// widens the marks clip so that those ends stay whole at the plot edge; unlike
+    /// [`line_width`](Self::line_width), it does not decide how an axis is padded, so a
+    /// scatter's own line leaves its limits as a scatter's.
+    pub fn stroke_width(&self) -> Option<f32> {
+        match *self {
+            ResolvedMark::Scatter { mark, width, .. } if mark.line().is_some() => Some(width),
+            _ => self.line_width(),
         }
     }
 
@@ -4104,6 +4119,7 @@ fn resolve_panel_marks_from<'a>(
                     color,
                     size: theme.drawn_marker_size(mark.options().size),
                     mapped,
+                    width: theme.drawn_line_width(crate::SizeSpec::Auto),
                 }
             }
             Mark::Bubbles(mark) => {

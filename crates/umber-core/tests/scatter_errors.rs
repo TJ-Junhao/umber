@@ -297,7 +297,7 @@ fn the_line_then_the_bars_lie_under_the_markers() {
 
 #[test]
 fn own_bars_look_like_standalone_error_bars_and_skip_nan_ends() {
-    let (low, high) = ([1.5, f64::NAN, 2.0], [2.5, 3.5, 3.0]);
+    let (low, high) = ([1.5, f64::NAN, 2.0], [2.5, f64::NAN, 3.0]);
     let mut own = figure(ScaleKind::Linear, ScaleKind::Linear);
     axes(&mut own)
         .scatter(
@@ -784,4 +784,112 @@ fn labels_of_lines_drawn_by_the_scatter_settle_as_limits_grow() {
         .collect();
     let peak = (f64::from(markers[1][3].x), f64::from(markers[1][3].y));
     assert_eq!(label_side(&scene, "81.7", peak), Place::Above);
+}
+
+// ---- Points that are not drawn, and the clip of the own line ---------------------------------
+
+/// The marker centres of `scene`, in drawing order.
+fn centres(scene: &Scene) -> Vec<(f32, f32)> {
+    mark_items(scene)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Markers { positions, .. } => {
+                Some(positions.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+#[test]
+fn bars_that_are_not_drawn_leave_the_limits_alone() {
+    let build = |x: &[f64], y: &[f64], y_error: Option<ErrorRange>| {
+        let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+        axes(&mut f)
+            .scatter(nums(x), y, with_errors(y_error, false))
+            .unwrap();
+        render(&f)
+    };
+    let nan = f64::NAN;
+    // A point left out for a missing x keeps no bar, and its ends count nowhere.
+    let (x, y) = ([0.0, 1.0, nan], [0.0, 1.0, 0.0]);
+    let plain = build(&x, &y, None);
+    let gapped = build(&x, &y, ends(&[nan, nan, 1000.0], &[nan, nan, 2000.0]));
+    assert_eq!(centres(&gapped), centres(&plain));
+    assert!(stroke_items(&gapped).is_empty());
+    // Nor does the end of a bar whose other end is missing.
+    let (x, y) = ([0.0, 1.0], [0.0, 1.0]);
+    let plain = build(&x, &y, None);
+    let half = build(&x, &y, ends(&[nan, nan], &[nan, 2000.0]));
+    assert_eq!(centres(&half), centres(&plain));
+    assert!(stroke_items(&half).is_empty());
+}
+
+#[test]
+fn a_point_hidden_by_its_mapped_value_loses_its_bar_and_label_and_breaks_the_line() {
+    let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+    axes(&mut f)
+        .scatter(
+            nums(&[1.0, 2.0, 3.0, 4.0, 5.0]),
+            &[2.0, 3.0, 2.25, 2.5, 3.5],
+            labelled(ScatterOptions {
+                color: PointColor::By(ColorBy::new(vec![0.1, 0.3, f64::NAN, 0.7, 0.9])),
+                ..with_errors(
+                    ends(&[1.5, 2.5, 2.0, 2.0, 3.0], &[2.5, 3.5, 2.5, 3.0, 4.0]),
+                    true,
+                )
+            }),
+        )
+        .unwrap();
+    let scene = render(&f);
+    let strokes = stroke_items(&scene);
+    let (line, bars) = (strokes[0].0, strokes[1].0);
+    assert_eq!(contours(line), 2);
+    assert_eq!(contours(bars), 12, "four bars, each a stem and two caps");
+    assert!(!texts(&scene).iter().any(|t| t.text == "2.25"));
+}
+
+#[test]
+fn the_own_line_widens_the_marks_clip_as_a_line_does() {
+    // Explicit x limits at the end points: the round ends of the line reach past the plot.
+    let clip_and_line = |connect: bool| {
+        let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+        let mut ax = axes(&mut f);
+        ax.xlim(0.0, 4.0).unwrap();
+        if !connect {
+            ax.line(
+                nums(&[0.0, 2.0, 4.0]),
+                &[1.0, 3.0, 2.0],
+                LineOptions {
+                    color: ColorSpec::Palette {
+                        index: 0,
+                        alpha: umber_core::Alpha::OPAQUE,
+                    },
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+        ax.scatter(
+            nums(&[0.0, 2.0, 4.0]),
+            &[1.0, 3.0, 2.0],
+            with_errors(None, connect),
+        )
+        .unwrap();
+        let scene = render(&f);
+        let clip = scene
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Group { clip: Some(r), .. } => Some(*r),
+                _ => None,
+            })
+            .unwrap();
+        let (path, style) = stroke_items(&scene)[0];
+        (clip, path.clone(), style.clone())
+    };
+    let (own, alone) = (clip_and_line(true), clip_and_line(false));
+    assert_eq!(own.2.cap, LineCap::Round);
+    assert_eq!(own, alone);
 }

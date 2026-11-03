@@ -789,9 +789,10 @@ impl<'a> AxesMut<'a> {
     /// line width; the bars have caps, as [`AxesMut::y_error_bars`] draws them with the default
     /// options. The line is drawn first, then the bars, then the markers. The bars extend
     /// automatic limits as error bars do, and they and the line are obstacles of every
-    /// automatic value label. An end that is NaN, or a missing time, skips that point's bar,
-    /// and a point whose coordinate along the bar is missing has none; a missing point breaks
-    /// the line, as NaN breaks [`AxesMut::line`]. The ends are checked as
+    /// automatic value label. A point that is not drawn, for a missing coordinate or a
+    /// color-mapped value that is NaN, has no marker, no value label and no bar, and breaks the
+    /// line, as NaN breaks [`AxesMut::line`]. A bar with a missing end, NaN or a missing time,
+    /// is skipped, and neither of its ends counts in the limits. The ends are checked as
     /// [`AxesMut::y_error_bars`] checks its limits, with errors that name `x_error` or
     /// `y_error` and the index: `Error::Usage` along a category axis, for numbers along a time
     /// axis and for times along another; `Error::Data` for ends that do not number one pair

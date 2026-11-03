@@ -1052,8 +1052,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         have caps, as ``y_error_bars()`` draws them. The line is drawn first, then the bars,
         then the markers. Bars extend automatic limits as standalone error bars do, and value
         labels avoid both the bars and the line. A NaN end skips that point's bar, so a bar can
-        go on one point only, and a point left out has no bar; a point left out also breaks the
-        line. With ``by``, each group's line joins only its own points. Use ``y_error_bars()``
+        go on one point only, and neither end of a skipped bar counts in the limits. A point
+        left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no marker, no value label
+        and no bar, and breaks the line. With ``by``, each group's line joins only its own
+        points. Use ``y_error_bars()``
         and ``line()`` only for marks that stand on their own.
 
         Args:

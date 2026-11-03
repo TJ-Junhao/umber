@@ -1983,9 +1983,11 @@ fn draw_scene(
         return Ok((scene, Vec::new()));
     }
     let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
+    let mut layers = draw_layers(figure, panels, &planned, fonts, context)?;
     let mut placements: Vec<point_labels::Placement> = std::iter::repeat_with(Default::default)
         .take(panels.len())
         .collect();
+    let mut points = place_point_labels(figure, panels, &planned, &layers, context)?;
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2010,53 +2012,26 @@ fn draw_scene(
                 continue;
             }
         };
-        draw::check_images(resolved, layout, &panel.marks, context)
-            .map_err(|err| in_cell(figure, panel.axes, err))?;
-        draw::check_points(resolved, layout, &panel.marks, context)
-            .map_err(|err| in_cell(figure, panel.axes, err))?;
-        scene.push(draw::chrome(theme, layout));
-        let drawn = draw::drawn_marks(theme, fonts, resolved, layout, &panel.marks)
-            .map_err(|err| in_cell(figure, panel.axes, err))?;
-        let notes = draw::heatmap_annotations(
-            theme,
-            fonts,
-            resolved,
-            layout,
-            &panel.marks,
-            (axes.y_tick_format(), context),
-        )
-        .map_err(|err| in_cell(figure, panel.axes, err))?;
-        let values = bar_labels::items(
-            theme,
-            resolved,
-            layout,
-            axes,
-            &panel.marks,
-            &panel.labels,
-            context,
-        )
-        .map_err(|err| in_cell(figure, panel.axes, err))?;
-        let boxes = values.as_ref().map_or(&[][..], |values| &values.boxes[..]);
-        let points = point_labels::items(
-            theme,
-            resolved,
-            layout,
-            &panel.marks,
-            &panel.points,
-            (&drawn, boxes),
-            context,
-        )
-        .map_err(|err| in_cell(figure, panel.axes, err))?;
+        let Some(LayerMarks {
+            drawn,
+            notes,
+            values,
+        }) = layers[i].take()
+        else {
+            continue;
+        };
+        let points = points[i].take().unwrap_or_default();
         placements[i] = points
             .placement
             .map_error(|err| in_cell(figure, panel.axes, err));
-        let layers = [
+        scene.push(draw::chrome(theme, layout));
+        let stacked = [
             drawn.into_item(),
             notes,
             values.map(|values| values.item),
             points.item,
         ];
-        for item in layers.into_iter().flatten() {
+        for item in stacked.into_iter().flatten() {
             scene.push(item);
         }
         let legend = draw::legend::legend(theme, layout);
@@ -2118,6 +2093,133 @@ fn draw_scene(
         scene.push(notes);
     }
     Ok((scene, placements))
+}
+
+/// What one Cartesian layer of a panel draws under its point labels: its marks, the values
+/// written on its heatmap cells and the values written on its bars.
+struct LayerMarks {
+    /// The marks, with the items of each mark kept apart.
+    drawn: draw::DrawnMarks,
+    /// The values written on annotated heatmap cells.
+    notes: Option<crate::scene::Item>,
+    /// The values written on annotated bars, with their boxes.
+    values: Option<bar_labels::PlacedLabels>,
+}
+
+/// The marks and the cell and bar labels of every Cartesian layer of `panels`, laid out as
+/// `planned`, in the order of the panels; `None` for a pie. They are drawn before any point
+/// label is placed, so that the point labels of a twin-axes panel avoid those of every layer.
+///
+/// # Errors
+///
+/// As [`draw::check_images`], [`draw::check_points`], [`draw::drawn_marks`],
+/// [`draw::heatmap_annotations`] and [`bar_labels::items`], for the first layer that fails,
+/// named by its cell.
+fn draw_layers(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    planned: &FigurePlan,
+    fonts: &SceneFonts<'_>,
+    context: &'static str,
+) -> Result<Vec<Option<LayerMarks>>> {
+    let theme = figure.theme();
+    panels
+        .iter()
+        .zip(&planned.panels)
+        .map(|(panel, (resolved, layout))| {
+            let Some(axes) = panel.axes.cartesian() else {
+                return Ok(None);
+            };
+            let cell = |err| in_cell(figure, panel.axes, err);
+            draw::check_images(resolved, layout, &panel.marks, context).map_err(cell)?;
+            draw::check_points(resolved, layout, &panel.marks, context).map_err(cell)?;
+            let drawn =
+                draw::drawn_marks(theme, fonts, resolved, layout, &panel.marks).map_err(cell)?;
+            let notes = draw::heatmap_annotations(
+                theme,
+                fonts,
+                resolved,
+                layout,
+                &panel.marks,
+                (axes.y_tick_format(), context),
+            )
+            .map_err(cell)?;
+            let values = bar_labels::items(
+                theme,
+                resolved,
+                layout,
+                axes,
+                &panel.marks,
+                &panel.labels,
+                context,
+            )
+            .map_err(cell)?;
+            Ok(Some(LayerMarks {
+                drawn,
+                notes,
+                values,
+            }))
+        })
+        .collect()
+}
+
+/// The point labels of every Cartesian layer of `panels`, laid out as `planned` and drawn as
+/// `layers`, in the order of the panels; `None` for a pie. The layers of one plot, a panel and
+/// its twin, share the obstacles of their labels: the marks and bar labels of every layer, then
+/// each label placed. They place their labels in the order of the panels, the left axes first.
+///
+/// # Errors
+///
+/// As [`point_labels::items`], for the first label that cannot be placed, named by its cell.
+fn place_point_labels(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    planned: &FigurePlan,
+    layers: &[Option<LayerMarks>],
+    context: &'static str,
+) -> Result<Vec<Option<point_labels::Placed>>> {
+    let theme = figure.theme();
+    // The plot each layer is drawn in: its own for a primary axes, its parent's for a twin.
+    let plot_of = |i: usize| match panels[i].axes {
+        Layer::Twin { parent, .. } => parent,
+        Layer::Primary(_) => i,
+    };
+    let mut placed: Vec<Option<point_labels::Placed>> =
+        std::iter::repeat_with(|| None).take(panels.len()).collect();
+    for plot in 0..panels.len() {
+        let members: Vec<usize> = (0..panels.len())
+            .filter(|&i| plot_of(i) == plot && layers[i].is_some())
+            .collect();
+        if members.iter().all(|&i| panels[i].points.is_empty()) {
+            continue;
+        }
+        let mut obstacles = point_labels::obstacles(planned.panels[plot].1.plot);
+        for &i in &members {
+            if let Some(layer) = &layers[i] {
+                let boxes = layer.values.as_ref().map_or(&[][..], |v| &v.boxes[..]);
+                point_labels::add_obstacles(
+                    &mut obstacles,
+                    &panels[i].marks,
+                    (&layer.drawn, boxes),
+                );
+            }
+        }
+        for &i in &members {
+            let (panel, (resolved, layout)) = (&panels[i], &planned.panels[i]);
+            let labels = point_labels::items(
+                theme,
+                resolved,
+                layout,
+                &panel.marks,
+                &panel.points,
+                &mut obstacles,
+                context,
+            )
+            .map_err(|err| in_cell(figure, panel.axes, err))?;
+            placed[i] = Some(labels);
+        }
+    }
+    Ok(placed)
 }
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a
