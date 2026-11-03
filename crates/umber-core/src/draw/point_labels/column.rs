@@ -19,16 +19,21 @@
 //! **Overlap.** Two values of one sub-column whose boxes overlap along the category axis fail
 //! the render, as does a value of a row above the plot that reaches into the row's title, and
 //! a value or title that leaves the part of the canvas that belongs to its axes (the whole
-//! canvas for a figure of one axes, its cells on a grid), as a value centred on a point at
-//! the edge of the plot can. The layout reserves no room for that overhang, and the limits
-//! never change to avoid it.
+//! canvas for a figure of one axes, its cells on a grid) or comes closer than
+//! [`X_LABEL_EDGE_GAP`] to the left or right edge of the canvas, as x tick labels may not, as a
+//! value centred on a point at the edge of the plot can. Between the cells of a grid the cell
+//! is the bound. The layout reserves no room for that overhang, and the limits never change
+//! to avoid it.
 
 use super::{MarkLabels, PointLabel};
 use crate::draw::chrome::text;
 use crate::draw::mapping::{AxisPoint, axis_values};
 use crate::draw::mark_context;
 use crate::error::quoted;
-use crate::layout::{ColumnInput, ColumnSide, Frame, Label, Layout, value_text};
+use crate::layout::{
+    CONTAINMENT_TOLERANCE, ColumnInput, ColumnSide, Frame, Label, Layout, X_LABEL_EDGE_GAP,
+    value_text,
+};
 use crate::model::Axes;
 use crate::resolve::{Resolved, ResolvedMark};
 use crate::scene::Item;
@@ -213,13 +218,14 @@ struct Span {
 
 /// The values that the marks `marks`, resolved as `resolved` and laid out as `layout`, write
 /// in their value column, measured in `labels`, and the column's title, as one unclipped
-/// group; `None` without a value column. Messages name the frame of the axes `container`:
-/// `"figure"` for a figure of one axes, `"panel"` on a grid.
+/// group; `None` without a value column. Messages name the frame of the axes: the figure for
+/// a figure of one axes, the panel on a grid (`on_grid`). The canvas is `canvas` pt wide.
 ///
 /// # Errors
 ///
-/// `Error::Style` under `context` for a title that leaves the frame; then, for the first
-/// sub-column, in mark order: a value that leaves the frame or, above the plot, reaches into
+/// `Error::Style` under `context` for a title that leaves the frame or comes closer than
+/// [`X_LABEL_EDGE_GAP`] to the left or right canvas edge; then, for the first sub-column, in
+/// mark order: a value that does so or, above the plot, reaches into
 /// the row's title, naming the mark and the value; and two values that overlap along the
 /// category axis, naming the mark and both values.
 pub(crate) fn column_items(
@@ -228,7 +234,7 @@ pub(crate) fn column_items(
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
     labels: &super::ScatterLabels,
-    (context, container): (&'static str, &'static str),
+    (context, on_grid, canvas): (&'static str, bool, f64),
 ) -> Result<Option<Item>> {
     let Some(placed) = &layout.value_column else {
         return Ok(None);
@@ -239,22 +245,35 @@ pub(crate) fn column_items(
         ColumnSide::Right => COLUMN_HINT,
         ColumnSide::Above => ROW_HINT,
     };
+    let bounds = text_bounds(layout.frame, canvas);
+    let (container, edge) = if on_grid {
+        ("panel", "the figure's")
+    } else {
+        ("figure", "its")
+    };
     let leaves = |what: String| {
-        Error::style(context, format!("{what} reaches outside the {container}.")).with_hint(hint)
+        Error::style(
+            context,
+            format!(
+                "{what} reaches outside the {container}, or less than {X_LABEL_EDGE_GAP} pt \
+                 from {edge} left or right edge."
+            ),
+        )
+        .with_hint(hint)
     };
     let mut items = Vec::new();
     // The title's box, which the values of a row above the plot keep clear of.
     let title = match &placed.title {
         Some(title) => {
-            let bounds = text_box(title, title.x, title.y);
-            if !inside(layout.frame, bounds) {
+            let title_box = text_box(title, title.x, title.y);
+            if !inside(bounds, title_box) {
                 return Err(leaves(format!(
                     "the value column title {}",
                     quoted(&title.text)
                 )));
             }
             items.push(text(title, theme.text_color()));
-            Some(bounds)
+            Some(title_box)
         }
         None => None,
     };
@@ -308,7 +327,7 @@ pub(crate) fn column_items(
                     (label.x, label.x + width)
                 }
             };
-            if !inside(layout.frame, text_box(&label, label.x, label.y)) {
+            if !inside(bounds, text_box(&label, label.x, label.y)) {
                 return Err(leaves(format!(
                     "the value {} of {}",
                     quoted(&point.label.text),
@@ -356,13 +375,32 @@ fn text_box(label: &Label, x: f64, y: f64) -> [f64; 4] {
     ]
 }
 
-/// Whether the box `bounds` lies inside `frame`, to the containment tolerance of the layout.
-fn inside(frame: Frame, [left, top, right, bottom]: [f64; 4]) -> bool {
-    let tolerance = crate::layout::CONTAINMENT_TOLERANCE;
-    left >= frame.x - tolerance
-        && top >= frame.y - tolerance
-        && right <= frame.right() + tolerance
-        && bottom <= frame.bottom() + tolerance
+/// Where the values and the title of the value column of axes whose frame is `frame`, on a
+/// canvas `canvas` pt wide, may go (left, top, right, bottom): the frame, less
+/// [`X_LABEL_EDGE_GAP`] on a side that is the left or right edge of the canvas, which x tick
+/// labels keep clear of too.
+fn text_bounds(frame: Frame, canvas: f64) -> [f64; 4] {
+    let tolerance = CONTAINMENT_TOLERANCE;
+    let left = if frame.x <= tolerance {
+        frame.x + X_LABEL_EDGE_GAP
+    } else {
+        frame.x
+    };
+    let right = if frame.right() >= canvas - tolerance {
+        frame.right() - X_LABEL_EDGE_GAP
+    } else {
+        frame.right()
+    };
+    [left, frame.y, right, frame.bottom()]
+}
+
+/// Whether the box `inner` lies inside the box `outer`, to the containment tolerance of the
+/// layout.
+fn inside(outer: [f64; 4], inner: [f64; 4]) -> bool {
+    inner[0] >= outer[0] - CONTAINMENT_TOLERANCE
+        && inner[1] >= outer[1] - CONTAINMENT_TOLERANCE
+        && inner[2] <= outer[2] + CONTAINMENT_TOLERANCE
+        && inner[3] <= outer[3] + CONTAINMENT_TOLERANCE
 }
 
 /// The first two of `spans` that overlap, as the indices of their points, the spans sorted

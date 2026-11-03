@@ -2069,18 +2069,17 @@ fn draw_scene(
         placements[i] = points
             .placement
             .map_error(|err| in_cell(figure, panel.axes, err));
-        let container = if figure.grid().rows() * figure.grid().cols() == 1 {
-            "figure"
-        } else {
-            "panel"
-        };
         let column = match point_labels::column_items(
             theme,
             resolved,
             layout,
             &panel.marks,
             &panel.points,
-            (context, container),
+            (
+                context,
+                figure.grid().rows() * figure.grid().cols() > 1,
+                width,
+            ),
         ) {
             Ok(column) => column,
             Err(err) => {

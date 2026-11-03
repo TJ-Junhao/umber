@@ -77,7 +77,7 @@ const AXIS_LABEL_GAP: f64 = 4.0;
 const MIN_PLOT: f64 = 1.0;
 /// The smallest gap between an x tick label and the left or right canvas edge: half the outer
 /// padding, so an end label may reach into the padding but never ends flush with the edge.
-const X_LABEL_EDGE_GAP: f64 = PADDING / 2.0;
+pub(crate) const X_LABEL_EDGE_GAP: f64 = PADDING / 2.0;
 /// The largest share of the inner width (inside the outer padding) by which x tick labels may
 /// inset one side of the plot area, and that direct labels may reserve on the right.
 const END_LABEL_SHARE: f64 = 0.25;

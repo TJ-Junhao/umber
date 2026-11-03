@@ -979,22 +979,60 @@ fn row_values_that_leave_the_figure_are_a_style_error() {
     assert_eq!(
         err.to_string(),
         "Figure.to_scene(): the value \"Measured = 123.456 units\" of scatter 1 reaches outside \
-         the figure."
+         the figure, or less than 6 pt from its left or right edge."
     );
     assert_eq!(
         err.hint(),
         Some("make the figure wider, pass a smaller label_size=, or use another place.")
     );
-    // The limits stay as set: a wider figure holds the values.
-    let mut f = Figure::new(9.0, 3.0, Theme::pigment()).unwrap();
+    // The same figure and limits with the points moved in from the plot's edges: the values
+    // fit, so the error is about where the values sit, not about the values themselves.
+    let mut f = Figure::new(4.0, 3.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .xlim(0.0, 1.0)
         .unwrap()
-        .scatter(nums(&[0.1, 0.9]), &[123.456, 789.012], measured())
+        .scatter(nums(&[0.25, 0.75]), &[123.456, 789.012], measured())
         .unwrap();
     let scene = render(&f);
-    assert!(boxed(&scene, "Measured = 123.456 units")[0] >= 0.0);
+    assert!(boxed(&scene, "Measured = 123.456 units")[0] >= 6.0);
+    assert!(boxed(&scene, "Measured = 789.012 units")[2] <= 4.0 * 72.0 - 6.0);
+}
+
+/// One row value at `x` between explicit limits 0 and 1, on a figure 4 in wide.
+fn edge_value(x: f64) -> Figure {
+    let mut f = Figure::new(4.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1000.0)
+        .unwrap()
+        .scatter(nums(&[x]), &[123.456], measured())
+        .unwrap();
+    f
+}
+
+#[test]
+fn row_values_keep_6_pt_from_the_canvas_edge() {
+    // Where the value's left end falls for a point at `x`: the plot and the value's width do
+    // not depend on `x`, since the limits are explicit.
+    let scene = render(&edge_value(0.5));
+    let [plot_left, _, plot_right, _] = plot(&scene);
+    let [left, _, right, _] = boxed(&scene, "Measured = 123.456 units");
+    let half = (right - left) / 2.0;
+    let at = |edge: f64| (edge + half - plot_left) / (plot_right - plot_left);
+    // Just inside the 6 pt inset at the left edge of the canvas renders there.
+    let scene = render(&edge_value(at(6.05)));
+    assert_close(boxed(&scene, "Measured = 123.456 units")[0], 6.05, "inside");
+    // Just outside it, though still on the canvas, raises.
+    let err = render_err(&edge_value(at(5.95)));
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert!(
+        err.to_string()
+            .ends_with("less than 6 pt from its left or right edge."),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1021,7 +1059,7 @@ fn row_values_that_reach_into_a_neighbouring_panel_are_a_style_error() {
     assert_eq!(
         err.to_string(),
         "Figure.to_scene(): row 0, col 0: the value \"Measured = 123.456 units\" of scatter 1 \
-         reaches outside the panel."
+         reaches outside the panel, or less than 6 pt from the figure's left or right edge."
     );
 }
 
