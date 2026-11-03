@@ -366,6 +366,13 @@ impl Resolved {
     }
 }
 
+/// The share of the line width of a standalone line or error bar of the automatic width
+/// ([`SizeSpec::Auto`](crate::SizeSpec::Auto)) that a scatter's own connecting line and error
+/// bars are drawn at ([`ScatterOptions::connect`](crate::ScatterOptions::connect),
+/// [`ScatterOptions::y_error`](crate::ScatterOptions::y_error)): they accompany the points, so
+/// they stay lighter than the marks. The caps of the bars keep the theme's length.
+pub(crate) const OWN_STROKE_SHARE: f32 = 0.5;
+
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
 pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
     (a.0 - b.0).abs() <= 1e-9
@@ -1662,6 +1669,9 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
         /// color; `None` for one marker color.
         mapped: Option<MappedColors<'a>>,
+        /// The stroke width, as drawn in points, of the scatter's own line and error bars:
+        /// [`OWN_STROKE_SHARE`] of the width of a line of the automatic width.
+        width: f32,
     },
     /// An area mark.
     Area {
@@ -2046,7 +2056,8 @@ impl<'a> ResolvedMark<'a> {
     ///
     /// A histogram yields the low and the high end of its binned range
     /// ([`HistBins::range`]), and nothing when it has no bins. An ECDF yields the x values of
-    /// its steps, and a density the x values of its line.
+    /// its steps, and a density the x values of its line. A scatter yields its x values and
+    /// then the limits of its own horizontal error bars, as error bars do.
     pub fn x_numbers(&self) -> DomainValues<'_> {
         let values: &[f64] = match self {
             ResolvedMark::Mesh { mark, .. } => mark.x_edges.numbers(),
@@ -2058,7 +2069,20 @@ impl<'a> ResolvedMark<'a> {
                 crate::bin2d::HexBins::Occupied(_) => bins.domain(0),
             },
             ResolvedMark::Line { mark, .. } => mark.x().numbers(),
-            ResolvedMark::Scatter { mark, .. } => mark.x().numbers(),
+            // The limits of a scatter's own horizontal bars are x values.
+            ResolvedMark::Scatter { mark, .. } => match mark.x_error_bars() {
+                Some(bars) => {
+                    return DomainValues::Computed(Box::new(
+                        mark.x()
+                            .numbers()
+                            .iter()
+                            .chain(bars.low())
+                            .chain(bars.high())
+                            .copied(),
+                    ));
+                }
+                None => mark.x().numbers(),
+            },
             ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
                 return DomainValues::Computed(Box::new(mark.sized(mark.x()).copied()));
             }
@@ -2161,8 +2185,9 @@ impl<'a> ResolvedMark<'a> {
 
     /// The times the mark contributes to a time axis along `which`, in data order, gaps
     /// skipped; none when its values along that axis are not times. Series and bubbles yield
-    /// their x or y times, bands and stacked areas their x times, error bars their positions,
-    /// mesh cells their edges, and reference lines and spans the times they sit at.
+    /// their x or y times, and a scatter then the limits of its own error bars along that axis,
+    /// bands and stacked areas their x times, error bars their positions and limits, mesh
+    /// cells their edges, and reference lines and spans the times they sit at.
     pub fn times(&self, which: ValueAxis) -> DomainTimes<'_> {
         match which {
             ValueAxis::X => self.x_times(),
@@ -2174,7 +2199,18 @@ impl<'a> ResolvedMark<'a> {
     fn x_times(&self) -> DomainTimes<'_> {
         match self {
             ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.x().times()),
-            ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.x().times()),
+            ResolvedMark::Scatter { mark, .. } => match mark.x_error_bars() {
+                Some(bars) => DomainTimes::Groups(Box::new(
+                    mark.x()
+                        .times()
+                        .iter()
+                        .chain(bars.low_times())
+                        .chain(bars.high_times())
+                        .copied()
+                        .flatten(),
+                )),
+                None => DomainTimes::gapped(mark.x().times()),
+            },
             ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.x().times()),
             ResolvedMark::Heatmap { .. } => DomainTimes::whole(&[]),
             ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.x().times()),
@@ -2221,7 +2257,18 @@ impl<'a> ResolvedMark<'a> {
     fn y_times(&self) -> DomainTimes<'_> {
         match self {
             ResolvedMark::Line { mark, .. } => DomainTimes::gapped(mark.y().times()),
-            ResolvedMark::Scatter { mark, .. } => DomainTimes::gapped(mark.y().times()),
+            ResolvedMark::Scatter { mark, .. } => match mark.y_error_bars() {
+                Some(bars) => DomainTimes::Groups(Box::new(
+                    mark.y()
+                        .times()
+                        .iter()
+                        .chain(bars.low_times())
+                        .chain(bars.high_times())
+                        .copied()
+                        .flatten(),
+                )),
+                None => DomainTimes::gapped(mark.y().times()),
+            },
             ResolvedMark::Stem { mark, .. } => DomainTimes::gapped(mark.y().times()),
             ResolvedMark::Heatmap { .. } => DomainTimes::whole(&[]),
             ResolvedMark::Area { mark, .. } => DomainTimes::gapped(mark.y().times()),
@@ -2421,7 +2468,20 @@ impl<'a> ResolvedMark<'a> {
                 crate::bin2d::HexBins::Occupied(_) => bins.domain(1),
             },
             ResolvedMark::Line { mark, .. } => mark.y().numbers(),
-            ResolvedMark::Scatter { mark, .. } => mark.y().numbers(),
+            // The limits of a scatter's own vertical bars are y values.
+            ResolvedMark::Scatter { mark, .. } => match mark.y_error_bars() {
+                Some(bars) => {
+                    return DomainValues::Computed(Box::new(
+                        mark.y()
+                            .numbers()
+                            .iter()
+                            .chain(bars.low())
+                            .chain(bars.high())
+                            .copied(),
+                    ));
+                }
+                None => mark.y().numbers(),
+            },
             ResolvedMark::Bubbles { mark, .. } if mark.has_missing_size() => {
                 return DomainValues::Computed(Box::new(mark.sized(mark.y()).copied()));
             }
@@ -2593,6 +2653,18 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. } => None,
             ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
+        }
+    }
+
+    /// The stroke width, as drawn, of the widest line the mark draws with round ends: its
+    /// [`line_width`](Self::line_width), or the width of a scatter's own connecting line. It
+    /// widens the marks clip so that those ends stay whole at the plot edge; unlike
+    /// [`line_width`](Self::line_width), it does not decide how an axis is padded, so a
+    /// scatter's own line leaves its limits as a scatter's.
+    pub fn stroke_width(&self) -> Option<f32> {
+        match *self {
+            ResolvedMark::Scatter { mark, width, .. } if mark.line().is_some() => Some(width),
+            _ => self.line_width(),
         }
     }
 
@@ -4054,6 +4126,7 @@ fn resolve_panel_marks_from<'a>(
                     color,
                     size: theme.drawn_marker_size(mark.options().size),
                     mapped,
+                    width: theme.drawn_line_width(crate::SizeSpec::Auto) * OWN_STROKE_SHARE,
                 }
             }
             Mark::Bubbles(mark) => {

@@ -52,7 +52,8 @@
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
-//!   [`ScatterOptions`], [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
+//!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, the [`ScatterGroup`]
+//!   of a grouped scatter, [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
 //!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
@@ -88,7 +89,8 @@
 //!   are edited with [`PieAxesMut`] and [`PieOptions`];
 //! - text at data positions or in the plot: [`TextOptions`], [`AnnotateOptions`], [`InPlot`],
 //!   [`TextPosition`], the read-only [`Annotation`] with its [`AnnotationPlacement`] that
-//!   [`Axes::annotations`] returns, and the [`ValueLabels`] written on bars;
+//!   [`Axes::annotations`] returns, the [`ValueLabels`] written on bars, and the
+//!   [`PointLabels`] written next to scatter points with their [`Place`];
 //! - errors and metadata: [`Error`], [`Result`] and [`VERSION`].
 //!
 //! **Advanced Rust API.** Lower-level building blocks for direct Rust use. They are public and
@@ -170,14 +172,14 @@ pub use error::{Error, ErrorMessage, Result};
 pub use figure::StackedAreaMark;
 pub use figure::pdf_pages;
 pub use figure::{
-    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
-    ValueLabels,
+    AnnotateOptions, Annotation, AnnotationPlacement, InPlot, Place, PointLabels, TextOptions,
+    TextPosition, ValueLabels,
 };
 pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
-    LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
-    Step, StepMark, StepOptions,
+    LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
+    SeriesView, Share, Step, StepMark, StepOptions,
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};
@@ -189,7 +191,7 @@ pub use figure::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionVi
 pub use figure::{BubbleMark, BubbleOptions};
 pub use figure::{CmapChoice, ColorBy, PointColor};
 pub use figure::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
-pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
 pub use figure::{EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{

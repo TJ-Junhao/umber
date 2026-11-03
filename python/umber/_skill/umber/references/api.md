@@ -1424,7 +1424,7 @@ Example:
 ### `umber.Axes.scatter`
 
 ```text
-Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> Self
+Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False) -> Self
 ```
 
 Add a marker at each point ``(x[i], y[i])``.
@@ -1434,6 +1434,35 @@ plot: each point sits at the centre of its category's band. ``ColorBy`` fills st
 opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
 colors, fading to the background color as the Oklab distance grows. Single-color
 markers keep the theme's marker alpha and a 0.8 pt background-colored outline.
+
+With ``annotate=True`` each drawn point shows its value next to it: x on a category y
+axis and y otherwise, the time on a time axis. Points left out, and points outside
+explicit limits, get no label. Labels take the series color at full opacity (each
+group's with ``by``); a ``ColorBy`` scatter's labels take the theme's text color. A
+fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, and
+automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
+and left, and takes the first position inside the plot that overlaps no mark of these
+axes (markers, error bars, lines, bars, areas, bands, boxes and violins; not reference
+lines, spans or color-mapped cells) and no value label placed before. When no position
+inside is clear, it takes the first clear side that leaves the plot only across
+automatic limits, and those limits grow just enough to hold it, such as above the
+highest point of a line; explicit limits and category axes never grow. Labels are
+placed in call order, point by point, so the same data always gives the same figure.
+Text from ``text()`` and ``annotate()`` is not avoided.
+
+``x_error`` and ``y_error`` give each point an error bar, and ``connect=True`` joins the
+points with a line in input order. They belong to the series: they take its color at
+full opacity (each group's with ``by``, the theme's text color with ``ColorBy``), no
+palette color and no legend entry of their own, and half the line width that ``line()``
+and ``y_error_bars()`` draw with ``Size.AUTO``, so that they stay lighter than the marks
+they accompany; the bars have caps as long as those of ``y_error_bars()``. The line is
+drawn first, then the bars, then the markers. Bars extend automatic limits as standalone
+error bars do, and value labels avoid both the bars and the line. A NaN end skips that
+point's bar, so a bar can go on one point only, and neither end of a skipped bar counts
+in the limits. A point left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no
+marker, no value label and no bar, and breaks the line. With ``by``, each group's line
+joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
+stand on their own.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1450,24 +1479,53 @@ Args:
         one series. Names supply legend labels and palette colors; do not pass
         a non-empty ``label`` or an explicit ``color``. Missing or empty names
         and an empty grouping column are refused. Column names are never read.
+    annotate: Whether each point shows its value next to it.
+    format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
+        format of the value axis, as for bar labels. On a time axis only
+        ``TickFormat.AUTO`` and ``TickFormat.iso()`` apply; each time is written down to
+        the finest unit the scatter's times need, such as ``Mar 3`` or ``2026-03-03``.
+    label_size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
+        label size, ``Size.times(k)`` multiplies it after font scaling, and
+        ``Size.pt(p)`` uses points without font scaling. (``size`` is the marker size.)
+    place: Where each value goes: ``Place.AUTO``, or a fixed side, ``Place.ABOVE``,
+        ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``.
+    x_error: The ends ``(low, high)`` of each point's horizontal error bar, one value
+        each per point, in x data units: numbers on a linear or log x axis, times on a
+        time x axis. ``AUTO`` draws no bars.
+    y_error: The ends ``(low, high)`` of each point's vertical error bar, one value
+        each per point, in y data units: numbers on a linear or log y axis, times on a
+        time y axis. ``AUTO`` draws no bars.
+    connect: Whether a line joins the points in input order.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+        tuple of two columns.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the
-        axes, or a ``ColorBy`` does not have one value per point.
+        axes, or a ``ColorBy`` does not have one value per point. Also if an end of
+        ``x_error`` or ``y_error`` is infinite or not positive on a log axis, they do
+        not hold one value per point, or a low end is above its high end; the message
+        names the argument and the index.
         It is also raised for a line break or other control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control
-        character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
+        character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
+        ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
+        number format for times). Rendering raises it when a value label does not fit
+        inside the plot, when no position is clear for a label with ``Place.AUTO``, and
+        when the sides of ``Place.AUTO`` labels keep changing as the limits grow; the
+        message names the series (its label, or ``scatter 2`` for the second scatter of
+        the axes) and the value.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         both axes are category axes (type checkers accept such axes, so
         this is raised when the call runs), a ``ColorBy`` comes with a label, or its
         ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
-        marks of these axes.
+        marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
+        without ``annotate``; or if ``x_error`` or ``y_error`` lies along a category
+        axis, or holds numbers along a time axis.
 
 Example:
 
@@ -1479,6 +1537,17 @@ Example:
 >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
 >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
 >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+>>> scores = ub.Figure().add_axes(y=ub.Scale.category())
+>>> scores = scores.scatter([71.2, 74.8], ["Base", "Gate"], annotate=True)
+>>> fixed = ub.Figure().add_axes().scatter(
+...     [1, 2], [0.25, 0.5], annotate=True, format=ub.TickFormat.percent(0),
+...     place=ub.Place.RIGHT,
+... )
+>>> nan = float("nan")
+>>> folds = ub.Figure().add_axes(x=ub.Scale.category()).scatter(
+...     ["Fold 1", "Fold 2", "Mean"], [66.8, 68.1, 67.5],
+...     y_error=([nan, nan, 66.9], [nan, nan, 68.1]), connect=True,
+... )
 ```
 
 ### `umber.Axes.show`
@@ -4765,6 +4834,69 @@ Example:
 >>> ax = ub.pie(["A", "B"], [1, 2]).title("Parts")
 ```
 
+## `umber.Place`
+
+```text
+class Place(Enum)
+```
+
+Where the value label of a scatter point goes, with ``Axes.scatter(annotate=True)``.
+
+A fixed side puts every label of the scatter 3 pt beyond the marker's drawn edge, outline
+included, and never moves it; automatic limits grow so that the labels fit inside the plot.
+``AUTO`` takes the first clear side inside the plot; when there is none, automatic limits
+grow to make room on the first clear side that leaves the plot across them.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes().scatter([1, 2], [3.0, 4.5], annotate=True)
+>>> ax = ax.scatter([1, 2], [1.0, 2.0], annotate=True, place=ub.Place.BELOW)
+```
+
+### `umber.Place.ABOVE`
+
+```text
+Place.ABOVE
+```
+
+Above the point, centred horizontally.
+
+### `umber.Place.AUTO`
+
+```text
+Place.AUTO
+```
+
+Try above, right, below and left, in that order, and take the first position that lies
+inside the plot and overlaps no mark and no label placed before; failing that, the first
+clear one that automatic limits can grow to hold.
+
+### `umber.Place.BELOW`
+
+```text
+Place.BELOW
+```
+
+Below the point, centred horizontally.
+
+### `umber.Place.LEFT`
+
+```text
+Place.LEFT
+```
+
+Left of the point, centred vertically.
+
+### `umber.Place.RIGHT`
+
+```text
+Place.RIGHT
+```
+
+Right of the point, centred vertically.
+
 ## `umber.Render`
 
 ```text
@@ -6471,7 +6603,7 @@ Example:
 ## `umber.scatter`
 
 ```text
-scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[float, float]
+scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False) -> Axes[float, float]
 ```
 
 Plot a marker at each point on a new figure and return its axes.
@@ -6493,18 +6625,32 @@ Args:
         appearance, supplying their labels and palette colors. Do not pass an explicit
         color or a non-empty label. Missing or empty names and an empty grouping column
         are refused.
+    annotate: Whether each point shows its value next to it, as in ``Axes.scatter()``.
+    format: The format of the values shown by ``annotate``, as in ``Axes.scatter()``.
+    label_size: The size of the values shown by ``annotate``, as in ``Axes.scatter()``.
+    place: Where each value goes, as in ``Axes.scatter()``.
+    x_error: The ends ``(low, high)`` of each point's horizontal error bar, as in
+        ``Axes.scatter()``.
+    y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
+        ``Axes.scatter()``.
+    connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
 
 Returns:
     The axes of the new figure.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+        tuple of two columns.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite,
-        ``x`` holds names, or a ``ColorBy`` does not have one value per point.
-    StyleError: If ``label`` is too long or holds a line break or another control character.
-    UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
-        a ``ColorBy`` comes with a label.
+        ``x`` holds names, or a ``ColorBy`` does not have one value per point; or if
+        an end of ``x_error`` or ``y_error`` is infinite, they do not hold one value per
+        point, or a low end is above its high end.
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character, or ``format`` is ``TickFormat.iso()``.
+    UsageError: If ``by`` comes with an explicit color or a non-empty label; if
+        a ``ColorBy`` comes with a label; or if ``format``, ``label_size`` or ``place``
+        is given without ``annotate``.
 
 Example:
 

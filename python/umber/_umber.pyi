@@ -160,6 +160,9 @@ type _AxisValues = _FloatArray | list[str]
 # Series values along either axis: float data, names, or times on a time axis.
 type _SeriesValues = _FloatArray | list[str] | _TimeArray
 # A bar series of grouped and stacked bars: (label, values, color).
+# The ends (low, high) of the error bars of scatter points: float data, or times on a time
+# axis; None for no bars.
+type _ErrorArg = tuple[_FloatArray | _TimeArray, _FloatArray | _TimeArray] | None
 type _SeriesArg = tuple[str, _FloatArray, _ColorArg]
 # A named distribution: (label, one array per category, color).
 type _DistributionArg = tuple[str, list[_FloatArray], _ColorArg]
@@ -405,6 +408,13 @@ class Figure:
         color: _ColorArg | ColorBy,
         marker: int,
         size: _SizeArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+        label_size: _SizeArg,
+        place: int,
+        x_error: _ErrorArg,
+        y_error: _ErrorArg,
+        connect: bool,
     ) -> None: ...
     def bubbles(
         self,
@@ -847,9 +857,14 @@ class Figure:
         self,
         row: int | TwinAxes,
         col: int,
-        groups: list[tuple[str, _SeriesValues, _SeriesValues]],
+        groups: list[tuple[str, _SeriesValues, _SeriesValues, _ErrorArg, _ErrorArg]],
         marker: int,
         size: _SizeArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+        label_size: _SizeArg,
+        place: int,
+        connect: bool,
     ) -> None: ...
     def grouped_step(
         self,

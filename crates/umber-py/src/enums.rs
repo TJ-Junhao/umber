@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
     Align, ColorbarPosition, ContourStyle, Dash, FillStyle, GridLines, LegendMode, LegendPosition,
-    LegendStyle, Marker, Render, Share, Step, SvgText,
+    LegendStyle, Marker, Place, Render, Share, Step, SvgText,
 };
 use umber_core::{HistStat, HistStyle};
 
@@ -117,6 +117,14 @@ int_enum!("Align", Align {
     "RIGHT" => Align::Right = 2,
 });
 
+int_enum!("Place", Place {
+    "AUTO" => Place::Auto = 0,
+    "ABOVE" => Place::Above = 1,
+    "BELOW" => Place::Below = 2,
+    "LEFT" => Place::Left = 3,
+    "RIGHT" => Place::Right = 4,
+});
+
 int_enum!("Step", Step {
     "POST" => Step::Post = 0,
     "PRE" => Step::Pre = 1,
@@ -179,7 +187,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 16] = [
+const TABLES: [(&str, &[(&str, i64)]); 17] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
@@ -196,6 +204,7 @@ const TABLES: [(&str, &[(&str, i64)]); 16] = [
     (HistStyle::PY_NAME, HistStyle::MEMBERS),
     (HistStat::PY_NAME, HistStat::MEMBERS),
     (ContourStyle::PY_NAME, ContourStyle::MEMBERS),
+    (Place::PY_NAME, Place::MEMBERS),
 ];
 
 /// The member tables of every bound enum, keyed by the Python enum name.
@@ -248,6 +257,7 @@ mod tests {
         round_trips::<HistStyle>();
         round_trips::<HistStat>();
         round_trips::<ContourStyle>();
+        round_trips::<Place>();
     }
 
     #[test]
@@ -278,7 +288,8 @@ mod tests {
                 "Render",
                 "Hist",
                 "Stat",
-                "Contour"
+                "Contour",
+                "Place"
             ]
         );
     }

@@ -55,6 +55,9 @@
 //!   pie, in each title alignment, and the errors of a caption (in `corpus/caption.rs`).
 //! - Text at positions in the plot, in each corner and pinned to an annotation's arrow (in
 //!   `corpus/in_plot.rs`).
+//! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
+//!   placed automatically, and labels on fixed sides that grow the limits (in
+//!   `corpus/point_labels.rs`).
 //!
 //! Not covered:
 //!
@@ -125,6 +128,7 @@ mod corpus {
     pub mod mesh;
     pub mod pie;
     pub mod plot_height;
+    pub mod point_labels;
     pub mod rules;
     pub mod share;
     pub mod share_color;
@@ -226,6 +230,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::line_breaks::cases(&lib, &mut sink);
     corpus::caption::cases(&lib, &mut sink);
     corpus::in_plot::cases(&lib, &mut sink);
+    corpus::point_labels::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

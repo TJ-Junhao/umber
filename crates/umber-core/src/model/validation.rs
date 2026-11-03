@@ -700,6 +700,112 @@ pub(super) fn check_x_error_bars(
     check_intervals(context, x_transform, limits)
 }
 
+/// Validates `range`, the ends of the error bars of the `count` points of a scatter along
+/// `axis`, of scale kind `kind`, given as the argument `parameter` (`x_error` or `y_error`),
+/// before the scatter is stored. The checks run in this order, the first failure the error under
+/// `context`, naming `parameter`:
+///
+/// 1. the axis is a category axis, on which a point has no extent (`Error::Usage`);
+/// 2. numbers on a time axis, or times on a linear or log axis (`Error::Usage`);
+/// 3. the lower and then the upper ends hold one value per point;
+/// 4. the lower and then the upper ends against the axis, as [`check_numbers`] checks them;
+/// 5. no lower end lies above its upper end; an index where either is missing is not compared.
+pub(super) fn check_scatter_error(
+    context: &'static str,
+    (parameter, axis): (&'static str, SharedAxis),
+    kind: ScaleKind,
+    count: usize,
+    range: &super::ErrorRange,
+) -> Result<()> {
+    let name = axis.name();
+    let usage = |message: String, hint: &'static str| {
+        Error::usage(context, message)
+            .with_parameter(parameter)
+            .with_hint(hint)
+    };
+    let transform = match (kind, range) {
+        (ScaleKind::Category, _) => {
+            return Err(usage(
+                format!(
+                    "the {name} axis is a category axis; {parameter} needs a linear, log or time \
+                     {name} axis."
+                ),
+                "give the error along the numeric axis, or leave it out.",
+            ));
+        }
+        (ScaleKind::Time, super::ErrorRange::Numbers { .. }) => {
+            return Err(usage(
+                format!("{parameter} holds numbers, but the {name} axis is a time axis."),
+                "pass times for both ends.",
+            ));
+        }
+        (ScaleKind::Linear | ScaleKind::Log { .. }, super::ErrorRange::Times { .. }) => {
+            return Err(usage(
+                format!("{parameter} holds times, but the {name} axis is not a time axis."),
+                axis.time_scale_hint(),
+            ));
+        }
+        (ScaleKind::Linear, _) => Transform::Linear,
+        (ScaleKind::Log { base }, _) => Transform::Log(base),
+        (ScaleKind::Time, super::ErrorRange::Times { .. }) => Transform::Linear,
+    };
+    let (low, high) = range.limits();
+    for (end, values) in [("low", &low), ("high", &high)] {
+        if values.len() != count {
+            return Err(Error::data(
+                context,
+                format!(
+                    "{parameter} {end} has {} values but the scatter has {count} points; \
+                     {parameter} needs one low and one high value per point.",
+                    values.len()
+                ),
+            )
+            .with_parameter(parameter));
+        }
+    }
+    let order = |i: usize, a: String, b: String| {
+        Error::at_input(
+            context,
+            parameter,
+            "",
+            [(
+                Some(i),
+                format!(" has low {a} above high {b}; low must not exceed high."),
+            )],
+        )
+        .with_parameter(parameter)
+        .with_hint("check that low and high are not swapped.")
+    };
+    match range {
+        super::ErrorRange::Numbers { low, high } => {
+            for (end, values) in [("low", low), ("high", high)] {
+                check_numbers(
+                    context,
+                    (&format!("{parameter} {end}"), parameter),
+                    values,
+                    transform,
+                    ERROR_BAR_GAP_HINT,
+                )?;
+            }
+            for (i, (&a, &b)) in low.iter().zip(high.iter()).enumerate() {
+                if a > b {
+                    return Err(order(i, number(a).to_string(), number(b).to_string()));
+                }
+            }
+        }
+        super::ErrorRange::Times { low, high } => {
+            for (i, (a, b)) in low.iter().zip(high.iter()).enumerate() {
+                if let (Some(a), Some(b)) = (a, b)
+                    && a > b
+                {
+                    return Err(order(i, a.label(), b.label()));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validates the positions and the time limits `low` and `high` of error bars whose limits lie
 /// along `value_axis`, on axes with an x axis of scale kind `x_kind` and a y axis of scale kind
 /// `y_kind`, before they are stored. The checks run in this order, the first failure the error

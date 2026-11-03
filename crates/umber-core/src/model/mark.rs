@@ -2,14 +2,15 @@
 
 use std::fmt;
 
-use super::axis_data::{AxisData, XySeries};
+use super::axis_data::{AxisData, SharedValues, XySeries};
 use super::band::BandMark;
 use super::bar::{BarGroupMark, BarMark};
 use super::box_plot::{BoxGroupMark, BoxMark};
 use super::color_by::PointColor;
-use super::error_bars::ErrorBarMark;
+use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
 use super::heatmap::HeatmapMark;
 use super::hist::HistMark;
+use super::point_labels::PointLabels;
 use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::stacked_area::StackedAreaMark;
 use super::stem::StemMark;
@@ -85,6 +86,8 @@ pub type AreaOptions = LineOptions;
 /// assert_eq!((&options.color, options.marker), (&PointColor::AUTO, Marker::Circle));
 /// assert_eq!(options.size, SizeSpec::Auto);
 /// assert!(options.label.is_empty());
+/// assert!(!options.labels.annotate);
+/// assert!(options.x_error.is_none() && options.y_error.is_none() && !options.connect);
 ///
 /// let small = ScatterOptions { size: SizeSpec::pt(3.0)?, ..ScatterOptions::default() };
 /// assert_ne!(small, options);
@@ -101,6 +104,14 @@ pub struct ScatterOptions {
     pub marker: Marker,
     /// The marker diameter; [`SizeSpec::Auto`] for the theme's marker size.
     pub size: SizeSpec,
+    /// The values written next to the points; none by default.
+    pub labels: PointLabels,
+    /// The ends of each point's error bar along x, one pair per point; `None` for no bars.
+    pub x_error: Option<ErrorRange>,
+    /// The ends of each point's error bar along y, one pair per point; `None` for no bars.
+    pub y_error: Option<ErrorRange>,
+    /// Whether a line joins the points in input order.
+    pub connect: bool,
 }
 
 impl Default for ScatterOptions {
@@ -110,6 +121,56 @@ impl Default for ScatterOptions {
             color: PointColor::AUTO,
             marker: Marker::Circle,
             size: SizeSpec::Auto,
+            labels: PointLabels::default(),
+            x_error: None,
+            y_error: None,
+            connect: false,
+        }
+    }
+}
+
+/// One group of [`AxesMut::grouped_scatter`](super::AxesMut::grouped_scatter): its name, which
+/// is its legend label, its points, and the ends of their error bars along x and along y, as
+/// [`ScatterOptions::x_error`] and [`ScatterOptions::y_error`] give them.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use umber_core::{AxisData, ErrorRange, ScatterGroup};
+///
+/// let group = ScatterGroup {
+///     y_error: Some(ErrorRange::Numbers { low: Arc::from([1.0]), high: Arc::from([2.0]) }),
+///     ..ScatterGroup::new("North", AxisData::Numbers(vec![0.0]), AxisData::Numbers(vec![1.5]))
+/// };
+/// assert_eq!(group.label, "North");
+/// assert!(group.x_error.is_none());
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScatterGroup {
+    /// The group's name.
+    pub label: String,
+    /// The x values.
+    pub x: AxisData,
+    /// The y values, as many as the x values.
+    pub y: AxisData,
+    /// The ends of each point's error bar along x; `None` for no bars.
+    pub x_error: Option<ErrorRange>,
+    /// The ends of each point's error bar along y; `None` for no bars.
+    pub y_error: Option<ErrorRange>,
+}
+
+impl ScatterGroup {
+    /// The group `label` of the points `x` and `y`, without error bars.
+    #[must_use]
+    pub fn new(label: impl Into<String>, x: AxisData, y: AxisData) -> ScatterGroup {
+        ScatterGroup {
+            label: label.into(),
+            x,
+            y,
+            x_error: None,
+            y_error: None,
         }
     }
 }
@@ -272,9 +333,25 @@ impl Mark {
         Mark::Line(LineMark::new(series, options))
     }
 
-    /// Markers at the points of a validated series.
-    pub(super) fn scatter(series: XySeries, options: ScatterOptions) -> Mark {
-        Mark::Scatter(ScatterMark { series, options })
+    /// Markers at the points of a validated series, with the error bars and the line that
+    /// `options` give them, on axes of the scale kinds `kinds`.
+    ///
+    /// # Errors
+    ///
+    /// As [`check_scatter_error`](super::validation::check_scatter_error), for
+    /// `options.x_error` and then `options.y_error`.
+    pub(super) fn scatter(
+        context: &'static str,
+        kinds: (crate::ScaleKind, crate::ScaleKind),
+        series: XySeries,
+        options: ScatterOptions,
+    ) -> crate::Result<Mark> {
+        let own = Box::new(OwnMarks::new(context, kinds, &series, &options)?);
+        Ok(Mark::Scatter(ScatterMark {
+            series,
+            options,
+            own,
+        }))
     }
 
     /// An area under a validated series.
@@ -493,6 +570,122 @@ impl fmt::Debug for LineMark {
 pub struct ScatterMark {
     series: XySeries,
     options: ScatterOptions,
+    /// Boxed, so that a scatter stays about as small as the other marks.
+    own: Box<OwnMarks>,
+}
+
+/// The marks a scatter draws for its own points, from the scatter's own values: the line that
+/// joins them ([`ScatterOptions::connect`]) and their error bars along x and along y
+/// ([`ScatterOptions::x_error`], [`ScatterOptions::y_error`]). They take the scatter's color
+/// and no legend entry of their own.
+#[derive(Debug, Clone, PartialEq)]
+struct OwnMarks {
+    /// The line through the points, in input order.
+    line: Option<LineMark>,
+    /// The horizontal bars, at the points' y values.
+    x_bars: Option<ErrorBarMark>,
+    /// The vertical bars, at the points' x values.
+    y_bars: Option<ErrorBarMark>,
+}
+
+impl OwnMarks {
+    /// The line and bars that `options` give the points `series`, on axes of the scale kinds
+    /// `(x, y)`, after checking the bars' ends: each bar sits at the point's coordinate on the
+    /// other axis. A point that is not drawn ([`point_drawn`]) has no bar and breaks the line,
+    /// and a bar with a missing end is not drawn either, so its other end does not count in
+    /// the limits.
+    fn new(
+        context: &'static str,
+        (x, y): (crate::ScaleKind, crate::ScaleKind),
+        series: &XySeries,
+        options: &ScatterOptions,
+    ) -> crate::Result<OwnMarks> {
+        let count = series.x().len();
+        let drawn = |i: usize| point_drawn(series, &options.color, i);
+        // The bars of `range`, given as `parameter`, along `axis` of scale kind `kind`, at
+        // `positions`.
+        let bars = |range: &Option<ErrorRange>,
+                    (parameter, axis, kind),
+                    orientation,
+                    positions: &std::sync::Arc<AxisData>| {
+            let Some(range) = range else {
+                return Ok(None);
+            };
+            super::validation::check_scatter_error(context, (parameter, axis), kind, count, range)?;
+            Ok::<_, crate::Error>(Some(ErrorBarMark::shared(
+                orientation,
+                std::sync::Arc::clone(positions),
+                complete_rows(range.limits(), drawn),
+                ErrorBarOptions::default(),
+            )))
+        };
+        let x_bars = bars(
+            &options.x_error,
+            ("x_error", super::share::SharedAxis::X, x),
+            ErrorBarOrientation::Horizontal,
+            series.shared_y(),
+        )?;
+        let y_bars = bars(
+            &options.y_error,
+            ("y_error", super::share::SharedAxis::Y, y),
+            ErrorBarOrientation::Vertical,
+            series.shared_x(),
+        )?;
+        let line = options.connect.then(|| {
+            // A point hidden by its mapped value breaks the line as a missing one does.
+            let hidden = |i: usize| !drawn(i) && !series.has_gap(i);
+            let points = if (0..count).any(hidden) {
+                series.with_gaps(hidden)
+            } else {
+                series.clone()
+            };
+            LineMark::new(points, LineOptions::default())
+        });
+        Ok(OwnMarks {
+            line,
+            x_bars,
+            y_bars,
+        })
+    }
+}
+
+/// Whether the point at `i` of the scatter `series` in `color` is drawn: both coordinates are
+/// present, and a color-mapped value is not NaN. A point that is not drawn has no marker, no
+/// value label and no error bar of its own, and breaks the scatter's own line.
+fn point_drawn(series: &XySeries, color: &PointColor, i: usize) -> bool {
+    let mapped = match color {
+        PointColor::Uniform(_) => true,
+        PointColor::By(by) => by.values.get(i).is_some_and(|v| !v.is_nan()),
+    };
+    mapped && !series.has_gap(i)
+}
+
+/// The ends `(low, high)` of the bars of a scatter's points, kept only on the complete rows:
+/// where the point is drawn (`drawn`) and both ends are present. Every other row has neither
+/// end, so that a bar that is not drawn does not count in the limits either. The ends
+/// themselves, shared, when every row with an end is complete.
+fn complete_rows(
+    (low, high): (SharedValues, SharedValues),
+    drawn: impl Fn(usize) -> bool,
+) -> (SharedValues, SharedValues) {
+    let complete = |i: usize| drawn(i) && !low.is_gap(i) && !high.is_gap(i);
+    let partial = (0..low.len()).any(|i| !complete(i) && !(low.is_gap(i) && high.is_gap(i)));
+    if !partial {
+        return (low, high);
+    }
+    let keep = |ends: &SharedValues| match ends {
+        SharedValues::Numbers(values) => SharedValues::Numbers(
+            (0..values.len())
+                .map(|i| if complete(i) { values[i] } else { f64::NAN })
+                .collect(),
+        ),
+        SharedValues::Times(times) => SharedValues::Times(
+            (0..times.len())
+                .map(|i| if complete(i) { times[i] } else { None })
+                .collect(),
+        ),
+    };
+    (keep(&low), keep(&high))
 }
 
 impl ScatterMark {
@@ -508,10 +701,73 @@ impl ScatterMark {
         self.series.y()
     }
 
-    /// Label, color, marker shape and size.
+    /// Label, color, marker shape and size, the values written next to the points, their error
+    /// bars and whether a line joins them.
     #[must_use]
     pub fn options(&self) -> &ScatterOptions {
         &self.options
+    }
+
+    /// The line that joins the points in input order, with [`ScatterOptions::connect`]; it
+    /// takes the scatter's color and adds no legend entry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, Mark, ScatterOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let options = ScatterOptions { connect: true, ..ScatterOptions::default() };
+    /// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], options)?;
+    /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
+    /// assert_eq!(scatter.line().map(|line| line.x()), Some(scatter.x()));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn line(&self) -> Option<&LineMark> {
+        self.own.line.as_ref()
+    }
+
+    /// The error bars of the points along x, from [`ScatterOptions::x_error`]: horizontal bars
+    /// at the points' y values. They take the scatter's color and add no legend entry.
+    #[must_use]
+    pub fn x_error_bars(&self) -> Option<&ErrorBarMark> {
+        self.own.x_bars.as_ref()
+    }
+
+    /// The error bars of the points along y, from [`ScatterOptions::y_error`]: vertical bars at
+    /// the points' x values. They take the scatter's color and add no legend entry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use umber_core::figure::{AxisData, ErrorBarOrientation, Mark, ScatterOptions};
+    /// use umber_core::{ErrorRange, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let y_error = ErrorRange::Numbers { low: Arc::from([1.5, 2.0]), high: Arc::from([2.5, 4.0]) };
+    /// let options = ScatterOptions { y_error: Some(y_error), ..ScatterOptions::default() };
+    /// axes.scatter(AxisData::Numbers(vec![0.0, 1.0]), &[2.0, 3.0], options)?;
+    /// let Some(Mark::Scatter(scatter)) = axes.marks().first() else { unreachable!() };
+    /// let bars = scatter.y_error_bars().unwrap();
+    /// assert_eq!(bars.orientation(), ErrorBarOrientation::Vertical);
+    /// assert_eq!((bars.positions(), bars.high()), (scatter.x(), &[2.5, 4.0][..]));
+    /// assert!(scatter.x_error_bars().is_none() && scatter.line().is_none());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_error_bars(&self) -> Option<&ErrorBarMark> {
+        self.own.y_bars.as_ref()
+    }
+
+    /// The scatter's own error bars, along x and then along y.
+    pub(crate) fn error_bars(&self) -> impl Iterator<Item = &ErrorBarMark> {
+        self.own.x_bars.iter().chain(&self.own.y_bars)
     }
 
     /// The validated series.

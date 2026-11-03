@@ -25,6 +25,7 @@ ENUMS = [
     ub.Hist,
     ub.Stat,
     ub.Contour,
+    ub.Place,
 ]
 
 

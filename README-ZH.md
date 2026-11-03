@@ -77,7 +77,7 @@ fig.save_pdf("temperature.pdf")
 | 带状散点图、蜂群图 | `ax.strip(categories, groups)`、`ax.swarm(categories, groups)` |
 | 事件图 | `ax.events(rows, positions)` |
 | 气泡图 | `ax.bubbles(x, y, sizes, label="Cities")`（附带尺寸图例） |
-| 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)` |
+| 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)`；属于某个 series 的误差棒和连线用 `ax.scatter(x, y, y_error=(low, high), connect=True)`，自动取该 series 的颜色 |
 | 区间带 | `ax.band(x, low, high)` |
 | 杆状图 | `ax.stem(x, y)` |
 | 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
@@ -245,7 +245,7 @@ left.figure.save_png("weather.png")
 
 `ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。`at=ub.InPlot(x, y)` 改用绘图区的比例位置，数据变化时文字仍留在原来的角落；`annotate(..., text_at=ub.InPlot(x, y))` 把文字写在该位置，箭头仍指向数据位置。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。
 
-在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。
+在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。在 `scatter` 上，`annotate=True` 以 series 的颜色在每个点旁写出数值：依次尝试上、右、下、左，取第一个不与 mark 和其他数值重叠的位置；也可以用 `place=ub.Place.ABOVE` 等固定一侧，此时自动 limits 会扩展以放下数值。
 
 ```python
 import numpy as np

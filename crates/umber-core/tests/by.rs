@@ -32,7 +32,13 @@ fn grouped_xy_calls_are_atomic() {
         for bad in [true, false] {
             let result = match method {
                 "line" => axes.grouped_line(groups(bad), Dash::Solid, SizeSpec::Auto),
-                "scatter" => axes.grouped_scatter(groups(bad), Marker::Circle, SizeSpec::Auto),
+                "scatter" => axes.grouped_scatter(
+                    scatter_groups(groups(bad)),
+                    Marker::Circle,
+                    SizeSpec::Auto,
+                    umber_core::PointLabels::default(),
+                    false,
+                ),
                 "step" => axes.grouped_step(groups(bad), Step::Post, Dash::Solid, SizeSpec::Auto),
                 "area" => axes.grouped_area(groups(bad), Dash::Solid, SizeSpec::Auto),
                 _ => unreachable!(),
@@ -111,4 +117,12 @@ fn grouped_step_checks_order_inside_each_group() {
             .is_err()
     );
     assert!(axes.marks().is_empty());
+}
+
+/// `groups` as the groups of a scatter, without error bars.
+fn scatter_groups(groups: Vec<(String, AxisData, AxisData)>) -> Vec<umber_core::ScatterGroup> {
+    groups
+        .into_iter()
+        .map(|(label, x, y)| umber_core::ScatterGroup::new(label, x, y))
+        .collect()
 }

@@ -65,6 +65,45 @@ svg = ax.figure.to_svg()
 
 For text at a fixed place in the plot, use `at=ub.InPlot(x, y)`, not data coordinates: `x` and `y` are fractions of the plot area (0, 0 is the lower left corner), so a note such as `ax.text("n = 5 folds", at=ub.InPlot(0.02, 0.96))` stays put when the data range changes. `ax.annotate("best", (x, y), text_at=ub.InPlot(0.9, 0.9))` writes its text there, with the arrow to the data point.
 
+## Values next to points
+
+Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color, and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
+
+```python
+models = ["Baseline", "Gate", "Gate + aug"]
+ax = ub.Figure(6, 3).add_axes(y=ub.Scale.category())
+ax.scatter(
+    [66.5, 71.6, 73.1],
+    models,
+    label="80 epochs",
+    x_error=([65.8, 70.9, 72.4], [67.2, 72.3, 73.7]),
+    annotate=True,
+    format=ub.TickFormat.fixed(1),
+)
+svg = ax.figure.to_svg()
+```
+
+When no side inside the plot is clear, `AUTO` lets automatic limits grow to hold the label, such as above the highest point of a line, so leave the limits automatic rather than setting `ylim()` to make room. With explicit limits a point with no clear side inside the plot raises `StyleError` when the figure is rendered: fix the side with `place=`, widen the limits, or use a larger figure. Category axes never grow. Text from `ax.text()` and `ax.annotate()` is not avoided.
+
+## Error bars and lines that belong to a series
+
+For a series' error bars and connecting line use `scatter(..., y_error=(low, high), connect=True)` (or `x_error=` for horizontal bars), which take the series color at half the line width of a standalone line, so they stay lighter than the points; use `y_error_bars()` and `line()` only for marks that stand alone. Separate calls take their own palette colors and legend entries, so they do not match the points and they shift the colors of later series. `low` and `high` hold one value per point; NaN skips a point's bar, which puts a bar on one point only, such as a "Mean" after the folds. A point left out, for a NaN coordinate or a NaN `ColorBy` value, has no marker, label or bar, and breaks the line. With `by=`, each group gets its own bars and line in its color.
+
+```python
+nan = float("nan")
+folds = ["Fold 1", "Fold 2", "Fold 3", "Mean"]
+ax = ub.Figure(6, 3).add_axes(x=ub.Scale.category())
+ax.scatter(
+    folds,
+    [66.8, 68.1, 65.4, 66.77],
+    label="80 epochs",
+    y_error=([nan, nan, nan, 65.6], [nan, nan, nan, 67.9]),
+    connect=True,
+    annotate=True,
+)
+svg = ax.figure.to_svg()
+```
+
 ## Colors, colormaps and color scales
 
 `ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.

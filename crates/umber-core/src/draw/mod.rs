@@ -57,7 +57,9 @@ mod line;
 mod mapping;
 mod marker;
 mod mesh;
+mod obstacles;
 pub(crate) mod pie;
+pub(crate) mod point_labels;
 mod rule;
 mod scatter;
 pub(crate) use scatter::{MARKER_OUTLINE, marker_reach};
@@ -150,14 +152,64 @@ pub(crate) fn marks(
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
 ) -> crate::Result<Option<Item>> {
+    drawn_marks(theme, fonts, resolved, layout, marks).map(DrawnMarks::into_item)
+}
+
+/// The scene items of the marks of one axes, as [`marks()`] draws them, before they are
+/// grouped: the items of each data mark can be read on their own
+/// ([`of_mark`](DrawnMarks::of_mark)).
+#[derive(Debug, Clone)]
+pub(crate) struct DrawnMarks {
+    /// The clip of the group, [`marks_clip`].
+    clip: Rect,
+    /// The items, in drawing order: the reference spans, the data marks, the reference lines.
+    items: Vec<Item>,
+    /// For each mark, by its index among the marks, the range of `items` that it drew; empty
+    /// for reference lines and spans, which are drawn in their own layers.
+    ranges: Vec<std::ops::Range<usize>>,
+}
+
+impl DrawnMarks {
+    /// The items as one group clipped to [`marks_clip`]; `None` when nothing is visible.
+    pub(crate) fn into_item(self) -> Option<Item> {
+        (!self.items.is_empty()).then_some(Item::Group {
+            clip: Some(self.clip),
+            items: self.items,
+        })
+    }
+
+    /// The items that the mark at `index` among the marks drew; none for a reference line or
+    /// span.
+    pub(crate) fn of_mark(&self, index: usize) -> &[Item] {
+        self.ranges
+            .get(index)
+            .and_then(|range| self.items.get(range.clone()))
+            .unwrap_or(&[])
+    }
+}
+
+/// The marks, drawn as [`marks()`] draws them, with the items of each mark kept apart.
+///
+/// # Errors
+///
+/// As [`marks()`].
+pub(crate) fn drawn_marks(
+    theme: &Theme,
+    fonts: &SceneFonts<'_>,
+    resolved: &Resolved,
+    layout: &Layout,
+    marks: &[ResolvedMark<'_>],
+) -> crate::Result<DrawnMarks> {
     let context = mark_context(theme, resolved, layout, marks);
     let mut items = Vec::new();
+    let mut ranges = Vec::with_capacity(marks.len());
     // Reference spans lie under the data marks and reference lines over them, whatever the order
     // of the calls; the data marks keep theirs.
     let clip = marks_clip(layout, marks);
     let layer_clip = rule::baseline_clip(&context, resolved, clip);
     rule::span_layer(&context, resolved, marks, layer_clip, &mut items);
     for mark in marks {
+        let start = items.len();
         match *mark {
             ResolvedMark::Line {
                 mark: line_mark,
@@ -165,9 +217,7 @@ pub(crate) fn marks(
                 width,
                 ..
             } => {
-                let (xs, ys) = line::line_points(&context, resolved, line_mark);
-                let style = line::line_style(width, color, line_mark.options().dash);
-                line::line_items(&context, &xs, &ys, &style, &mut items);
+                line_mark_items(&context, resolved, line_mark, (color, width), &mut items);
             }
             ResolvedMark::Area {
                 mark: area_mark,
@@ -184,8 +234,18 @@ pub(crate) fn marks(
                 color,
                 size,
                 ref mapped,
+                width,
                 ..
             } => {
+                // The scatter's own line, then its own error bars, lie under its markers, all
+                // in its color at full opacity and at the lighter width resolved for them.
+                let own = (solid(color), width);
+                if let Some(line_mark) = scatter_mark.line() {
+                    line_mark_items(&context, resolved, line_mark, own, &mut items);
+                }
+                for bars in scatter_mark.error_bars() {
+                    error_bars::error_bar_items(&context, resolved, bars, own, &mut items);
+                }
                 let xs = axis_values(&resolved.x, scatter_mark.x());
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
@@ -441,15 +501,14 @@ pub(crate) fn marks(
                 kde::kde_items(&context, resolved, kde_mark, (color, width), &mut items);
             }
         }
+        ranges.push(start..items.len());
     }
     rule::rule_layer(&context, resolved, marks, layer_clip, &mut items);
-    if items.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Item::Group {
-        clip: Some(clip),
+    Ok(DrawnMarks {
+        clip,
         items,
-    }))
+        ranges,
+    })
 }
 
 /// Checks that every mark of `marks` that draws something and whose options draw its cells as
@@ -521,6 +580,27 @@ fn point_fill<'a, 'm: 'a>(
     }
 }
 
+/// The items of the line `line_mark` in `color`, `width` pt wide: its points as
+/// [`line::line_points`] keeps them, stroked in its dash.
+fn line_mark_items(
+    context: &MarkContext<'_>,
+    resolved: &Resolved,
+    line_mark: &crate::model::LineMark,
+    (color, width): (crate::Rgba, f32),
+    items: &mut Vec<Item>,
+) {
+    let (xs, ys) = line::line_points(context, resolved, line_mark);
+    let style = line::line_style(width, color, line_mark.options().dash);
+    line::line_items(context, &xs, &ys, &style, items);
+}
+
+/// The color of what a scatter in `color` draws besides its markers, its own line and error
+/// bars, and of its value labels: `color`, the mark's resolved color (the theme's text color
+/// for a color-mapped mark), at full opacity, whatever the marker alpha.
+pub(crate) fn solid(color: crate::Rgba) -> crate::Rgba {
+    crate::Rgba { a: 255, ..color }
+}
+
 /// Whether the point at `index` of a scatter or bubble mark in `color`, its colors mapped from
 /// values when `mapped` is set, has a fill on the axes' color scale `scale`, as drawing it
 /// needs ([`point_fill`] and the fill of each point): every point of one color does, a mapped
@@ -547,8 +627,9 @@ pub(crate) fn marker_outline(mapped: bool) -> f32 {
 }
 
 /// The clip rectangle of the marks: the plot area, widened horizontally on each side by half of
-/// the widest stroke among the `marks` drawn along a line, each at its own drawn width
-/// ([`ResolvedMark::line_width`]); the plot area itself when there is no such mark.
+/// the widest stroke among the `marks` drawn along a line, a scatter's own line included, each
+/// at its own drawn width ([`ResolvedMark::stroke_width`]); the plot area itself when there is
+/// no such mark.
 ///
 /// The widening never takes more than the free room beside the plot area
 /// ([`Layout::room_left`], [`Layout::room_right`]): on the left it stops at the y tick labels
@@ -574,12 +655,12 @@ pub(super) fn marks_clip(layout: &Layout, marks: &[ResolvedMark<'_>]) -> Rect {
     }
 }
 
-/// The drawn stroke width of the widest of the `marks` drawn along a line
-/// ([`ResolvedMark::line_width`]), in points; 0 when there is no such mark. It widens the
+/// The drawn stroke width of the widest line among the `marks`, a scatter's own line included
+/// ([`ResolvedMark::stroke_width`]), in points; 0 when there is no such line. It widens the
 /// marks clip ([`marks_clip`]) and sets the smallest axis-space clip margin of every line.
 fn widest_line_width(marks: &[ResolvedMark<'_>]) -> f32 {
     marks
         .iter()
-        .filter_map(ResolvedMark::line_width)
+        .filter_map(ResolvedMark::stroke_width)
         .fold(0.0, f32::max)
 }

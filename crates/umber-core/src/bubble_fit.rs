@@ -1,13 +1,18 @@
-//! Automatic limits that fit whole bubble markers, outlines included, and the value labels at
-//! bar ends on the final plot.
+//! Automatic limits that fit whole bubble markers, outlines included, the value labels at
+//! bar ends and the value labels of scatter points, on the final plot.
 //!
 //! A bubble's extent, like a label's, is in points while an axis domain is in data units, and
 //! the plot size is known only once the layout is solved, so the final layout loop asks the fits
 //! again after every solve ([`BubbleFits::update`]). A bubble reaches as far on both sides of
 //! its centre; a bar's label reaches past the bar's end on one side only ([`EndReach`]), and is
-//! fitted as a bubble is, with no reach on the other side. A fit of bar labels alone is made
-//! only once a label reaches past the plot edge, so a range that already holds every label is
-//! kept as it is; a fit holding a bubble is always made. A fit starts from the axis's raw
+//! fitted as a bubble is, with no reach on the other side. A point's label on a fixed side
+//! reaches past the point on that side along one axis, and half its extent on both sides along
+//! the other. A label placed automatically reaches as a fixed-side label on the side it took in
+//! the previous placement, and adds no reach in the first one, so a figure whose automatic
+//! labels all fit has the limits it would have without them
+//! ([`crate::draw::point_labels::fit_then_place`]). A fit of labels alone is made only once a
+//! label reaches past the plot edge, so a range that already holds every label is kept as it
+//! is; a fit holding a bubble is always made. A fit starts from the axis's raw
 //! extent, the extent of the data and of any explicit tick positions as resolve sees it, and
 //! widens it to the smallest extent in which every bubble reaches no further than the plot edge
 //! at its share of the plot length. Resolve then pads that extent once (rounding it first on log
@@ -151,18 +156,30 @@ impl Axis {
     }
 }
 
-/// How far a bar's value label reaches past the bar's value on the bar's value axis: the input
-/// of the fits for one label, which [`crate::draw::bar_labels`] measures.
+/// How far a value label reaches past the coordinate it is placed from, along one axis: the
+/// input of the fits for one label. [`crate::draw::bar_labels`] measures a bar's label past
+/// the bar's value on its value axis; [`crate::draw::point_labels`] measures a point's label on
+/// its side, fixed or taken in the previous placement, past the point's coordinate on each
+/// axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct EndReach {
-    /// The value axis.
+    /// The axis.
     pub axis: ValueAxis,
-    /// The bar's value.
-    pub value: f64,
+    /// The coordinate the label reaches from: the bar's value, or the point's coordinate.
+    pub value: ReachFrom,
     /// How far the label reaches towards the axis's low end, in points; 0 for none.
     pub low: f64,
     /// How far the label reaches towards the axis's high end, in points; 0 for none.
     pub high: f64,
+}
+
+/// The coordinate a label's reach starts from ([`EndReach`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ReachFrom {
+    /// A number on a linear or log axis.
+    Number(f64),
+    /// A time on a time axis.
+    Time(Instant),
 }
 
 /// One drawn bubble or bar label, as one axis sees it.
@@ -281,16 +298,12 @@ impl BubbleFit {
         );
         let on_demand = bubbles.is_empty();
         bubbles.extend(members.clone().flat_map(|(panel, _, ends)| {
-            ends.iter()
-                .filter(move |end| end.axis == axis.which())
-                .map(move |end| Bubble {
-                    value: end.value,
-                    low: end.low,
-                    high: end.high,
-                    drawn: (end.low, end.high),
-                    panel,
-                    mark: None,
-                })
+            ends.iter().filter_map(move |end| match end.value {
+                ReachFrom::Number(value) if end.axis == axis.which() => {
+                    Some(label_reach(end, value, panel))
+                }
+                ReachFrom::Number(_) | ReachFrom::Time(_) => None,
+            })
         }));
         if bubbles.is_empty() {
             return None;
@@ -312,17 +325,32 @@ impl BubbleFit {
     /// The fit of the time `axis` with `limits`, whose group's members are `members`, as
     /// [`new`](Self::new) fits a linear axis, in seconds from the earliest time of the data and
     /// the explicit ticks, the origin of the axis ([`resolve::time_extents`]). A single instant
-    /// has the half-hour reach on each side that resolve gives it.
+    /// has the half-hour reach on each side that resolve gives it. Labels reach from their
+    /// times, as bubbles do, and a fit of labels alone is made on demand.
     fn time<'a, 'm: 'a>(
         axis: Axis,
         limits: &TimeLimits<'_>,
-        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>])> + Clone,
+        members: impl Iterator<Item = (usize, &'a [ResolvedMark<'m>], &'a [EndReach])> + Clone,
         fills: Fills<'_>,
     ) -> Option<BubbleFit> {
-        let marks = members.clone().flat_map(|(_, marks)| marks.iter());
+        let marks = members.clone().flat_map(|(_, marks, _)| marks.iter());
         let (_, extent) = resolve::time_extents(marks.clone(), axis.which(), limits.ticks);
         let (origin, _) = extent?;
-        let bubbles = Self::drawn(axis, Some(origin), members, fills);
+        let mut bubbles = Self::drawn(
+            axis,
+            Some(origin),
+            members.clone().map(|(i, marks, _)| (i, marks)),
+            fills,
+        );
+        let on_demand = bubbles.is_empty();
+        bubbles.extend(members.flat_map(|(panel, _, ends)| {
+            ends.iter().filter_map(move |end| match end.value {
+                ReachFrom::Time(t) if end.axis == axis.which() => {
+                    Some(label_reach(end, seconds_between(origin, t), panel))
+                }
+                ReachFrom::Number(_) | ReachFrom::Time(_) => None,
+            })
+        }));
         if bubbles.is_empty() {
             return None;
         }
@@ -348,7 +376,7 @@ impl BubbleFit {
             axis,
             seed,
             bubbles,
-            on_demand: false,
+            on_demand,
             as_drawn: false,
             state: State::Unfitted,
         })
@@ -780,6 +808,19 @@ fn is_drawn(values: &SharedValues, i: usize) -> bool {
     }
 }
 
+/// The label reaching as `end` says from `value`, in the space of its axis, measured against
+/// the plot of `panel`.
+fn label_reach(end: &EndReach, value: f64, panel: usize) -> Bubble {
+    Bubble {
+        value,
+        low: end.low,
+        high: end.high,
+        drawn: (end.low, end.high),
+        panel,
+        mark: None,
+    }
+}
+
 /// The coordinate at `i` in the space of its axis: a number as it is, a time in seconds from
 /// `origin`; NaN for a missing time, or for a time without an origin, which a numeric axis
 /// never has.
@@ -830,12 +871,9 @@ impl BubbleFits {
                         AxisLimits::Continuous(limits) if limits.explicit.is_none() => {
                             BubbleFit::new(axis, &limits, members, fills)
                         }
-                        AxisLimits::Time(limits) if limits.explicit.is_none() => BubbleFit::time(
-                            axis,
-                            &limits,
-                            members.map(|(j, marks, _)| (j, marks)),
-                            fills,
-                        ),
+                        AxisLimits::Time(limits) if limits.explicit.is_none() => {
+                            BubbleFit::time(axis, &limits, members, fills)
+                        }
                         _ => None,
                     }
                 })

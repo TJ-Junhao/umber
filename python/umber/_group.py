@@ -410,6 +410,83 @@ class XY:
         return _GroupedCall(partial(self.draw_groups, series), groups)
 
 
+# The ends (low, high) of the error bars of scatter points, converted along their axis.
+type Ends = tuple[FloatArray | MicrosArray, FloatArray | MicrosArray]
+
+
+class _PointsDraw(Protocol):
+    def __call__(
+        self,
+        x: Coordinates,
+        y: Coordinates,
+        *,
+        x_error: Ends | None,
+        y_error: Ends | None,
+        label: str,
+    ) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class Points:
+    """Converters and native calls for scatter points and the ends of their error bars.
+
+    The ends of each error bar are columns of their own, split by ``by`` with the points.
+    """
+
+    x: Callable[[], Coordinates]
+    y: Callable[[], Coordinates]
+    x_error: Callable[[], Ends] | None
+    y_error: Callable[[], Ends] | None
+    draw: _PointsDraw
+    draw_groups: Callable[
+        [list[tuple[str, Coordinates, Coordinates, Ends | None, Ends | None]]], None
+    ]
+
+    def convert(self) -> dict[str, Coordinates]:
+        """Convert named columns once, before either native call."""
+        columns: dict[str, Coordinates] = {"x": self.x(), "y": self.y()}
+        for name, ends in (("x_error", self.x_error), ("y_error", self.y_error)):
+            if ends is not None:
+                columns[f"{name} low"], columns[f"{name} high"] = ends()
+        return columns
+
+    def plain(self, columns: dict[str, Coordinates], label: str) -> None:
+        """Draw the ordinary call without splitting its columns."""
+        self.draw(
+            columns["x"],
+            columns["y"],
+            x_error=_ends(columns, "x_error"),
+            y_error=_ends(columns, "y_error"),
+            label=label,
+        )
+
+    def grouped(
+        self, context: str, columns: dict[str, Coordinates], groups: list[_Group]
+    ) -> _GroupedCall:
+        """Prepare one native call and its input row maps."""
+        series = [
+            (
+                group.label,
+                _coordinates(group.columns["x"]),
+                _coordinates(group.columns["y"]),
+                _ends(group.columns, "x_error"),
+                _ends(group.columns, "y_error"),
+            )
+            for group in groups
+        ]
+        return _GroupedCall(partial(self.draw_groups, series), groups)
+
+
+def _ends(columns: dict[str, Any], name: str) -> Ends | None:
+    """The ends of the error bars ``name`` among ``columns``; ``None`` when they are absent."""
+    if f"{name} low" not in columns:
+        return None
+    return (
+        cast(FloatArray | MicrosArray, columns[f"{name} low"]),
+        cast(FloatArray | MicrosArray, columns[f"{name} high"]),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Bars:
     """Converters and native calls for categories with aligned heights."""
@@ -495,7 +572,7 @@ def call(
     by: Values[str] | Auto,
     label: str,
     color: object,
-    method: XY | Bars | Samples | Ecdf,
+    method: XY | Points | Bars | Samples | Ecdf,
 ) -> None:
     """Check grouping, convert once, and dispatch either ordinary or grouped data."""
     if by is not AUTO:
@@ -524,8 +601,8 @@ def call(
     if by is AUTO:
         method.plain(columns, name)
         return
-    if len(columns) == 2:
-        (left, xs), (right, ys) = columns.items()
+    if len(columns) >= 2:
+        (left, xs), (right, ys) = list(columns.items())[:2]
         if len(xs) != len(ys):
             raise new_error(
                 DataError,

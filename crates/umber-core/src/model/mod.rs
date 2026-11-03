@@ -29,8 +29,11 @@ mod kde;
 mod mark;
 mod mesh;
 mod panel;
+mod point_labels;
 pub(crate) use panel::Layer;
 pub use panel::Panel;
+pub(crate) use point_labels::values_on_x;
+pub use point_labels::{Place, PointLabels};
 pub(crate) mod pie;
 pub use pie::{PieAxesMut, PieOptions, PiePanel};
 mod render;
@@ -62,7 +65,7 @@ pub use bubbles::{BubbleMark, BubbleOptions};
 pub use color_by::{CmapChoice, ColorBy, PointColor};
 pub use contour::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use ecdf::{EcdfMark, EcdfOptions};
-pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
 pub use events::{EventsMark, EventsOptions};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
@@ -71,7 +74,9 @@ pub use hist::{
     Bins, GroupedHistOptions, HistGroupMark, HistMark, HistOptions, HistStat, HistStyle,
 };
 pub use kde::{Bandwidth, GroupedKdeOptions, KdeMark, KdeOptions};
-pub use mark::{AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterMark, ScatterOptions};
+pub use mark::{
+    AreaMark, AreaOptions, LineMark, LineOptions, Mark, ScatterGroup, ScatterMark, ScatterOptions,
+};
 pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 pub use render::Render;

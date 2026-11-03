@@ -52,7 +52,16 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                     .grouped_area(xy_groups(), Dash::Dashed, SizeSpec::Auto)
                     .unwrap(),
                 "scatter" => ax
-                    .grouped_scatter(xy_groups(), Marker::Diamond, SizeSpec::Auto)
+                    .grouped_scatter(
+                        xy_groups()
+                            .into_iter()
+                            .map(|(label, x, y)| umber_core::ScatterGroup::new(label, x, y))
+                            .collect(),
+                        Marker::Diamond,
+                        SizeSpec::Auto,
+                        umber_core::PointLabels::default(),
+                        false,
+                    )
                     .unwrap(),
                 "step" => ax
                     .grouped_step(xy_groups(), Step::Post, Dash::Solid, SizeSpec::Auto)

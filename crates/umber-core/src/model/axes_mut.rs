@@ -21,8 +21,9 @@ use super::figure::Figure;
 use super::heatmap::{HeatmapMark, HeatmapOptions};
 use super::hist::{GroupedHistOptions, HistGroupMark, HistMark, HistOptions};
 use super::kde::{GroupedKdeOptions, KdeMark, KdeOptions};
-use super::mark::{AreaOptions, LineOptions, Mark, ScatterOptions};
+use super::mark::{AreaOptions, LineOptions, Mark, ScatterGroup, ScatterOptions};
 use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
+use super::point_labels::PointLabels;
 use super::rule::{
     AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
 };
@@ -768,6 +769,37 @@ impl<'a> AxesMut<'a> {
     /// color as the Oklab distance grows. Uniform colors keep the theme's marker alpha and
     /// their 0.8 pt background-colored outline.
     ///
+    /// With [`PointLabels::annotate`] in `options.labels`, each drawn point shows its value
+    /// next to it, as [`PointLabels`] and [`Place`](crate::Place) describe: on a fixed side,
+    /// for which automatic limits grow so that the labels fit, or on the first clear side,
+    /// for which automatic limits grow when no side inside the plot is clear.
+    /// Rendering fails with `Error::Style` (see [`Figure::to_scene`](crate::Figure::to_scene))
+    /// for a label that does not fit inside the plot, for an automatic label with no clear
+    /// side, and for automatic labels whose sides do not settle as the limits grow. A format,
+    /// size or place without `annotate`, or a format that does not suit the value axis, is
+    /// refused (see [`PointLabels`]).
+    ///
+    /// `options.x_error` and `options.y_error` give each point an error bar, and
+    /// `options.connect` joins the points with a line in input order
+    /// ([`ScatterMark::line`](crate::ScatterMark::line),
+    /// [`ScatterMark::x_error_bars`](crate::ScatterMark::x_error_bars),
+    /// [`ScatterMark::y_error_bars`](crate::ScatterMark::y_error_bars)). They belong to the
+    /// scatter: they take its resolved color at full opacity (the theme's text color when the
+    /// colors are mapped), no palette slot and no legend entry of their own, and half the line
+    /// width a standalone line or error bar of the automatic width gets, so that they stay
+    /// lighter than the marks they accompany; the bars have caps, as long as those of
+    /// [`AxesMut::y_error_bars`]. The line is drawn first, then the bars, then the markers. The bars extend
+    /// automatic limits as error bars do, and they and the line are obstacles of every
+    /// automatic value label. A point that is not drawn, for a missing coordinate or a
+    /// color-mapped value that is NaN, has no marker, no value label and no bar, and breaks the
+    /// line, as NaN breaks [`AxesMut::line`]. A bar with a missing end, NaN or a missing time,
+    /// is skipped, and neither of its ends counts in the limits. The ends are checked as
+    /// [`AxesMut::y_error_bars`] checks its limits, with errors that name `x_error` or
+    /// `y_error` and the index: `Error::Usage` along a category axis, for numbers along a time
+    /// axis and for times along another; `Error::Data` for ends that do not number one pair
+    /// per point, are infinite, beyond [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) or not positive
+    /// on a log axis, or have a low end above its high end.
+    ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an
     /// [`AxisData`] without copying them, use [`AxesMut::scatter_shared`].
     ///
@@ -824,13 +856,12 @@ impl<'a> AxesMut<'a> {
         let series = XySeries::new(CONTEXT, (axes.x, axes.y), x, y, SCATTER_GAP_HINT)?;
         check_point_color(CONTEXT, axes, &options.color, series.x().len())?;
         check_scatter_label(CONTEXT, &options.color, &options.label)?;
+        options.labels.check(CONTEXT, axes.x, axes.y)?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
-        self.axes_mut().add_marks(
-            CONTEXT,
-            LabelSource::Options,
-            [Mark::scatter(series, options)],
-        )?;
+        let mark = Mark::scatter(CONTEXT, (self.x, self.y), series, options)?;
+        self.axes_mut()
+            .add_marks(CONTEXT, LabelSource::Options, [mark])?;
         Ok(self)
     }
 
@@ -3795,41 +3826,76 @@ impl<'a> AxesMut<'a> {
         })
     }
 
-    /// Adds one scatter per named pair of columns, in order with palette colors.
+    /// Adds one scatter per group, in order with palette colors.
     /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
-    /// All groups use the same marker and size. A failed call adds nothing.
+    /// All groups use the same marker, size and value labels, and with `connect` each group's
+    /// line joins only its own points. Each group's labels, error bars and line take its color.
+    /// A failed call adds nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::scatter_shared`], for the first group that fails, which the error names.
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{AxisData, Figure, Marker, ScaleKind, SizeSpec, Theme};
+    /// use umber_core::{AxisData, Figure, Marker, PointLabels, ScaleKind, ScatterGroup, SizeSpec, Theme};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
-    /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
-    ///     AxisData::Numbers(vec![2.0, 3.0]))];
-    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto)?;
+    /// let groups = vec![ScatterGroup::new(
+    ///     "North",
+    ///     AxisData::Numbers(vec![0.0, 1.0]),
+    ///     AxisData::Numbers(vec![2.0, 3.0]),
+    /// )];
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, PointLabels::default(), true)?;
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     pub fn grouped_scatter(
         &mut self,
-        groups: Vec<(String, AxisData, AxisData)>,
+        groups: Vec<ScatterGroup>,
         marker: crate::Marker,
         size: crate::SizeSpec,
+        labels: PointLabels,
+        connect: bool,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         check_not_two_categories(CONTEXT, self.x, self.y)?;
-        self.grouped_xy(CONTEXT, groups, SCATTER_GAP_HINT, |label, series| {
-            Ok(Mark::scatter(
-                series,
-                ScatterOptions {
-                    label,
-                    marker,
-                    size,
-                    ..ScatterOptions::default()
-                },
-            ))
-        })
+        labels.check(CONTEXT, self.x, self.y)?;
+        let kinds = (self.x, self.y);
+        let groups = groups
+            .into_iter()
+            .map(|group| {
+                (
+                    group.label,
+                    group.x,
+                    group.y,
+                    (group.x_error, group.y_error),
+                )
+            })
+            .collect();
+        self.grouped_xy_with(
+            CONTEXT,
+            groups,
+            SCATTER_GAP_HINT,
+            |label, series, (x_error, y_error)| {
+                Mark::scatter(
+                    CONTEXT,
+                    kinds,
+                    series,
+                    ScatterOptions {
+                        label,
+                        marker,
+                        size,
+                        labels: labels.clone(),
+                        x_error,
+                        y_error,
+                        connect,
+                        ..ScatterOptions::default()
+                    },
+                )
+            },
+        )
     }
 
     /// Adds one step line per named pair of columns, in order with palette colors.
@@ -3925,20 +3991,40 @@ impl<'a> AxesMut<'a> {
         gap_hint: &'static str,
         make_mark: impl Fn(String, XySeries) -> Result<Mark>,
     ) -> Result<&mut Self> {
+        let groups = groups
+            .into_iter()
+            .map(|(label, x, y)| (label, x, y, ()))
+            .collect();
+        self.grouped_xy_with(context, groups, gap_hint, |label, series, ()| {
+            make_mark(label, series)
+        })
+    }
+
+    /// [`grouped_xy`](Self::grouped_xy) for groups that each carry `T` besides their columns,
+    /// which `make_mark` receives with the group's validated series.
+    fn grouped_xy_with<T>(
+        &mut self,
+        context: &'static str,
+        groups: Vec<(String, AxisData, AxisData, T)>,
+        gap_hint: &'static str,
+        make_mark: impl Fn(String, XySeries, T) -> Result<Mark>,
+    ) -> Result<&mut Self> {
         check_groups_present(context, groups.len())?;
         let series = groups
             .into_iter()
             .enumerate()
-            .map(|(i, (label, x, y))| {
+            .map(|(i, (label, x, y, extra))| {
                 XySeries::new(context, (self.x, self.y), x, y, gap_hint)
-                    .map(|series| (label, series))
+                    .map(|series| (label, series, extra))
                     .map_err(|error| error.in_group(i))
             })
             .collect::<Result<Vec<_>>>()?;
         let marks = series
             .into_iter()
             .enumerate()
-            .map(|(i, (label, series))| make_mark(label, series).map_err(|error| error.in_group(i)))
+            .map(|(i, (label, series, extra))| {
+                make_mark(label, series, extra).map_err(|error| error.in_group(i))
+            })
             .collect::<Result<Vec<_>>>()?;
         self.axes_mut()
             .add_marks(context, LabelSource::Groups, marks)?;

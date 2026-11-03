@@ -43,6 +43,7 @@ from umber._enums import (
     LegendPosition,
     LegendStyle,
     Marker,
+    Place,
     Render,
     Stat,
     Step,
@@ -107,6 +108,7 @@ def _members_hint(cls: type[Enum]) -> str:
 
 _DASH_HINT: Final = _members_hint(Dash)
 _MARKER_HINT: Final = _members_hint(Marker)
+_PLACE_HINT: Final = _members_hint(Place)
 _STEP_HINT: Final = _members_hint(Step)
 _HIST_HINT: Final = _members_hint(Hist)
 _STAT_HINT: Final = _members_hint(Stat)
@@ -1012,6 +1014,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         marker: Marker = Marker.CIRCLE,
         size: Size = Size.AUTO,
         by: Values[str] | Auto = AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+        label_size: Size = Size.AUTO,
+        place: Place = Place.AUTO,
+        x_error: tuple[Values[X], Values[X]] | Auto = AUTO,
+        y_error: tuple[Values[Y], Values[Y]] | Auto = AUTO,
+        connect: bool = False,
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
@@ -1020,6 +1029,35 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
         colors, fading to the background color as the Oklab distance grows. Single-color
         markers keep the theme's marker alpha and a 0.8 pt background-colored outline.
+
+        With ``annotate=True`` each drawn point shows its value next to it: x on a category y
+        axis and y otherwise, the time on a time axis. Points left out, and points outside
+        explicit limits, get no label. Labels take the series color at full opacity (each
+        group's with ``by``); a ``ColorBy`` scatter's labels take the theme's text color. A
+        fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, and
+        automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
+        and left, and takes the first position inside the plot that overlaps no mark of these
+        axes (markers, error bars, lines, bars, areas, bands, boxes and violins; not reference
+        lines, spans or color-mapped cells) and no value label placed before. When no position
+        inside is clear, it takes the first clear side that leaves the plot only across
+        automatic limits, and those limits grow just enough to hold it, such as above the
+        highest point of a line; explicit limits and category axes never grow. Labels are
+        placed in call order, point by point, so the same data always gives the same figure.
+        Text from ``text()`` and ``annotate()`` is not avoided.
+
+        ``x_error`` and ``y_error`` give each point an error bar, and ``connect=True`` joins the
+        points with a line in input order. They belong to the series: they take its color at
+        full opacity (each group's with ``by``, the theme's text color with ``ColorBy``), no
+        palette color and no legend entry of their own, and half the line width that ``line()``
+        and ``y_error_bars()`` draw with ``Size.AUTO``, so that they stay lighter than the marks
+        they accompany; the bars have caps as long as those of ``y_error_bars()``. The line is
+        drawn first, then the bars, then the markers. Bars extend automatic limits as standalone
+        error bars do, and value labels avoid both the bars and the line. A NaN end skips that
+        point's bar, so a bar can go on one point only, and neither end of a skipped bar counts
+        in the limits. A point left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no
+        marker, no value label and no bar, and breaks the line. With ``by``, each group's line
+        joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
+        stand on their own.
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1036,24 +1074,53 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 one series. Names supply legend labels and palette colors; do not pass
                 a non-empty ``label`` or an explicit ``color``. Missing or empty names
                 and an empty grouping column are refused. Column names are never read.
+            annotate: Whether each point shows its value next to it.
+            format: The format of the values shown by ``annotate``. ``AUTO`` follows the tick
+                format of the value axis, as for bar labels. On a time axis only
+                ``TickFormat.AUTO`` and ``TickFormat.iso()`` apply; each time is written down to
+                the finest unit the scatter's times need, such as ``Mar 3`` or ``2026-03-03``.
+            label_size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
+                label size, ``Size.times(k)`` multiplies it after font scaling, and
+                ``Size.pt(p)`` uses points without font scaling. (``size`` is the marker size.)
+            place: Where each value goes: ``Place.AUTO``, or a fixed side, ``Place.ABOVE``,
+                ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``.
+            x_error: The ends ``(low, high)`` of each point's horizontal error bar, one value
+                each per point, in x data units: numbers on a linear or log x axis, times on a
+                time x axis. ``AUTO`` draws no bars.
+            y_error: The ends ``(low, high)`` of each point's vertical error bar, one value
+                each per point, in y data units: numbers on a linear or log y axis, times on a
+                time y axis. ``AUTO`` draws no bars.
+            connect: Whether a line joins the points in input order.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If an argument has the wrong type.
+            TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+                tuple of two columns.
             DataError: If ``by`` has invalid names or differs in length from the data; or if
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the
-                axes, or a ``ColorBy`` does not have one value per point.
+                axes, or a ``ColorBy`` does not have one value per point. Also if an end of
+                ``x_error`` or ``y_error`` is infinite or not positive on a log axis, they do
+                not hold one value per point, or a low end is above its high end; the message
+                names the argument and the index.
                 It is also raised for a line break or other control character in a category name.
             StyleError: If ``label`` is too long or holds a line break or another control
-                character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
+                character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
+                ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
+                number format for times). Rendering raises it when a value label does not fit
+                inside the plot, when no position is clear for a label with ``Place.AUTO``, and
+                when the sides of ``Place.AUTO`` labels keep changing as the limits grow; the
+                message names the series (its label, or ``scatter 2`` for the second scatter of
+                the axes) and the value.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
                 ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
-                marks of these axes.
+                marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
+                without ``annotate``; or if ``x_error`` or ``y_error`` lies along a category
+                axis, or holds numbers along a time axis.
 
         Example:
             >>> import umber as ub
@@ -1063,6 +1130,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
             >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
             >>> grouped = ub.scatter([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+            >>> scores = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> scores = scores.scatter([71.2, 74.8], ["Base", "Gate"], annotate=True)
+            >>> fixed = ub.Figure().add_axes().scatter(
+            ...     [1, 2], [0.25, 0.5], annotate=True, format=ub.TickFormat.percent(0),
+            ...     place=ub.Place.RIGHT,
+            ... )
+            >>> nan = float("nan")
+            >>> folds = ub.Figure().add_axes(x=ub.Scale.category()).scatter(
+            ...     ["Fold 1", "Fold 2", "Mean"], [66.8, 68.1, 67.5],
+            ...     y_error=([nan, nan, 66.9], [nan, nan, 68.1]), connect=True,
+            ... )
         """
         with api_call():
             context = "Axes.scatter()"
@@ -1072,14 +1150,22 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = native_point_color(context, color)
             shape = instance(context, "marker", marker, Marker, _MARKER_HINT)
             extent = _size_argument(context, "size", size)
+            shows, labelled, text_size, where = _point_labels(
+                context, annotate, format, label_size, place
+            )
+            x_ends = _error_ends(context, "x_error", x_error, self._x)
+            y_ends = _error_ends(context, "y_error", y_error, self._y)
+            joins = _args.boolean(context, "connect", connect)
             _group.call(
                 context,
                 by,
                 label,
                 color,
-                _group.XY(
+                _group.Points(
                     x=partial(self._x_values, context, x),
                     y=partial(self._y_values, context, y),
+                    x_error=x_ends,
+                    y_error=y_ends,
                     draw=partial(
                         self._native.scatter,
                         self._target,
@@ -1087,6 +1173,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         color=spec,
                         marker=shape.value,
                         size=extent,
+                        annotate=shows,
+                        format=labelled,
+                        label_size=text_size,
+                        place=where,
+                        connect=joins,
                     ),
                     draw_groups=partial(
                         self._native.grouped_scatter,
@@ -1094,6 +1185,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         self._col,
                         marker=shape.value,
                         size=extent,
+                        annotate=shows,
+                        format=labelled,
+                        label_size=text_size,
+                        place=where,
+                        connect=joins,
                     ),
                 ),
             )
@@ -3703,6 +3799,70 @@ def _value_labels(
         else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
     )
     return shows, checked, _size.native(instance(context, "size", size, Size, _SIZE_HINT))
+
+
+def _error_ends(
+    context: str, name: str, value: object, scale: Scale[Any]
+) -> Callable[[], _group.Ends] | None:
+    """Check the type of an ``x_error`` or ``y_error`` argument along an axis of ``scale``.
+
+    Returns:
+        ``None`` for ``AUTO``; otherwise the conversion of its two ends, numbers or times as
+        the axis holds them, for the grouping call to run once.
+
+    Raises:
+        TypeError: The value is neither ``AUTO`` nor a tuple of two columns, or an end is not a
+            column.
+    """
+    if value is AUTO:
+        return None
+    hint = "pass the lower and the upper end of each bar, as (low, high)."
+    if not isinstance(value, tuple):
+        raise new_error(
+            TypeError,
+            context,
+            f"{name} is {type_name(value)}; {name} must be a tuple (low, high) or ub.AUTO.",
+            parameter=name,
+            hint=hint,
+        )
+    count = len(cast(tuple[object, ...], value))
+    if count != 2:
+        raise new_error(
+            TypeError,
+            context,
+            f"{name} has {count} elements; {name} must be a tuple (low, high) of two columns.",
+            parameter=name,
+            hint=hint,
+        )
+    low, high = cast(tuple[object, object], value)
+    for end, column in (("low", low), ("high", high)):
+        check_axis_type(context, f"{name} {end}", column)
+
+    def convert() -> _group.Ends:
+        return (
+            _limit_values(context, f"{name} low", low, scale),
+            _limit_values(context, f"{name} high", high, scale),
+        )
+
+    return convert
+
+
+def _point_labels(
+    context: str, annotate: object, format: object, label_size: object, place: object
+) -> tuple[bool, tuple[int, int, str, str] | None, tuple[int, float], int]:
+    """Check the value label arguments of ``scatter()`` and return their native form.
+
+    A ``format`` of ``AUTO`` is ``None``: the tick format of the value axis.
+    """
+    shows = _args.boolean(context, "annotate", annotate)
+    checked = (
+        None
+        if format is AUTO
+        else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+    )
+    size = _size.native(instance(context, "label_size", label_size, Size, _SIZE_HINT))
+    where = instance(context, "place", place, Place, _PLACE_HINT)
+    return shows, checked, size, where.value
 
 
 def _check_coordinate_type(context: str, scale: Scale[Any], value: object) -> None:

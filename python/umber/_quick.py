@@ -14,7 +14,7 @@ from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
 from umber._color_by import ColorBy
-from umber._enums import AUTO, Auto, Dash, Hist, Marker, Stat
+from umber._enums import AUTO, Auto, Dash, Hist, Marker, Place, Stat
 from umber._figure import Figure
 from umber._pie import PieAxes
 from umber._report import api_call
@@ -148,6 +148,13 @@ def scatter(
     size: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
     by: Values[str] | Auto = AUTO,
+    annotate: bool = False,
+    format: TickFormat | Auto = AUTO,
+    label_size: Size = Size.AUTO,
+    place: Place = Place.AUTO,
+    x_error: tuple[Values[float], Values[float]] | Auto = AUTO,
+    y_error: tuple[Values[float], Values[float]] | Auto = AUTO,
+    connect: bool = False,
 ) -> Axes[float, float]:
     """Plot a marker at each point on a new figure and return its axes.
 
@@ -168,18 +175,32 @@ def scatter(
             appearance, supplying their labels and palette colors. Do not pass an explicit
             color or a non-empty label. Missing or empty names and an empty grouping column
             are refused.
+        annotate: Whether each point shows its value next to it, as in ``Axes.scatter()``.
+        format: The format of the values shown by ``annotate``, as in ``Axes.scatter()``.
+        label_size: The size of the values shown by ``annotate``, as in ``Axes.scatter()``.
+        place: Where each value goes, as in ``Axes.scatter()``.
+        x_error: The ends ``(low, high)`` of each point's horizontal error bar, as in
+            ``Axes.scatter()``.
+        y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
+            ``Axes.scatter()``.
+        connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
 
     Returns:
         The axes of the new figure.
 
     Raises:
-        TypeError: If an argument has the wrong type.
+        TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+            tuple of two columns.
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a value is infinite,
-            ``x`` holds names, or a ``ColorBy`` does not have one value per point.
-        StyleError: If ``label`` is too long or holds a line break or another control character.
-        UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
-            a ``ColorBy`` comes with a label.
+            ``x`` holds names, or a ``ColorBy`` does not have one value per point; or if
+            an end of ``x_error`` or ``y_error`` is infinite, they do not hold one value per
+            point, or a low end is above its high end.
+        StyleError: If ``label`` is too long or holds a line break or another control
+            character, or ``format`` is ``TickFormat.iso()``.
+        UsageError: If ``by`` comes with an explicit color or a non-empty label; if
+            a ``ColorBy`` comes with a label; or if ``format``, ``label_size`` or ``place``
+            is given without ``annotate``.
 
     Example:
         >>> import umber as ub
@@ -191,7 +212,22 @@ def scatter(
     with api_call():
         instance("scatter()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes()
-        return axes.scatter(x, y, by=by, label=label, color=color, marker=marker, size=size)
+        return axes.scatter(
+            x,
+            y,
+            by=by,
+            label=label,
+            color=color,
+            marker=marker,
+            size=size,
+            annotate=annotate,
+            format=format,
+            label_size=label_size,
+            place=place,
+            x_error=x_error,
+            y_error=y_error,
+            connect=connect,
+        )
 
 
 def bar(

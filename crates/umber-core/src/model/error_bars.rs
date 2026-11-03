@@ -1,6 +1,7 @@
 //! Error bar marks: the options given to the error bar methods and the stored error bar mark.
 
 use std::fmt;
+use std::sync::Arc;
 
 use super::axis_data::{AxisData, SharedValues};
 use crate::{ColorSpec, Instant, SizeSpec};
@@ -111,7 +112,7 @@ impl Default for ErrorBarOptions {
 #[derive(Clone, PartialEq)]
 pub struct ErrorBarMark {
     orientation: ErrorBarOrientation,
-    positions: AxisData,
+    positions: Arc<AxisData>,
     low: SharedValues,
     high: SharedValues,
     options: ErrorBarOptions,
@@ -125,6 +126,18 @@ impl ErrorBarMark {
         positions: AxisData,
         low: SharedValues,
         high: SharedValues,
+        options: ErrorBarOptions,
+    ) -> ErrorBarMark {
+        ErrorBarMark::shared(orientation, Arc::new(positions), (low, high), options)
+    }
+
+    /// Bars of `orientation` at validated `positions` shared with the mark they belong to,
+    /// between the validated limits `low` and `high` of the same count, both numbers or both
+    /// times.
+    pub(super) fn shared(
+        orientation: ErrorBarOrientation,
+        positions: Arc<AxisData>,
+        (low, high): (SharedValues, SharedValues),
         options: ErrorBarOptions,
     ) -> ErrorBarMark {
         ErrorBarMark {
@@ -207,6 +220,59 @@ impl ErrorBarMark {
     #[must_use]
     pub fn options(&self) -> &ErrorBarOptions {
         &self.options
+    }
+}
+
+/// The lower and the upper end of the error bar of each point of a scatter, along one axis
+/// ([`ScatterOptions::x_error`](super::ScatterOptions::x_error) and
+/// [`ScatterOptions::y_error`](super::ScatterOptions::y_error)), in data units of that axis:
+/// numbers on a linear or log axis, times on a time axis. A NaN, or a missing time, at an index
+/// skips that point's bar. Clones share the values.
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use umber_core::ErrorRange;
+///
+/// // A NaN skips the second point's bar.
+/// let range = ErrorRange::Numbers { low: Arc::from([1.0, f64::NAN]), high: Arc::from([3.0, f64::NAN]) };
+/// let ErrorRange::Numbers { low, .. } = &range else { unreachable!() };
+/// assert!(low[1].is_nan());
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum ErrorRange {
+    /// Numbers, on a linear or log axis.
+    Numbers {
+        /// The lower end of each point's bar.
+        low: Arc<[f64]>,
+        /// The upper end of each point's bar, at least the lower end where both are numbers.
+        high: Arc<[f64]>,
+    },
+    /// Times, on a time axis.
+    Times {
+        /// The lower end of each point's bar; `None` for no bar.
+        low: Arc<[Option<Instant>]>,
+        /// The upper end of each point's bar, no earlier than the lower end where both are
+        /// given.
+        high: Arc<[Option<Instant>]>,
+    },
+}
+
+impl ErrorRange {
+    /// The lower and the upper ends as stored.
+    pub(super) fn limits(&self) -> (SharedValues, SharedValues) {
+        match self {
+            ErrorRange::Numbers { low, high } => (
+                SharedValues::Numbers(Arc::clone(low)),
+                SharedValues::Numbers(Arc::clone(high)),
+            ),
+            ErrorRange::Times { low, high } => (
+                SharedValues::Times(Arc::clone(low)),
+                SharedValues::Times(Arc::clone(high)),
+            ),
+        }
     }
 }
 
