@@ -39,6 +39,7 @@ mod value_column;
 pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
+pub(crate) use inset::CONTAINMENT_TOLERANCE;
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
 pub(crate) use value_column::{ColumnInput, ColumnSide, PlacedColumn};

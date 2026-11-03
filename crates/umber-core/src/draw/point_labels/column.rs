@@ -17,14 +17,18 @@
 //! the plot each value, a number or a time, is centred on its point's x.
 //!
 //! **Overlap.** Two values of one sub-column whose boxes overlap along the category axis fail
-//! the render, as does a value of a row above the plot that reaches into the row's title.
+//! the render, as does a value of a row above the plot that reaches into the row's title, and
+//! a value or title that leaves the part of the canvas that belongs to its axes (the whole
+//! canvas for a figure of one axes, its cells on a grid), as a value centred on a point at
+//! the edge of the plot can. The layout reserves no room for that overhang, and the limits
+//! never change to avoid it.
 
 use super::{MarkLabels, PointLabel};
 use crate::draw::chrome::text;
 use crate::draw::mapping::{AxisPoint, axis_values};
 use crate::draw::mark_context;
 use crate::error::quoted;
-use crate::layout::{ColumnInput, ColumnSide, Layout, value_text};
+use crate::layout::{ColumnInput, ColumnSide, Frame, Label, Layout, value_text};
 use crate::model::Axes;
 use crate::resolve::{Resolved, ResolvedMark};
 use crate::scene::Item;
@@ -209,38 +213,51 @@ struct Span {
 
 /// The values that the marks `marks`, resolved as `resolved` and laid out as `layout`, write
 /// in their value column, measured in `labels`, and the column's title, as one unclipped
-/// group; `None` without a value column.
+/// group; `None` without a value column. Messages name the frame of the axes `container`:
+/// `"figure"` for a figure of one axes, `"panel"` on a grid.
 ///
 /// # Errors
 ///
-/// `Error::Style` under `context` for the first sub-column, in mark order, two of whose values
-/// overlap along the category axis, naming the mark and both values; and for a value of a row
-/// above the plot that reaches into the row's title.
+/// `Error::Style` under `context` for a title that leaves the frame; then, for the first
+/// sub-column, in mark order: a value that leaves the frame or, above the plot, reaches into
+/// the row's title, naming the mark and the value; and two values that overlap along the
+/// category axis, naming the mark and both values.
 pub(crate) fn column_items(
     theme: &Theme,
     resolved: &Resolved,
     layout: &Layout,
     marks: &[ResolvedMark<'_>],
     labels: &super::ScatterLabels,
-    context: &'static str,
+    (context, container): (&'static str, &'static str),
 ) -> Result<Option<Item>> {
     let Some(placed) = &layout.value_column else {
         return Ok(None);
     };
     let plot = layout.plot;
     let maps = mark_context(theme, resolved, layout, marks).maps;
+    let hint = match placed.side {
+        ColumnSide::Right => COLUMN_HINT,
+        ColumnSide::Above => ROW_HINT,
+    };
+    let leaves = |what: String| {
+        Error::style(context, format!("{what} reaches outside the {container}.")).with_hint(hint)
+    };
     let mut items = Vec::new();
     // The title's box, which the values of a row above the plot keep clear of.
-    let title = placed.title.as_ref().map(|title| {
-        items.push(text(title, theme.text_color()));
-        let layout = &title.layout;
-        [
-            title.x,
-            title.y - f64::from(layout.ascent()),
-            title.x + title.width(),
-            title.y + f64::from(layout.descent()),
-        ]
-    });
+    let title = match &placed.title {
+        Some(title) => {
+            let bounds = text_box(title, title.x, title.y);
+            if !inside(layout.frame, bounds) {
+                return Err(leaves(format!(
+                    "the value column title {}",
+                    quoted(&title.text)
+                )));
+            }
+            items.push(text(title, theme.text_color()));
+            Some(bounds)
+        }
+        None => None,
+    };
     for (values, &(start, _)) in labels.columns.iter().zip(&placed.cells) {
         let mark_labels = &values.labels;
         let Some(ResolvedMark::Scatter { mark, .. }) = marks.get(mark_labels.mark) else {
@@ -291,6 +308,13 @@ pub(crate) fn column_items(
                     (label.x, label.x + width)
                 }
             };
+            if !inside(layout.frame, text_box(&label, label.x, label.y)) {
+                return Err(leaves(format!(
+                    "the value {} of {}",
+                    quoted(&point.label.text),
+                    mark_labels.name
+                )));
+            }
             spans.push(Span {
                 low: span.0,
                 high: span.1,
@@ -318,6 +342,27 @@ pub(crate) fn column_items(
         }
     }
     Ok(Some(Item::Group { clip: None, items }))
+}
+
+/// The box (left, top, right, bottom) of `label` with its baseline starting at `x`, `y`: its
+/// advance width by its ascent and descent.
+fn text_box(label: &Label, x: f64, y: f64) -> [f64; 4] {
+    let layout = &label.layout;
+    [
+        x,
+        y - f64::from(layout.ascent()),
+        x + label.width(),
+        y + f64::from(layout.descent()),
+    ]
+}
+
+/// Whether the box `bounds` lies inside `frame`, to the containment tolerance of the layout.
+fn inside(frame: Frame, [left, top, right, bottom]: [f64; 4]) -> bool {
+    let tolerance = crate::layout::CONTAINMENT_TOLERANCE;
+    left >= frame.x - tolerance
+        && top >= frame.y - tolerance
+        && right <= frame.right() + tolerance
+        && bottom <= frame.bottom() + tolerance
 }
 
 /// The first two of `spans` that overlap, as the indices of their points, the spans sorted

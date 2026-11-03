@@ -19,7 +19,8 @@
 //!   panel's header, so the title never meets the panel title or a legend row above the plot.
 //! - **Above the plot**, when y is the value axis: a row of sub-rows stacked top down with
 //!   [`SUB_COLUMN_GAP`] between them, [`ROW_GAP`] above the highest point a y tick label
-//!   reaches. The row sits under the header and the y axis labels, of a twin axis too, which
+//!   reaches, as tall as its sub-rows or its title, whichever is taller, the two centred on one
+//!   another. The row sits under the header and the y axis labels, of a twin axis too, which
 //!   move up by its height.
 //!   Its title is written before it, right-aligned [`Y_LABEL_GAP`] left of the plot, as a y
 //!   tick label is, and centred on the row vertically; the y tick label column widens to hold
@@ -143,10 +144,20 @@ impl MeasuredColumn {
         }
     }
 
+    /// The height of a row above the plot: its sub-rows stacked, or its title when that is
+    /// taller, so that both fit, centred on one another.
+    fn row_height(&self) -> f64 {
+        let title = self
+            .title
+            .as_ref()
+            .map_or(0.0, |_| self.title_ascent + self.title_descent);
+        self.block.max(title)
+    }
+
     /// The room a row above the plot takes there, its gap included; 0 for a column.
     pub(super) fn row_band(&self) -> f64 {
         match self.side {
-            ColumnSide::Above => ROW_GAP + self.block,
+            ColumnSide::Above => ROW_GAP + self.row_height(),
             ColumnSide::Right => 0.0,
         }
     }
@@ -186,14 +197,15 @@ impl MeasuredColumn {
                 (left + (width - self.block) / 2.0, title)
             }
             ColumnSide::Above => {
-                let top = plot.y - label_rise - ROW_GAP - self.block;
-                let centre = top + self.block / 2.0;
+                let height = self.row_height();
+                let top = plot.y - label_rise - ROW_GAP - height;
+                let centre = top + height / 2.0;
                 let title = self.title.map(|mut title| {
                     title.x = plot.x - Y_LABEL_GAP - title.width();
                     title.y = centre + (self.title_ascent - self.title_descent) / 2.0;
                     title
                 });
-                (top, title)
+                (top + (height - self.block) / 2.0, title)
             }
         };
         let mut at = start;

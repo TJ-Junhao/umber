@@ -147,3 +147,17 @@ def test_png_svg_and_pdf_agree() -> None:
     again = forest()
     assert again.figure.to_svg() == ax.figure.to_svg()
     assert again.figure.to_png() == ax.figure.to_png()
+
+
+def test_row_values_that_leave_the_figure_raise_when_rendered() -> None:
+    ax = ub.Figure(4, 3).add_axes().xlim(0, 1)
+    ax = ax.scatter(
+        [0, 1],
+        [123.456, 789.012],
+        annotate=True,
+        place=ub.Place.COLUMN,
+        format=ub.TickFormat.fixed(3).affix("Measured = ", " units"),
+    )
+    with pytest.raises(ub.StyleError) as caught:
+        ax.figure.to_svg()
+    assert "reaches outside the figure" in str(caught.value)

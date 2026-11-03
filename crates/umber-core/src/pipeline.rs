@@ -1974,7 +1974,9 @@ pub(crate) fn scene(
 /// The value labels of scatter points can make room for themselves: each pass lays the figure
 /// out with the sides its automatic labels took in the pass before, none at first, and draws
 /// it, and the passes end once the labels settle ([`point_labels::fit_then_place`]). Each pass
-/// measures the panels again, so that nothing but those sides carries over.
+/// measures the panels again, so that nothing but those sides carries over. A value column is
+/// judged against the settled layout: its errors come from the last pass only, since an earlier
+/// one may lay the plot out narrower.
 fn scene_with_labels(
     figure: &Figure,
     fonts: &SceneFonts<'_>,
@@ -1992,16 +1994,18 @@ fn scene_with_labels(
             }
         }
         draw_scene(figure, &mut panels, &groups, fonts, context, labels)
-    })
+    })?
 }
 
 /// The scene of `figure` laid out and drawn once, with the records `panels` of its panels, as
 /// [`scene`] describes, and where the automatic value labels of each panel went, in the order
-/// of the panels.
+/// of the panels. The scene is the first error of a value column instead, when one has values
+/// that cannot be written ([`point_labels::column_items`]): the pass still places every
+/// automatic label, so that the caller raises that error only from a settled pass.
 ///
 /// # Errors
 ///
-/// As [`scene`].
+/// As [`scene`], but for the errors of value columns.
 fn draw_scene(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -2009,7 +2013,7 @@ fn draw_scene(
     fonts: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
-) -> Result<(Scene, Vec<point_labels::Placement>)> {
+) -> Result<(Result<Scene>, Vec<point_labels::Placement>)> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
@@ -2020,7 +2024,7 @@ fn draw_scene(
         if let Some(header) = draw::figure_header(theme, &header) {
             scene.push(header);
         }
-        return Ok((scene, Vec::new()));
+        return Ok((Ok(scene), Vec::new()));
     }
     let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
     let mut layers = draw_layers(figure, panels, &planned, fonts, context)?;
@@ -2028,6 +2032,7 @@ fn draw_scene(
         .take(panels.len())
         .collect();
     let mut points = place_point_labels(figure, panels, &planned, &layers, context)?;
+    let mut column_error = None;
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2064,15 +2069,26 @@ fn draw_scene(
         placements[i] = points
             .placement
             .map_error(|err| in_cell(figure, panel.axes, err));
-        let column = point_labels::column_items(
+        let container = if figure.grid().rows() * figure.grid().cols() == 1 {
+            "figure"
+        } else {
+            "panel"
+        };
+        let column = match point_labels::column_items(
             theme,
             resolved,
             layout,
             &panel.marks,
             &panel.points,
-            context,
-        )
-        .map_err(|err| in_cell(figure, panel.axes, err))?;
+            (context, container),
+        ) {
+            Ok(column) => column,
+            Err(err) => {
+                // Judged against the settled layout only: see `scene_with_labels`.
+                column_error.get_or_insert_with(|| in_cell(figure, panel.axes, err));
+                None
+            }
+        };
         scene.push(draw::chrome(theme, layout));
         let stacked = [
             drawn.into_item(),
@@ -2142,7 +2158,7 @@ fn draw_scene(
     for notes in annotations {
         scene.push(notes);
     }
-    Ok((scene, placements))
+    Ok((column_error.map_or(Ok(scene), Err), placements))
 }
 
 /// What one Cartesian layer of a panel draws under its point labels: its marks, the values

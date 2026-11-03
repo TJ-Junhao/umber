@@ -947,6 +947,167 @@ fn the_no_room_hint_of_labels_in_the_plot_suggests_a_column() {
     );
 }
 
+/// Row values written with a long prefix and suffix, which reach far past their points.
+fn measured() -> ScatterOptions {
+    ScatterOptions {
+        labels: PointLabels {
+            annotate: true,
+            format: Some(
+                TickFormat::fixed(3)
+                    .unwrap()
+                    .affix("Measured = ", " units")
+                    .unwrap(),
+            ),
+            place: Place::Column,
+            ..PointLabels::default()
+        },
+        ..ScatterOptions::default()
+    }
+}
+
+#[test]
+fn row_values_that_leave_the_figure_are_a_style_error() {
+    let mut f = Figure::new(4.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .scatter(nums(&[0.0, 1.0]), &[123.456, 789.012], measured())
+        .unwrap();
+    let err = render_err(&f);
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_scene(): the value \"Measured = 123.456 units\" of scatter 1 reaches outside \
+         the figure."
+    );
+    assert_eq!(
+        err.hint(),
+        Some("make the figure wider, pass a smaller label_size=, or use another place.")
+    );
+    // The limits stay as set: a wider figure holds the values.
+    let mut f = Figure::new(9.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .scatter(nums(&[0.1, 0.9]), &[123.456, 789.012], measured())
+        .unwrap();
+    let scene = render(&f);
+    assert!(boxed(&scene, "Measured = 123.456 units")[0] >= 0.0);
+}
+
+#[test]
+fn row_values_that_reach_into_a_neighbouring_panel_are_a_style_error() {
+    let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    let at = |col: i64| Placement {
+        row: GridIndex::At(0),
+        col: GridIndex::At(col),
+        ..Placement::default()
+    };
+    f.add_axes_at(at(0), ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .scatter(nums(&[0.0, 1.0]), &[123.456, 789.012], measured())
+        .unwrap();
+    f.add_axes_at(at(1), ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .scatter(nums(&[0.0, 1.0]), &[3.0, 4.0], in_column("", None))
+        .unwrap()
+        .value_column("Mean", SizeSpec::Auto);
+    let err = render_err(&f);
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_scene(): row 0, col 0: the value \"Measured = 123.456 units\" of scatter 1 \
+         reaches outside the panel."
+    );
+}
+
+#[test]
+fn a_column_overlap_is_judged_against_the_settled_layout() {
+    // An automatic label above a point on a line first leaves the plot, so the first pass
+    // lays the plot out before the limits grow, narrower than the settled one; the row's
+    // values fit the settled plot.
+    let categories = ["A", "B", "C", "D"];
+    let mut f = Figure::new(2.1, 1.5, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .line(
+            names(&categories),
+            &[1.0; 4],
+            umber_core::LineOptions::default(),
+        )
+        .unwrap()
+        .scatter_shared(
+            names(&["B"]),
+            nums(&[1.0]),
+            ScatterOptions {
+                labels: PointLabels {
+                    annotate: true,
+                    format: fixed(4),
+                    ..PointLabels::default()
+                },
+                y_error: Some(umber_core::ErrorRange::Numbers {
+                    low: std::sync::Arc::from(&[0.0][..]),
+                    high: std::sync::Arc::from(&[1.0][..]),
+                }),
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap()
+        .scatter_shared(
+            names(&categories),
+            nums(&[0.2, 0.3, 0.4, 0.5]),
+            in_column("", fixed(4)),
+        )
+        .unwrap();
+    let scene = render(&f);
+    for value in ["1.0000", "0.2000", "0.3000", "0.4000", "0.5000"] {
+        text(&scene, value);
+    }
+    for pair in ["0.2000", "0.3000", "0.4000", "0.5000"].windows(2) {
+        assert!(
+            boxed(&scene, pair[0])[2] <= boxed(&scene, pair[1])[0],
+            "{pair:?}"
+        );
+    }
+}
+
+#[test]
+fn a_tall_row_title_gets_room_and_is_centred_with_the_row() {
+    let mut f = Figure::new(5.0, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .scatter_shared(
+            names(&["A", "B", "C"]),
+            nums(&[1.0, 2.0, 3.0]),
+            in_column("", None),
+        )
+        .unwrap()
+        .ylabel("Response")
+        .title("Panel title")
+        .value_column("Mean", SizeSpec::pt(48.0).unwrap());
+    let scene = render(&f);
+    let plot = plot(&scene);
+    let title = boxed(&scene, "Mean");
+    let label = boxed(&scene, "Response");
+    assert!(label[3] <= title[1] + TOLERANCE, "{label:?} over {title:?}");
+    assert!(boxed(&scene, "Panel title")[3] <= label[1] + TOLERANCE);
+    assert!(title[3] <= plot[1] - tick_rise(&scene, plot) - ROW_GAP + TOLERANCE);
+    // The values sit at the title's vertical centre.
+    let item = text(&scene, "Mean");
+    let fonts = FontLibrary::global()
+        .with_figure_fonts(&scene.fonts)
+        .unwrap();
+    let layout = fonts.layout("Mean", &item.style).unwrap();
+    let centre =
+        f64::from(item.origin.y) - (f64::from(layout.ascent()) - f64::from(layout.descent())) / 2.0;
+    let value = boxed(&scene, "2");
+    assert_close((value[1] + value[3]) / 2.0, centre, "centred");
+}
+
 // ---- Output --------------------------------------------------------------------------------
 
 #[test]

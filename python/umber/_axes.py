@@ -1168,9 +1168,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 number format for times). Rendering raises it when a value label does not fit
                 inside the plot, when no position is clear for a label with ``Place.AUTO``, and
                 when the sides of ``Place.AUTO`` labels keep changing as the limits grow, and
-                when two values of one ``Place.COLUMN`` sub-column overlap; the message names
-                the series (its label, or ``scatter 2`` for the second scatter of the axes) and
-                the value.
+                when two values of one ``Place.COLUMN`` sub-column overlap or a value leaves
+                the figure (its panel, on a grid); the message names the series (its label, or
+                ``scatter 2`` for the second scatter of the axes) and the value.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
