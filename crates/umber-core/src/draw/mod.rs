@@ -217,9 +217,7 @@ pub(crate) fn drawn_marks(
                 width,
                 ..
             } => {
-                let (xs, ys) = line::line_points(&context, resolved, line_mark);
-                let style = line::line_style(width, color, line_mark.options().dash);
-                line::line_items(&context, &xs, &ys, &style, &mut items);
+                line_mark_items(&context, resolved, line_mark, (color, width), &mut items);
             }
             ResolvedMark::Area {
                 mark: area_mark,
@@ -238,6 +236,16 @@ pub(crate) fn drawn_marks(
                 ref mapped,
                 ..
             } => {
+                // The scatter's own line, then its own error bars, lie under its markers, all
+                // in its color at full opacity and the theme's line width, as a line and error
+                // bars of the automatic width are drawn.
+                let own = (solid(color), theme.drawn_line_width(crate::SizeSpec::Auto));
+                if let Some(line_mark) = scatter_mark.line() {
+                    line_mark_items(&context, resolved, line_mark, own, &mut items);
+                }
+                for bars in scatter_mark.error_bars() {
+                    error_bars::error_bar_items(&context, resolved, bars, own, &mut items);
+                }
                 let xs = axis_values(&resolved.x, scatter_mark.x());
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
@@ -570,6 +578,27 @@ fn point_fill<'a, 'm: 'a>(
         }),
         (Some(_), None) => None,
     }
+}
+
+/// The items of the line `line_mark` in `color`, `width` pt wide: its points as
+/// [`line::line_points`] keeps them, stroked in its dash.
+fn line_mark_items(
+    context: &MarkContext<'_>,
+    resolved: &Resolved,
+    line_mark: &crate::model::LineMark,
+    (color, width): (crate::Rgba, f32),
+    items: &mut Vec<Item>,
+) {
+    let (xs, ys) = line::line_points(context, resolved, line_mark);
+    let style = line::line_style(width, color, line_mark.options().dash);
+    line::line_items(context, &xs, &ys, &style, items);
+}
+
+/// The color of what a scatter in `color` draws besides its markers, its own line and error
+/// bars, and of its value labels: `color`, the mark's resolved color (the theme's text color
+/// for a color-mapped mark), at full opacity, whatever the marker alpha.
+pub(crate) fn solid(color: crate::Rgba) -> crate::Rgba {
+    crate::Rgba { a: 255, ..color }
 }
 
 /// Whether the point at `index` of a scatter or bubble mark in `color`, its colors mapped from

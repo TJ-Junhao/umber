@@ -10,7 +10,8 @@ use umber_core::scene::{Item, Scene, TextItem};
 use umber_core::{
     AxesMut, AxisData, AxisValue, BarOptions, ColorBy, ColorSpec, Error, ErrorBarOptions, Figure,
     FontLibrary, GridIndex, Instant, LineOptions, Marker, Place, PointColor, PointLabels, Rgba,
-    ScaleKind, ScatterOptions, SizeSpec, SvgText, TextOptions, Theme, TickFormat, ValueLabels,
+    ScaleKind, ScatterGroup, ScatterOptions, SizeSpec, SvgText, TextOptions, Theme, TickFormat,
+    ValueLabels,
 };
 
 const TOLERANCE: f64 = 2e-3;
@@ -245,10 +246,11 @@ fn two_category_axes_are_refused_when_the_call_is_made() {
     assert!(matches!(err, Error::Usage { .. }), "{err}");
     let err = axes(&mut f)
         .grouped_scatter(
-            vec![("North".into(), names(&["A"]), names(&["B"]))],
+            vec![ScatterGroup::new("North", names(&["A"]), names(&["B"]))],
             Marker::Circle,
             SizeSpec::Auto,
             labels(Place::Auto),
+            false,
         )
         .unwrap_err();
     assert!(matches!(err, Error::Usage { .. }), "{err}");
@@ -379,12 +381,13 @@ fn labels_take_the_series_color_at_full_opacity() {
     axes(&mut f)
         .grouped_scatter(
             vec![
-                ("North".into(), nums(&[1.0]), nums(&[3.5])),
-                ("South".into(), nums(&[2.0]), nums(&[4.5])),
+                ScatterGroup::new("North", nums(&[1.0]), nums(&[3.5])),
+                ScatterGroup::new("South", nums(&[2.0]), nums(&[4.5])),
             ],
             Marker::Circle,
             SizeSpec::Auto,
             labels(Place::Auto),
+            false,
         )
         .unwrap();
     let scene = render(&f);
@@ -1053,10 +1056,11 @@ fn label_options_without_annotate_are_refused() {
         );
         let err = axes(&mut f)
             .grouped_scatter(
-                vec![("North".into(), nums(&[1.0]), nums(&[2.0]))],
+                vec![ScatterGroup::new("North", nums(&[1.0]), nums(&[2.0]))],
                 Marker::Circle,
                 SizeSpec::Auto,
                 labels,
+                false,
             )
             .unwrap_err();
         assert_eq!(err.parameter(), Some(parameter));

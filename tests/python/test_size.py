@@ -22,6 +22,8 @@ ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 NO_POINT_LABELS = (False, None, NO_SIZE, 0)
+# No error bars and no connecting line of a scatter's own: x_error, y_error and connect.
+NO_OWN_MARKS = (None, None, False)
 LINEAR = 0
 OUTLINES = 0
 TIMES_HINT = "use Size.AUTO for the theme's size, or a factor below 1 for a smaller one."
@@ -284,7 +286,16 @@ def test_a_scatter_with_a_size_in_points_matches_the_native_figure() -> None:
     native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
     native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     native_fig.scatter(
-        0, 0, floats(0, 1, 2), floats(2, 1, 3), "", AUTO, 1, (2, 11.0), *NO_POINT_LABELS
+        0,
+        0,
+        floats(0, 1, 2),
+        floats(2, 1, 3),
+        "",
+        AUTO,
+        1,
+        (2, 11.0),
+        *NO_POINT_LABELS,
+        *NO_OWN_MARKS,
     )
     assert fig.to_svg() == native_fig.to_svg(OUTLINES)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
@@ -334,7 +345,18 @@ def test_native_marks_report_the_core_error_for_a_bad_size() -> None:
     fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     before = fig.to_svg(OUTLINES)
     with pytest.raises(ub.StyleError) as caught:
-        fig.scatter(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, (2, 100.0), *NO_POINT_LABELS)
+        fig.scatter(
+            0,
+            0,
+            floats(0, 1),
+            floats(1, 2),
+            "",
+            AUTO,
+            0,
+            (2, 100.0),
+            *NO_POINT_LABELS,
+            *NO_OWN_MARKS,
+        )
     assert str(caught.value) == f"Size.pt(): points is 100; {POINTS_RANGE}"
     # The failed call stored no series.
     assert fig.to_svg(OUTLINES) == before

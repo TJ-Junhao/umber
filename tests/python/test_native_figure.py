@@ -36,6 +36,8 @@ NO_SIZE = (0, 0.0)
 # Bars without value labels: annotate, format and size.
 NO_LABELS = (False, None, NO_SIZE)
 NO_POINT_LABELS = (False, None, NO_SIZE, 0)
+# No error bars and no connecting line of a scatter's own: x_error, y_error and connect.
+NO_OWN_MARKS = (None, None, False)
 RED = (2, 0xD64933FF, 1.0)
 BLUE = (2, 0x3366B8FF, 1.0)
 LINEAR, LOG, CATEGORY = 0, 1, 2
@@ -387,7 +389,7 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(
-        r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS
+        r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
     ),
     "bubbles": lambda f, r, c: f.bubbles(r, c, floats(1), floats(1), floats(1), "", AUTO, 0),
     "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO, *NO_LABELS),
@@ -784,7 +786,16 @@ def test_marks_draw() -> None:
     with_line = fig.to_svg(OUTLINES)
     assert with_line != empty
     fig.scatter(
-        0, 0, floats(0, 1, 2), floats(2, 1, 0), "b", (1, 3, 0.5), 4, NO_SIZE, *NO_POINT_LABELS
+        0,
+        0,
+        floats(0, 1, 2),
+        floats(2, 1, 0),
+        "b",
+        (1, 3, 0.5),
+        4,
+        NO_SIZE,
+        *NO_POINT_LABELS,
+        *NO_OWN_MARKS,
     )
     assert fig.to_svg(OUTLINES) != with_line
 
@@ -796,7 +807,9 @@ def test_marks_draw() -> None:
 
     categories = figure(x=CATEGORY)
     categories.line(0, 0, ["a", "b"], floats(1, 2), "", AUTO, 0, NO_SIZE)
-    categories.scatter(0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS)
+    categories.scatter(
+        0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+    )
 
     hist = figure()
     hist.hist(0, 0, floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, 0, False, 0, "h", AUTO)
@@ -807,7 +820,9 @@ def test_mark_labels_and_colors_reach_the_legend() -> None:
     fig = figure()
     fig.legend(0, 0, 2, NO_SIZE)
     fig.line(0, 0, floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE)
-    fig.scatter(0, 0, floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE, *NO_POINT_LABELS)
+    fig.scatter(
+        0, 0, floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+    )
     svg = fig.to_svg(EDITABLE)
     assert ">North</text>" in svg
     assert ">South</text>" in svg
@@ -921,7 +936,9 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "scatter length",
         figure,
-        lambda f: f.scatter(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS),
+        lambda f: f.scatter(
+            0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        ),
         ub.DataError,
         "Axes.scatter(): x has 2 values but y has 1; x and y must have the same length.",
         None,
@@ -931,7 +948,16 @@ MARK_ERRORS: list[ErrorCase] = [
         "scatter y infinite",
         figure,
         lambda f: f.scatter(
-            0, 0, floats(1, 2), floats(1, np.inf), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS
+            0,
+            0,
+            floats(1, 2),
+            floats(1, np.inf),
+            "",
+            AUTO,
+            0,
+            NO_SIZE,
+            *NO_POINT_LABELS,
+            *NO_OWN_MARKS,
         ),
         ub.DataError,
         f"Axes.scatter(): y[1] is inf; {FINITE}",
@@ -1139,7 +1165,9 @@ INTERNAL_MARK_ERRORS: list[
     ),
     (
         "marker",
-        lambda f: f.scatter(0, 0, floats(1), floats(1), "", AUTO, 5, NO_SIZE, *NO_POINT_LABELS),
+        lambda f: f.scatter(
+            0, 0, floats(1), floats(1), "", AUTO, 5, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        ),
         ValueError,
         "5 is not a value of Marker",
     ),
@@ -1270,7 +1298,9 @@ def test_a_clone_is_independent_of_the_original() -> None:
     assert copy.to_svg(EDITABLE) == svg
 
     copy.title(0, 0, "Changed", NO_SIZE)
-    copy.scatter(0, 0, floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE, *NO_POINT_LABELS)
+    copy.scatter(
+        0, 0, floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+    )
     copy.xlim(0, 0, -1.0, 3.0)
     assert ">Changed</text>" in copy.to_svg(EDITABLE)
     assert original.to_svg(EDITABLE) == svg

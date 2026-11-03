@@ -35,8 +35,8 @@ pub use crate::model::{
 pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
-    LineOptions, MAX_GRID, Mark, Placement, ScatterMark, ScatterOptions, Series, SeriesView, Share,
-    Step, StepMark, StepOptions,
+    LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
+    SeriesView, Share, Step, StepMark, StepOptions,
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
@@ -49,7 +49,7 @@ pub use crate::model::{BoxGroupMark, BoxMark, BoxOptions, Distribution, Distribu
 pub use crate::model::{BubbleMark, BubbleOptions};
 pub use crate::model::{CmapChoice, ColorBy, PointColor};
 pub use crate::model::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
-pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+pub use crate::model::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
 pub use crate::model::{
     EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions,
 };

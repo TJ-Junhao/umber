@@ -1,13 +1,14 @@
 //! Values written next to scatter points in every theme: a horizontal dot-and-whisker chart and
-//! a matched-fold chart with points joined by lines, both placed automatically, the second
+//! a matched-fold chart with points joined by lines, both placed automatically, with the error
+//! bars and lines declared on the scatters so that they take the series colors, the second
 //! with automatic limits that grow to hold the label above its highest point, and labels on a
 //! fixed side that grow the automatic limits.
 
 use std::sync::Arc;
 
 use umber_core::{
-    Alpha, AxisData, ColorSpec, ErrorBarOptions, FontLibrary, LineOptions, Marker, Place,
-    PointColor, PointLabels, ScaleKind, ScatterOptions, SizeSpec, TickFormat,
+    Alpha, AxisData, ColorSpec, ErrorRange, FontLibrary, Marker, Place, PointColor, PointLabels,
+    ScaleKind, ScatterOptions, TickFormat,
 };
 
 use super::super::{Output, axes, emit_scene, figure, linear, themes};
@@ -23,10 +24,9 @@ fn palette(index: usize) -> ColorSpec {
     }
 }
 
-fn labelled(label: &str, index: usize, marker: Marker, place: Place) -> ScatterOptions {
+fn labelled(label: &str, marker: Marker, place: Place) -> ScatterOptions {
     ScatterOptions {
         label: label.into(),
-        color: PointColor::Uniform(palette(index)),
         marker,
         labels: PointLabels {
             annotate: true,
@@ -76,24 +76,19 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut ax = axes(&mut f);
         ax.title("Five-fold accuracy by model")
             .xlabel("Accuracy (%)");
-        for (i, (label, marker, means, sds)) in series.iter().enumerate() {
+        for (label, marker, means, sds) in &series {
             let low: Vec<f64> = means.iter().zip(sds).map(|(m, s)| m - s).collect();
             let high: Vec<f64> = means.iter().zip(sds).map(|(m, s)| m + s).collect();
-            ax.x_error_bars_shared(
-                names(&models),
-                Arc::from(low),
-                Arc::from(high),
-                ErrorBarOptions {
-                    color: palette(i),
-                    width: SizeSpec::pt(1.0).unwrap(),
-                    ..ErrorBarOptions::default()
-                },
-            )
-            .unwrap()
-            .scatter_shared(
+            ax.scatter_shared(
                 AxisData::Numbers(means.to_vec()),
                 names(&models),
-                labelled(label, i, *marker, Place::Auto),
+                ScatterOptions {
+                    x_error: Some(ErrorRange::Numbers {
+                        low: Arc::from(low),
+                        high: Arc::from(high),
+                    }),
+                    ..labelled(label, *marker, Place::Auto)
+                },
             )
             .unwrap();
         }
@@ -107,33 +102,23 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let mut ax = axes(&mut f);
         // Automatic limits grow to hold the label above the highest point.
         ax.title("Matched folds").ylabel("Accuracy (%)");
-        for (i, (label, marker, values, sd)) in matched.iter().enumerate() {
+        for (label, marker, values, sd) in &matched {
+            // Only the mean has an error bar: NaN skips the bars of the folds.
             let mean = values[5];
-            ax.line(
-                names(&folds),
-                values,
-                LineOptions {
-                    color: palette(i),
-                    width: SizeSpec::pt(0.8).unwrap(),
-                    ..LineOptions::default()
-                },
-            )
-            .unwrap()
-            .y_error_bars(
-                names(&["Mean"]),
-                &[mean - sd],
-                &[mean + sd],
-                ErrorBarOptions {
-                    color: palette(i),
-                    width: SizeSpec::pt(1.0).unwrap(),
-                    ..ErrorBarOptions::default()
-                },
-            )
-            .unwrap()
-            .scatter_shared(
+            let mut low = [f64::NAN; 6];
+            let mut high = [f64::NAN; 6];
+            (low[5], high[5]) = (mean - sd, mean + sd);
+            ax.scatter_shared(
                 names(&folds),
                 AxisData::Numbers(values.to_vec()),
-                labelled(label, i, *marker, Place::Auto),
+                ScatterOptions {
+                    y_error: Some(ErrorRange::Numbers {
+                        low: Arc::from(low),
+                        high: Arc::from(high),
+                    }),
+                    connect: true,
+                    ..labelled(label, *marker, Place::Auto)
+                },
             )
             .unwrap();
         }
@@ -153,7 +138,10 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             ax.scatter_shared(
                 AxisData::Numbers(xs.clone()),
                 AxisData::Numbers(ys.iter().map(|y| y + shift).collect()),
-                labelled("", i, Marker::Diamond, place),
+                ScatterOptions {
+                    color: PointColor::Uniform(palette(i)),
+                    ..labelled("", Marker::Diamond, place)
+                },
             )
             .unwrap();
         }

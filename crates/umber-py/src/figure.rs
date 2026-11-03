@@ -42,6 +42,7 @@ use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
 use umber_core::{ContourLevels, ContourOptions, ContourStyle};
+use umber_core::{ErrorRange, ScatterGroup};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
@@ -63,6 +64,62 @@ type DistributionArgs<'py> = Vec<(String, Vec<Bound<'py, PyAny>>, ColorArg)>;
 
 /// Named coordinate pairs, already converted by the Python facade.
 type XyGroupArgs<'py> = Vec<(String, Bound<'py, PyAny>, Bound<'py, PyAny>)>;
+
+/// The ends `(low, high)` of the error bars of scatter points, already converted by the Python
+/// facade: numbers, or times in int64 buffers of microseconds; `None` for no bars.
+type ErrorArgs<'py> = Option<(Bound<'py, PyAny>, Bound<'py, PyAny>)>;
+
+/// Named scatter groups: their coordinates and the ends of their error bars along x and y.
+type ScatterGroupArgs<'py> = Vec<(
+    String,
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+    ErrorArgs<'py>,
+    ErrorArgs<'py>,
+)>;
+
+/// Copies the ends of the error bars of scatter points, given as `name`, into the form held by
+/// the core: times when they arrive in int64 buffers, numbers otherwise.
+fn error_range(
+    context: &'static str,
+    name: &'static str,
+    ends: ErrorArgs<'_>,
+) -> PyResult<Option<ErrorRange>> {
+    let Some((low, high)) = ends else {
+        return Ok(None);
+    };
+    if is_int64_buffer(&low) {
+        return Ok(Some(ErrorRange::Times {
+            low: times(context, name, &low)?.into(),
+            high: times(context, name, &high)?.into(),
+        }));
+    }
+    Ok(Some(ErrorRange::Numbers {
+        low: shared_floats(&low)?,
+        high: shared_floats(&high)?,
+    }))
+}
+
+/// Copies grouped scatter points and their error bars into the forms held by the core.
+fn scatter_groups(
+    context: &'static str,
+    groups: ScatterGroupArgs<'_>,
+) -> PyResult<Vec<ScatterGroup>> {
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(i, (label, x, y, x_error, y_error))| {
+            let group = |error| group_error(error, i);
+            Ok(ScatterGroup {
+                label,
+                x: series_data(context, "x", &x).map_err(group)?,
+                y: series_data(context, "y", &y).map_err(group)?,
+                x_error: error_range(context, "x_error", x_error).map_err(group)?,
+                y_error: error_range(context, "y_error", y_error).map_err(group)?,
+            })
+        })
+        .collect()
+}
 
 /// Copies grouped coordinates into the forms held by the core.
 fn xy_groups(
@@ -792,6 +849,9 @@ impl Figure {
         format: Option<TickFormatArg>,
         label_size: SizeArg,
         place: i64,
+        x_error: ErrorArgs<'_>,
+        y_error: ErrorArgs<'_>,
+        connect: bool,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.scatter()";
         let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
@@ -801,6 +861,9 @@ impl Figure {
             marker: enum_value::<Marker>(marker)?,
             size: size_spec(size)?,
             labels: point_labels(annotate, format, label_size, place)?,
+            x_error: error_range(CONTEXT, "x_error", x_error)?,
+            y_error: error_range(CONTEXT, "y_error", y_error)?,
+            connect,
         };
         self.axes(row, col)?
             .scatter_shared(x, y, options)
@@ -2125,19 +2188,20 @@ impl Figure {
         &mut self,
         row: AxesRow,
         col: i64,
-        groups: XyGroupArgs<'_>,
+        groups: ScatterGroupArgs<'_>,
         marker: i64,
         size: SizeArg,
         annotate: bool,
         format: Option<TickFormatArg>,
         label_size: SizeArg,
         place: i64,
+        connect: bool,
     ) -> PyResult<()> {
-        let groups = xy_groups("Axes.scatter()", groups)?;
+        let groups = scatter_groups("Axes.scatter()", groups)?;
         let (marker, size) = (enum_value::<Marker>(marker)?, size_spec(size)?);
         let labels = point_labels(annotate, format, label_size, place)?;
         self.axes(row, col)?
-            .grouped_scatter(groups, marker, size, labels)
+            .grouped_scatter(groups, marker, size, labels, connect)
             .map(drop)
             .map_err(core_error)
     }

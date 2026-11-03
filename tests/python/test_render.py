@@ -17,6 +17,8 @@ ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 NO_POINT_LABELS = (False, None, NO_SIZE, 0)
+# No error bars and no connecting line of a scatter's own: x_error, y_error and connect.
+NO_OWN_MARKS = (None, None, False)
 
 
 def floats(*values: float) -> npt.NDArray[np.float64]:
@@ -77,6 +79,7 @@ def native_figure() -> _umber.Figure:
         3,
         NO_SIZE,
         *NO_POINT_LABELS,
+        *NO_OWN_MARKS,
     )
     fig.xlim(0, 0, 2019.5, 2023.5)
     fig.ylim(0, 0, 0.5, 16.0)
@@ -92,7 +95,9 @@ def category_figures() -> tuple[ub.Figure, _umber.Figure]:
     native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight(), *ONE_CELL)
     native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
     native.line(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, NO_SIZE)
-    native.scatter(0, 0, ["Q2", "Q4"], floats(2, 4), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS)
+    native.scatter(
+        0, 0, ["Q2", "Q4"], floats(2, 4), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+    )
     return fig, native
 
 

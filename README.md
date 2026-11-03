@@ -77,7 +77,7 @@ Data can be a list, a tuple, a NumPy array, or a pandas or polars Series. Missin
 | Strip, swarm | `ax.strip(categories, groups)`, `ax.swarm(categories, groups)` |
 | Events | `ax.events(rows, positions)` |
 | Bubbles | `ax.bubbles(x, y, sizes, label="Cities")` (adds a size legend) |
-| Error bars | `ax.y_error_bars(x, low, high)`, `ax.x_error_bars(y, low, high)` |
+| Error bars | `ax.y_error_bars(x, low, high)`, `ax.x_error_bars(y, low, high)`; a series' own bars and connecting line in its color: `ax.scatter(x, y, y_error=(low, high), connect=True)` |
 | Band | `ax.band(x, low, high)` |
 | Stem | `ax.stem(x, y)` |
 | Reference lines and spans | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |

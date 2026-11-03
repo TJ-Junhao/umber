@@ -150,6 +150,16 @@ impl XySeries {
     pub(super) fn y(&self) -> &AxisData {
         &self.y
     }
+
+    /// The x values, shared with every mark built from the series.
+    pub(super) fn shared_x(&self) -> &Arc<AxisData> {
+        &self.x
+    }
+
+    /// The y values, shared with every mark built from the series.
+    pub(super) fn shared_y(&self) -> &Arc<AxisData> {
+        &self.y
+    }
 }
 
 impl fmt::Debug for XySeries {

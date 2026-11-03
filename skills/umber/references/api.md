@@ -1424,7 +1424,7 @@ Example:
 ### `umber.Axes.scatter`
 
 ```text
-Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO) -> Self
+Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False) -> Self
 ```
 
 Add a marker at each point ``(x[i], y[i])``.
@@ -1449,6 +1449,17 @@ automatic limits, and those limits grow just enough to hold it, such as above th
 highest point of a line; explicit limits and category axes never grow. Labels are
 placed in call order, point by point, so the same data always gives the same figure.
 Text from ``text()`` and ``annotate()`` is not avoided.
+
+``x_error`` and ``y_error`` give each point an error bar, and ``connect=True`` joins the
+points with a line in input order. They belong to the series: they take its color at
+full opacity (each group's with ``by``, the theme's text color with ``ColorBy``), no
+palette color and no legend entry of their own, and the theme's line width; the bars
+have caps, as ``y_error_bars()`` draws them. The line is drawn first, then the bars,
+then the markers. Bars extend automatic limits as standalone error bars do, and value
+labels avoid both the bars and the line. A NaN end skips that point's bar, so a bar can
+go on one point only, and a point left out has no bar; a point left out also breaks the
+line. With ``by``, each group's line joins only its own points. Use ``y_error_bars()``
+and ``line()`` only for marks that stand on their own.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1475,16 +1486,27 @@ Args:
         ``Size.pt(p)`` uses points without font scaling. (``size`` is the marker size.)
     place: Where each value goes: ``Place.AUTO``, or a fixed side, ``Place.ABOVE``,
         ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``.
+    x_error: The ends ``(low, high)`` of each point's horizontal error bar, one value
+        each per point, in x data units: numbers on a linear or log x axis, times on a
+        time x axis. ``AUTO`` draws no bars.
+    y_error: The ends ``(low, high)`` of each point's vertical error bar, one value
+        each per point, in y data units: numbers on a linear or log y axis, times on a
+        time y axis. ``AUTO`` draws no bars.
+    connect: Whether a line joins the points in input order.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+        tuple of two columns.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the
-        axes, or a ``ColorBy`` does not have one value per point.
+        axes, or a ``ColorBy`` does not have one value per point. Also if an end of
+        ``x_error`` or ``y_error`` is infinite or not positive on a log axis, they do
+        not hold one value per point, or a low end is above its high end; the message
+        names the argument and the index.
         It is also raised for a line break or other control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control
         character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
@@ -1499,7 +1521,8 @@ Raises:
         this is raised when the call runs), a ``ColorBy`` comes with a label, or its
         ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
         marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
-        without ``annotate``.
+        without ``annotate``; or if ``x_error`` or ``y_error`` lies along a category
+        axis, or holds numbers along a time axis.
 
 Example:
 
@@ -1516,6 +1539,11 @@ Example:
 >>> fixed = ub.Figure().add_axes().scatter(
 ...     [1, 2], [0.25, 0.5], annotate=True, format=ub.TickFormat.percent(0),
 ...     place=ub.Place.RIGHT,
+... )
+>>> nan = float("nan")
+>>> folds = ub.Figure().add_axes(x=ub.Scale.category()).scatter(
+...     ["Fold 1", "Fold 2", "Mean"], [66.8, 68.1, 67.5],
+...     y_error=([nan, nan, 66.9], [nan, nan, 68.1]), connect=True,
 ... )
 ```
 
@@ -6572,7 +6600,7 @@ Example:
 ## `umber.scatter`
 
 ```text
-scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO) -> Axes[float, float]
+scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False) -> Axes[float, float]
 ```
 
 Plot a marker at each point on a new figure and return its axes.
@@ -6598,15 +6626,23 @@ Args:
     format: The format of the values shown by ``annotate``, as in ``Axes.scatter()``.
     label_size: The size of the values shown by ``annotate``, as in ``Axes.scatter()``.
     place: Where each value goes, as in ``Axes.scatter()``.
+    x_error: The ends ``(low, high)`` of each point's horizontal error bar, as in
+        ``Axes.scatter()``.
+    y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
+        ``Axes.scatter()``.
+    connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
 
 Returns:
     The axes of the new figure.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+        tuple of two columns.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite,
-        ``x`` holds names, or a ``ColorBy`` does not have one value per point.
+        ``x`` holds names, or a ``ColorBy`` does not have one value per point; or if
+        an end of ``x_error`` or ``y_error`` is infinite, they do not hold one value per
+        point, or a low end is above its high end.
     StyleError: If ``label`` is too long or holds a line break or another control
         character, or ``format`` is ``TickFormat.iso()``.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; if

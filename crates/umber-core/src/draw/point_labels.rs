@@ -38,8 +38,11 @@
 //! automatic label reaches past its point on the side it took, as a fixed-side label does, and
 //! the next pass fits the limits again from the plot without automatic labels plus these
 //! reaches, never from the limits of an earlier pass, so that they grow just enough to hold
-//! them. Growing the limits moves every point, so the labels are placed again. The placement
-//! is final once every label lies inside the plot on the side it took in the pass before.
+//! them. Growing the limits moves every point, so the labels are placed again; each label then
+//! tries the side it took in the pass before first, and the other sides in the usual order, so
+//! that a label the limits now hold keeps its side rather than move to a side earlier in the
+//! order that the moved points have just cleared. The placement is final once every label lies
+//! inside the plot on the side it took in the pass before.
 //! A label still outside on that side means the limits cannot hold it, which fails the render;
 //! so does a placement that has not settled after [`MAX_PASSES`] passes.
 //!
@@ -51,7 +54,7 @@ use super::bar_labels::{self, contains};
 use super::chrome::text;
 use super::mapping::{AxisPoint, axis_values};
 use super::obstacles::{Bounds, Obstacles};
-use super::{DrawnMarks, has_fill, mark_context, marker_outline, marker_reach};
+use super::{DrawnMarks, has_fill, mark_context, marker_outline, marker_reach, solid};
 use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::color_scale::ResolvedColorScale;
 use crate::error::quoted;
@@ -276,7 +279,7 @@ impl ScatterLabels {
                 mark: index,
                 name,
                 place: labels.place,
-                color: Rgba { a: 255, ..*color },
+                color: solid(*color),
                 reach: marker_reach(options.marker, *size, marker_outline(mapped.is_some())),
                 points,
             });
@@ -339,6 +342,18 @@ impl ScatterLabels {
             }
         }
         reaches
+    }
+
+    /// The sides the automatic label `point` of the annotated mark `mark` tries, in order:
+    /// [`Side::AUTO_ORDER`], with the side it took in the previous pass first, since the limits
+    /// now make room for that side.
+    fn order(&self, mark: usize, point: usize) -> [Side; 4] {
+        let mut order = Side::AUTO_ORDER;
+        let held = self.held.as_ref().and_then(|held| held.side(mark, point));
+        if let Some(at) = order.iter().position(|&side| Some(side) == held) {
+            order[..=at].rotate_right(1);
+        }
+        order
     }
 
     /// The error for the label `point` of the annotated mark `mark` that has not settled on a
@@ -520,7 +535,7 @@ pub(crate) fn items(
                 // An axis whose limits grow: automatic, and not a category axis.
                 let grows = [0, 1].map(|axis| !labels.explicit[axis] && point.at[axis].is_some());
                 let clear = |bounds| !obstacles.hit(padded(bounds));
-                let boxes = Side::AUTO_ORDER.map(|side| (side, candidate(side)));
+                let boxes = labels.order(m, p).map(|side| (side, candidate(side)));
                 let (side, bounds) = boxes
                     .into_iter()
                     .find(|&(_, bounds)| contains(plot, bounds) && clear(bounds))
@@ -858,6 +873,18 @@ mod tests {
             (passes, err.to_string()),
             (1, "Figure.to_scene(): failed".to_owned())
         );
+    }
+
+    #[test]
+    fn a_label_tries_its_held_side_first() {
+        let mut labels = ScatterLabels::default();
+        assert_eq!(labels.order(0, 0), Side::AUTO_ORDER);
+        labels.hold(Sides(vec![vec![Some(Side::Below), None]]));
+        assert_eq!(
+            labels.order(0, 0),
+            [Side::Below, Side::Above, Side::Right, Side::Left]
+        );
+        assert_eq!(labels.order(0, 1), Side::AUTO_ORDER);
     }
 
     #[test]

@@ -77,7 +77,7 @@ fig.save_pdf("temperature.pdf")
 | 带状散点图、蜂群图 | `ax.strip(categories, groups)`、`ax.swarm(categories, groups)` |
 | 事件图 | `ax.events(rows, positions)` |
 | 气泡图 | `ax.bubbles(x, y, sizes, label="Cities")`（附带尺寸图例） |
-| 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)` |
+| 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)`；属于某个 series 的误差棒和连线用 `ax.scatter(x, y, y_error=(low, high), connect=True)`，自动取该 series 的颜色 |
 | 区间带 | `ax.band(x, low, high)` |
 | 杆状图 | `ax.stem(x, y)` |
 | 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |

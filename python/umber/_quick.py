@@ -152,6 +152,9 @@ def scatter(
     format: TickFormat | Auto = AUTO,
     label_size: Size = Size.AUTO,
     place: Place = Place.AUTO,
+    x_error: tuple[Values[float], Values[float]] | Auto = AUTO,
+    y_error: tuple[Values[float], Values[float]] | Auto = AUTO,
+    connect: bool = False,
 ) -> Axes[float, float]:
     """Plot a marker at each point on a new figure and return its axes.
 
@@ -176,15 +179,23 @@ def scatter(
         format: The format of the values shown by ``annotate``, as in ``Axes.scatter()``.
         label_size: The size of the values shown by ``annotate``, as in ``Axes.scatter()``.
         place: Where each value goes, as in ``Axes.scatter()``.
+        x_error: The ends ``(low, high)`` of each point's horizontal error bar, as in
+            ``Axes.scatter()``.
+        y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
+            ``Axes.scatter()``.
+        connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
 
     Returns:
         The axes of the new figure.
 
     Raises:
-        TypeError: If an argument has the wrong type.
+        TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
+            tuple of two columns.
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a value is infinite,
-            ``x`` holds names, or a ``ColorBy`` does not have one value per point.
+            ``x`` holds names, or a ``ColorBy`` does not have one value per point; or if
+            an end of ``x_error`` or ``y_error`` is infinite, they do not hold one value per
+            point, or a low end is above its high end.
         StyleError: If ``label`` is too long or holds a line break or another control
             character, or ``format`` is ``TickFormat.iso()``.
         UsageError: If ``by`` comes with an explicit color or a non-empty label; if
@@ -213,6 +224,9 @@ def scatter(
             format=format,
             label_size=label_size,
             place=place,
+            x_error=x_error,
+            y_error=y_error,
+            connect=connect,
         )
 
 

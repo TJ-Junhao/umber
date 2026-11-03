@@ -72,14 +72,37 @@ Label points with `annotate=True`; do not place value text by hand with `ax.text
 ```python
 models = ["Baseline", "Gate", "Gate + aug"]
 ax = ub.Figure(6, 3).add_axes(y=ub.Scale.category())
-ax.x_error_bars(models, [65.8, 70.9, 72.4], [67.2, 72.3, 73.7])
 ax.scatter(
-    [66.5, 71.6, 73.1], models, label="80 epochs", annotate=True, format=ub.TickFormat.fixed(1)
+    [66.5, 71.6, 73.1],
+    models,
+    label="80 epochs",
+    x_error=([65.8, 70.9, 72.4], [67.2, 72.3, 73.7]),
+    annotate=True,
+    format=ub.TickFormat.fixed(1),
 )
 svg = ax.figure.to_svg()
 ```
 
 When no side inside the plot is clear, `AUTO` lets automatic limits grow to hold the label, such as above the highest point of a line, so leave the limits automatic rather than setting `ylim()` to make room. With explicit limits a point with no clear side inside the plot raises `StyleError` when the figure is rendered: fix the side with `place=`, widen the limits, or use a larger figure. Category axes never grow. Text from `ax.text()` and `ax.annotate()` is not avoided.
+
+## Error bars and lines that belong to a series
+
+For a series' error bars and connecting line use `scatter(..., y_error=(low, high), connect=True)` (or `x_error=` for horizontal bars), which take the series color; use `y_error_bars()` and `line()` only for marks that stand alone. Separate calls take their own palette colors and legend entries, so they do not match the points and they shift the colors of later series. `low` and `high` hold one value per point; NaN skips a point's bar, which puts a bar on one point only, such as a "Mean" after the folds. With `by=`, each group gets its own bars and line in its color.
+
+```python
+nan = float("nan")
+folds = ["Fold 1", "Fold 2", "Fold 3", "Mean"]
+ax = ub.Figure(6, 3).add_axes(x=ub.Scale.category())
+ax.scatter(
+    folds,
+    [66.8, 68.1, 65.4, 66.77],
+    label="80 epochs",
+    y_error=([nan, nan, nan, 65.6], [nan, nan, nan, 67.9]),
+    connect=True,
+    annotate=True,
+)
+svg = ax.figure.to_svg()
+```
 
 ## Colors, colormaps and color scales
 
