@@ -52,8 +52,9 @@
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
 //!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
-//!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, the [`ScatterGroup`]
-//!   of a grouped scatter, [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
+//!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, drawn at
+//!   [`OWN_STROKE_SHARE`] of the line width, the [`ScatterGroup`] of a grouped scatter,
+//!   [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
 //!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
@@ -204,6 +205,7 @@ pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
 pub use model::{BaselineVisibility, ColorbarOptions};
 pub use render::SvgText;
+pub use resolve::OWN_STROKE_SHARE;
 pub use scale::{
     CategoryScale, ContinuousScale, LogBase, MAX_MAGNITUDE, MIN_LOG_VALUE, ScaleKind, Transform,
 };

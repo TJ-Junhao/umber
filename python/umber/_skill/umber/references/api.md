@@ -1453,15 +1453,16 @@ Text from ``text()`` and ``annotate()`` is not avoided.
 ``x_error`` and ``y_error`` give each point an error bar, and ``connect=True`` joins the
 points with a line in input order. They belong to the series: they take its color at
 full opacity (each group's with ``by``, the theme's text color with ``ColorBy``), no
-palette color and no legend entry of their own, and the theme's line width; the bars
-have caps, as ``y_error_bars()`` draws them. The line is drawn first, then the bars,
-then the markers. Bars extend automatic limits as standalone error bars do, and value
-labels avoid both the bars and the line. A NaN end skips that point's bar, so a bar can
-go on one point only, and neither end of a skipped bar counts in the limits. A point
-left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no marker, no value label
-and no bar, and breaks the line. With ``by``, each group's line joins only its own
-points. Use ``y_error_bars()``
-and ``line()`` only for marks that stand on their own.
+palette color and no legend entry of their own, and half the line width that ``line()``
+and ``y_error_bars()`` draw with ``Size.AUTO``, so that they stay lighter than the marks
+they accompany; the bars have caps as long as those of ``y_error_bars()``. The line is
+drawn first, then the bars, then the markers. Bars extend automatic limits as standalone
+error bars do, and value labels avoid both the bars and the line. A NaN end skips that
+point's bar, so a bar can go on one point only, and neither end of a skipped bar counts
+in the limits. A point left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no
+marker, no value label and no bar, and breaks the line. With ``by``, each group's line
+joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
+stand on their own.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.

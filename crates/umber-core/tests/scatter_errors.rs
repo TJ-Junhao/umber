@@ -105,6 +105,11 @@ fn contours(path: &Path) -> usize {
         .count()
 }
 
+/// The width of a standalone line or error bar drawn as a scatter's own are: half the automatic.
+fn half() -> SizeSpec {
+    SizeSpec::times(f64::from(umber_core::OWN_STROKE_SHARE)).unwrap()
+}
+
 fn solid(color: Rgba) -> Rgba {
     Rgba { a: 255, ..color }
 }
@@ -312,7 +317,10 @@ fn own_bars_look_like_standalone_error_bars_and_skip_nan_ends() {
             nums(&[1.0, 2.0, 3.0]),
             &low,
             &high,
-            ErrorBarOptions::default(),
+            ErrorBarOptions {
+                width: half(),
+                ..ErrorBarOptions::default()
+            },
         )
         .unwrap()
         .scatter(
@@ -866,6 +874,7 @@ fn the_own_line_widens_the_marks_clip_as_a_line_does() {
                         index: 0,
                         alpha: umber_core::Alpha::OPAQUE,
                     },
+                    width: half(),
                     ..LineOptions::default()
                 },
             )
@@ -892,4 +901,37 @@ fn the_own_line_widens_the_marks_clip_as_a_line_does() {
     let (own, alone) = (clip_and_line(true), clip_and_line(false));
     assert_eq!(own.2.cap, LineCap::Round);
     assert_eq!(own, alone);
+}
+
+#[test]
+fn own_bars_and_line_are_half_as_wide_as_standalone_ones() {
+    let themes = [
+        Theme::pigment(),
+        Theme::graphite(),
+        Theme::midnight(),
+        Theme::pigment().with_line_width(3.5).unwrap(),
+    ];
+    for theme in themes {
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .line(nums(&[0.0, 3.0]), &[0.0, 1.0], LineOptions::default())
+            .unwrap()
+            .y_error_bars(nums(&[0.5]), &[0.0], &[1.0], ErrorBarOptions::default())
+            .unwrap()
+            .scatter(
+                nums(&[1.0, 2.0]),
+                &[2.0, 3.0],
+                with_errors(ends(&[1.5, 2.5], &[2.5, 3.5]), true),
+            )
+            .unwrap();
+        let scene = render(&f);
+        let widths: Vec<f32> = stroke_items(&scene).iter().map(|(_, s)| s.width).collect();
+        // The standalone line and bars, then the scatter's own line and bars.
+        assert_eq!(widths.len(), 4);
+        assert_eq!(widths[0], theme.line_width());
+        assert_eq!(widths[1], theme.line_width());
+        assert_eq!(widths[2], widths[0] / 2.0);
+        assert_eq!(widths[3], widths[1] / 2.0);
+    }
 }

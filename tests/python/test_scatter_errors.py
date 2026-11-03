@@ -12,6 +12,8 @@ import umber as ub
 from umber._errors import details
 
 NAN = math.nan
+# A scatter's own bars and line are drawn at half the automatic line width.
+HALF = ub.Size.times(0.5)
 
 
 def call(function: object) -> Callable[..., object]:
@@ -43,7 +45,7 @@ def test_own_bars_and_line_draw_as_standalone_marks_in_the_series_color() -> Non
     own = own.scatter(folds, values, label="80 epochs", y_error=(low, high))
     alone = ub.Figure().add_axes(x=ub.Scale.category())
     color = ub.Color.palette(0)
-    alone.y_error_bars(folds, low, high, color=color)
+    alone.y_error_bars(folds, low, high, color=color, width=HALF)
     alone.scatter(folds, values, label="80 epochs")
     assert svg(own) == svg(alone)
     # With the line too, the strokes are the same. Only the clip of the marks differs: a line
@@ -51,8 +53,8 @@ def test_own_bars_and_line_draw_as_standalone_marks_in_the_series_color() -> Non
     own = ub.Figure().add_axes(x=ub.Scale.category())
     own = own.scatter(folds, values, label="80 epochs", y_error=(low, high), connect=True)
     alone = ub.Figure().add_axes(x=ub.Scale.category())
-    alone.line(folds, values, color=color)
-    alone.y_error_bars(folds, low, high, color=color)
+    alone.line(folds, values, color=color, width=HALF)
+    alone.y_error_bars(folds, low, high, color=color, width=HALF)
     alone.scatter(folds, values, label="80 epochs")
     assert strokes(own) == strokes(alone)
 
@@ -64,8 +66,8 @@ def test_both_errors_at_once_and_the_following_series_keeps_its_color() -> None:
     ).scatter([1.0, 2.0], [1.0, 2.0])
     alone = ub.Figure().add_axes()
     color = ub.Color.palette(0)
-    alone.x_error_bars([3.0, 4.0], [0.8, 1.8], [1.2, 2.2], color=color)
-    alone.y_error_bars([1.0, 2.0], [2.5, 3.5], [3.5, 4.5], color=color)
+    alone.x_error_bars([3.0, 4.0], [0.8, 1.8], [1.2, 2.2], color=color, width=HALF)
+    alone.y_error_bars([1.0, 2.0], [2.5, 3.5], [3.5, 4.5], color=color, width=HALF)
     alone.scatter([1.0, 2.0], [3.0, 4.0]).scatter([1.0, 2.0], [1.0, 2.0])
     assert svg(own) == svg(alone)
 
@@ -81,8 +83,10 @@ def test_groups_join_and_bar_only_their_own_points() -> None:
     for name, rows in (("A", [0, 1]), ("B", [2, 3, 4])):
         color = ub.Color.palette(0 if name == "A" else 1)
         xs, ys = [x[i] for i in rows], [y[i] for i in rows]
-        alone.line(xs, ys, color=color)
-        alone.y_error_bars(xs, [low[i] for i in rows], [high[i] for i in rows], color=color)
+        alone.line(xs, ys, color=color, width=HALF)
+        alone.y_error_bars(
+            xs, [low[i] for i in rows], [high[i] for i in rows], color=color, width=HALF
+        )
         alone.scatter(xs, ys, label=name)
     assert strokes(own) == strokes(alone)
 

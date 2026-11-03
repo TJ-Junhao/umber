@@ -785,9 +785,10 @@ impl<'a> AxesMut<'a> {
     /// [`ScatterMark::x_error_bars`](crate::ScatterMark::x_error_bars),
     /// [`ScatterMark::y_error_bars`](crate::ScatterMark::y_error_bars)). They belong to the
     /// scatter: they take its resolved color at full opacity (the theme's text color when the
-    /// colors are mapped), no palette slot and no legend entry of their own, and the theme's
-    /// line width; the bars have caps, as [`AxesMut::y_error_bars`] draws them with the default
-    /// options. The line is drawn first, then the bars, then the markers. The bars extend
+    /// colors are mapped), no palette slot and no legend entry of their own, and half the line
+    /// width a standalone line or error bar of the automatic width gets
+    /// ([`OWN_STROKE_SHARE`](crate::OWN_STROKE_SHARE)); the bars have caps, as long as those of
+    /// [`AxesMut::y_error_bars`]. The line is drawn first, then the bars, then the markers. The bars extend
     /// automatic limits as error bars do, and they and the line are obstacles of every
     /// automatic value label. A point that is not drawn, for a missing coordinate or a
     /// color-mapped value that is NaN, has no marker, no value label and no bar, and breaks the

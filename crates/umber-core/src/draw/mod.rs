@@ -238,8 +238,7 @@ pub(crate) fn drawn_marks(
                 ..
             } => {
                 // The scatter's own line, then its own error bars, lie under its markers, all
-                // in its color at full opacity and the theme's line width, as a line and error
-                // bars of the automatic width are drawn.
+                // in its color at full opacity and at the lighter width resolved for them.
                 let own = (solid(color), width);
                 if let Some(line_mark) = scatter_mark.line() {
                     line_mark_items(&context, resolved, line_mark, own, &mut items);

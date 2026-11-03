@@ -87,7 +87,7 @@ When no side inside the plot is clear, `AUTO` lets automatic limits grow to hold
 
 ## Error bars and lines that belong to a series
 
-For a series' error bars and connecting line use `scatter(..., y_error=(low, high), connect=True)` (or `x_error=` for horizontal bars), which take the series color; use `y_error_bars()` and `line()` only for marks that stand alone. Separate calls take their own palette colors and legend entries, so they do not match the points and they shift the colors of later series. `low` and `high` hold one value per point; NaN skips a point's bar, which puts a bar on one point only, such as a "Mean" after the folds. A point left out, for a NaN coordinate or a NaN `ColorBy` value, has no marker, label or bar, and breaks the line. With `by=`, each group gets its own bars and line in its color.
+For a series' error bars and connecting line use `scatter(..., y_error=(low, high), connect=True)` (or `x_error=` for horizontal bars), which take the series color at half the line width of a standalone line, so they stay lighter than the points; use `y_error_bars()` and `line()` only for marks that stand alone. Separate calls take their own palette colors and legend entries, so they do not match the points and they shift the colors of later series. `low` and `high` hold one value per point; NaN skips a point's bar, which puts a bar on one point only, such as a "Mean" after the folds. A point left out, for a NaN coordinate or a NaN `ColorBy` value, has no marker, label or bar, and breaks the line. With `by=`, each group gets its own bars and line in its color.
 
 ```python
 nan = float("nan")

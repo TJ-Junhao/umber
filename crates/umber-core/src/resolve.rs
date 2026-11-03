@@ -366,6 +366,13 @@ impl Resolved {
     }
 }
 
+/// The share of the line width of a standalone line or error bar of the automatic width
+/// ([`SizeSpec::Auto`](crate::SizeSpec::Auto)) that a scatter's own connecting line and error
+/// bars are drawn at ([`ScatterOptions::connect`](crate::ScatterOptions::connect),
+/// [`ScatterOptions::y_error`](crate::ScatterOptions::y_error)): they accompany the points, so
+/// they stay lighter than the marks. The caps of the bars keep the theme's length.
+pub const OWN_STROKE_SHARE: f32 = 0.5;
+
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
 pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
     (a.0 - b.0).abs() <= 1e-9
@@ -1662,8 +1669,8 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
         /// color; `None` for one marker color.
         mapped: Option<MappedColors<'a>>,
-        /// The stroke width, as drawn in points, of the scatter's own line and error bars: the
-        /// theme's line width.
+        /// The stroke width, as drawn in points, of the scatter's own line and error bars:
+        /// [`OWN_STROKE_SHARE`] of the width of a line of the automatic width.
         width: f32,
     },
     /// An area mark.
@@ -4119,7 +4126,7 @@ fn resolve_panel_marks_from<'a>(
                     color,
                     size: theme.drawn_marker_size(mark.options().size),
                     mapped,
-                    width: theme.drawn_line_width(crate::SizeSpec::Auto),
+                    width: theme.drawn_line_width(crate::SizeSpec::Auto) * OWN_STROKE_SHARE,
                 }
             }
             Mark::Bubbles(mark) => {
