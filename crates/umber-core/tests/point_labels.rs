@@ -465,7 +465,7 @@ fn each_fixed_side_sits_3_pt_beyond_the_marker_edge() {
                 assert!(close(left, x + reach_x + 3.0), "{place:?}");
                 assert!(close((top + bottom) / 2.0, y), "{place:?}");
             }
-            Place::Auto => unreachable!(),
+            Place::Auto | Place::Column => unreachable!(),
         }
     }
 }

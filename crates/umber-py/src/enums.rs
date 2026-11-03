@@ -123,6 +123,7 @@ int_enum!("Place", Place {
     "BELOW" => Place::Below = 2,
     "LEFT" => Place::Left = 3,
     "RIGHT" => Place::Right = 4,
+    "COLUMN" => Place::Column = 5,
 });
 
 int_enum!("Step", Step {

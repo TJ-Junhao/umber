@@ -656,6 +656,13 @@ impl Figure {
         Ok(())
     }
 
+    /// Sets the title of the value column and its size.
+    fn value_column(&mut self, row: AxesRow, col: i64, title: &str, size: SizeArg) -> PyResult<()> {
+        let size = size_spec(size)?;
+        self.axes(row, col)?.value_column(title, size);
+        Ok(())
+    }
+
     /// Sets the x limits.
     fn xlim(&mut self, row: AxesRow, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?

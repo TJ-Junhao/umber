@@ -150,6 +150,43 @@ fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroup
     }
 }
 
+/// Checks that every axes that sets a value column title
+/// ([`AxesMut::value_column`](crate::AxesMut::value_column)) has a scatter that writes its
+/// values in that column: `Error::Usage` under `context` for the first that has none, named
+/// by its cell, rather than a title over nothing.
+fn check_value_columns(figure: &Figure, context: &'static str) -> Result<()> {
+    for layer in figure.layers() {
+        let Some(axes) = layer.cartesian() else {
+            continue;
+        };
+        if axes.value_column_options().is_none() {
+            continue;
+        }
+        let used = axes.marks().iter().any(|mark| {
+            matches!(mark, crate::model::Mark::Scatter(scatter)
+                if scatter.options().labels.annotate
+                    && scatter.options().labels.place == crate::Place::Column)
+        });
+        if !used {
+            return Err(in_cell(
+                figure,
+                layer,
+                Error::usage(
+                    context,
+                    "value_column() is set on these axes, but none of their scatters writes its \
+                     values in the column."
+                        .to_owned(),
+                )
+                .with_hint(
+                    "pass annotate=True and place=Place.COLUMN to the scatter whose values the \
+                     column shows, or remove the value_column() call.",
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that the color-mapped contours of each color group, which share one colorbar, all
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
 /// naming the panels of the first two whose levels differ. It reads the levels the model
@@ -655,6 +692,7 @@ fn plan(
             figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
+            column: panel.points.column(),
             lib,
             context,
         })
@@ -1866,6 +1904,7 @@ pub(crate) fn with_layout_input<R>(
             figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
+            column: panel.points.column(),
             lib,
             context: "Figure.to_scene()",
         })
@@ -1944,6 +1983,7 @@ fn scene_with_labels(
 ) -> Result<Scene> {
     let groups = ShareGroups::new(figure);
     check_contour_levels(figure, &groups, context)?;
+    check_value_columns(figure, context)?;
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
         if let Some(held) = held {
@@ -2024,12 +2064,22 @@ fn draw_scene(
         placements[i] = points
             .placement
             .map_error(|err| in_cell(figure, panel.axes, err));
+        let column = point_labels::column_items(
+            theme,
+            resolved,
+            layout,
+            &panel.marks,
+            &panel.points,
+            context,
+        )
+        .map_err(|err| in_cell(figure, panel.axes, err))?;
         scene.push(draw::chrome(theme, layout));
         let stacked = [
             drawn.into_item(),
             notes,
             values.map(|values| values.item),
             points.item,
+            column,
         ];
         for item in stacked.into_iter().flatten() {
             scene.push(item);
@@ -2915,6 +2965,7 @@ mod tests {
                 figure_title_size: figure.title_size(),
                 axes: panel.axes,
                 legend: &panel.legend,
+                column: panel.points.column(),
                 lib,
                 context: "Figure.to_scene()",
             })

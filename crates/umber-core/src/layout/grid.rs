@@ -1599,9 +1599,10 @@ fn needed_width(
 ) -> f64 {
     let cols = columns.count();
     let gap = columns.gap;
-    // Direct labels beside a panel or shared colorbar are uncapped; their band stays fixed.
+    // Direct labels beside a panel or shared colorbar are uncapped; their band stays fixed, as
+    // does that of a value column.
     let reserve = |panel: &LayoutInput<'_>, band: &PanelBands, cap: f64| {
-        if band.right_colorbar > 0.0 || !input.colorbars.is_empty() {
+        if band.right_colorbar > 0.0 || band.value_column() > 0.0 || !input.colorbars.is_empty() {
             band.right()
         } else {
             band.right_offset

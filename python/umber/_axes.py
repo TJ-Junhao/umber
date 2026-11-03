@@ -421,6 +421,55 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
             return self
 
+    def value_column(self, title: str = "", *, size: Size = Size.AUTO) -> Self:
+        """Set the title of the value column, where ``scatter(place=Place.COLUMN)`` writes values.
+
+        With x as the value axis, as on a category y axis, the column is right of the plot,
+        outside a colorbar and inside a right legend; each value sits level with its point.
+        The title is centred over the column, level with the y axis label. With y as the value
+        axis, the values form a row above the plot, under the y axis labels (of both axes with
+        ``twin_y()``), each centred on its point's x, and the title is written before the row,
+        in the y tick label column. Each scatter that uses the column, and each group with ``by``,
+        has a sub-column of its own, in call order: left to right, or top to bottom in a row.
+        The plot narrows, or gets shorter, by the room the column takes. Calling it again
+        replaces the earlier setting.
+
+        Args:
+            title: The title, at most 1,000 characters, in the axis label style. An empty
+                string writes none.
+            size: ``Size.AUTO`` is the axis label size, ``Size.times(k)`` multiplies it after
+                font scaling, and ``Size.pt(p)`` uses points without font scaling.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``title`` is not a ``str`` or ``size`` is not a ``Size``.
+            StyleError: If ``title`` is too long, or holds a line break, another control
+                character or a line or paragraph separator: column titles are one line.
+            UsageError: Rendering raises it if no scatter on these axes writes its values in
+                the column with ``annotate=True`` and ``place=Place.COLUMN``.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(y=ub.Scale.category())
+            >>> ax = ax.scatter(
+            ...     [66.5, 71.6], ["Baseline", "Gate"], annotate=True, place=ub.Place.COLUMN
+            ... )
+            >>> ax = ax.value_column("Mean (%)")
+        """
+        with api_call():
+            context = "Axes.value_column()"
+            _args.require_text(context, "title", title)
+            instance(context, "size", size, Size, _SIZE_HINT)
+            self._native.value_column(
+                self._target,
+                self._col,
+                _args.text(context, "title", title, one_line="value column titles"),
+                _size.native(size),
+            )
+            return self
+
     def xlim(self: SX, low: X, high: X) -> SX:
         """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
@@ -1043,7 +1092,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         automatic limits, and those limits grow just enough to hold it, such as above the
         highest point of a line; explicit limits and category axes never grow. Labels are
         placed in call order, point by point, so the same data always gives the same figure.
-        Text from ``text()`` and ``annotate()`` is not avoided.
+        Text from ``text()`` and ``annotate()`` is not avoided. ``Place.COLUMN`` writes the
+        values outside the plot instead, in the column that ``value_column()`` titles: right of
+        the plot, level with each point, when x is the value axis, and in a row above it,
+        centred on each point's x, otherwise. Each scatter, and each group with ``by``, has a
+        sub-column of its own; values of one sub-column are aligned on the decimal point when
+        they are written in one notation, and right-aligned otherwise. They do not change the
+        limits.
 
         ``x_error`` and ``y_error`` give each point an error bar, and ``connect=True`` joins the
         points with a line in input order. They belong to the series: they take its color at
@@ -1082,8 +1137,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label_size: The size of the values shown by ``annotate``. ``Size.AUTO`` is the tick
                 label size, ``Size.times(k)`` multiplies it after font scaling, and
                 ``Size.pt(p)`` uses points without font scaling. (``size`` is the marker size.)
-            place: Where each value goes: ``Place.AUTO``, or a fixed side, ``Place.ABOVE``,
-                ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``.
+            place: Where each value goes: ``Place.AUTO``, a fixed side, ``Place.ABOVE``,
+                ``Place.BELOW``, ``Place.LEFT`` or ``Place.RIGHT``, or ``Place.COLUMN``, outside
+                the plot.
             x_error: The ends ``(low, high)`` of each point's horizontal error bar, one value
                 each per point, in x data units: numbers on a linear or log x axis, times on a
                 time x axis. ``AUTO`` draws no bars.
@@ -1111,16 +1167,18 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
                 number format for times). Rendering raises it when a value label does not fit
                 inside the plot, when no position is clear for a label with ``Place.AUTO``, and
-                when the sides of ``Place.AUTO`` labels keep changing as the limits grow; the
-                message names the series (its label, or ``scatter 2`` for the second scatter of
-                the axes) and the value.
+                when the sides of ``Place.AUTO`` labels keep changing as the limits grow, and
+                when two values of one ``Place.COLUMN`` sub-column overlap; the message names
+                the series (its label, or ``scatter 2`` for the second scatter of the axes) and
+                the value.
             UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
                 both axes are category axes (type checkers accept such axes, so
                 this is raised when the call runs), a ``ColorBy`` comes with a label, or its
                 ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
                 marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
-                without ``annotate``; or if ``x_error`` or ``y_error`` lies along a category
-                axis, or holds numbers along a time axis.
+                without ``annotate``, or ``place`` is ``Place.COLUMN`` on a twin axes; or if
+                ``x_error`` or ``y_error`` lies along a category axis, or holds numbers along a
+                time axis.
 
         Example:
             >>> import umber as ub
