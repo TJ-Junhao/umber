@@ -1,8 +1,9 @@
 //! The values written next to scatter points ([`PointLabels`](crate::PointLabels)): measured
-//! once per render, before layout ([`ScatterLabels::measure`]); on a fixed side they widen
-//! automatic limits so that they fit ([`ScatterLabels::end_reaches`], see
-//! [`crate::bubble_fit`]); they are placed over the marks once the marks are drawn
-//! ([`items`]).
+//! once per render, before layout ([`ScatterLabels::measure`]); on a fixed side, and on the
+//! sides that automatic labels took in the previous pass, they widen automatic limits so that
+//! they fit ([`ScatterLabels::end_reaches`], see [`crate::bubble_fit`]); they are placed over
+//! the marks once the marks are drawn ([`items`]), and the limits are fitted again until the
+//! placement settles ([`fit_then_place`]).
 //!
 //! **Which points.** A point gets a label when it is drawn: both coordinates present (a finite
 //! number, a category, a time) and a fill (a color-mapped value that maps to a color), with its
@@ -24,11 +25,23 @@
 //! **Automatic place.** [`Place::Auto`] tries above, right, below and left, in that order, and
 //! takes the first box that lies inside the plot and is clear: the box widened by [`PADDING`]
 //! meets none of the [`Obstacles`] of the panel, which are the marks drawn in it
-//! ([`obstacle_marks`]) and every label placed before. Labels are placed in input order, mark
-//! by mark in draw order and point by point within a mark, after the bar labels, so the same
-//! figure always places them the same way. Automatic labels add no reach to the limit fits:
-//! they are judged against the limits the plot has without them, so the choice does not chase
-//! itself. A label with no clear position fails the render.
+//! ([`obstacle_marks`]) and every label placed before. When no box inside the plot is clear,
+//! the label may leave the plot across automatic limits: it takes the first side, in the same
+//! order, whose box is clear and leaves the plot only along axes whose limits are automatic
+//! (not explicit, not categories). A label with no such side fails the render. Labels are
+//! placed in input order, mark by mark in draw order and point by point within a mark, after
+//! the bar labels, so the same figure always places them the same way.
+//!
+//! **Limits.** The first pass fits the limits as the plot has them without automatic labels,
+//! and places every label against them. When every automatic label lies inside the plot, that
+//! placement is final, and the limits are those of the plot without labels. Otherwise each
+//! automatic label reaches past its point on the side it took, as a fixed-side label does, and
+//! the next pass fits the limits again from the plot without automatic labels plus these
+//! reaches, never from the limits of an earlier pass, so that they grow just enough to hold
+//! them. Growing the limits moves every point, so the labels are placed again. The placement
+//! is final once every label lies inside the plot on the side it took in the pass before.
+//! A label still outside on that side means the limits cannot hold it, which fails the render;
+//! so does a placement that has not settled after [`MAX_PASSES`] passes.
 //!
 //! Text written by `text()` and `annotate()` is drawn after the labels and is not an obstacle.
 //! Heatmap cell labels need two category axes, on which no scatter is drawn, so they never
@@ -42,7 +55,7 @@ use super::{DrawnMarks, has_fill, mark_context, marker_outline, marker_reach};
 use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::color_scale::ResolvedColorScale;
 use crate::error::quoted;
-use crate::layout::{Label, Layout, value_text};
+use crate::layout::{Area, Label, Layout, value_text};
 use crate::model::{Axes, AxisData, values_on_x};
 use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::Item;
@@ -55,15 +68,77 @@ use crate::{Error, Instant, NumberStyle, Place, Result, Rgba, Theme, TickFormat}
 pub(crate) const GAP: f64 = bar_labels::END_GAP;
 /// How far, in points, the box of an automatic label must stay from every obstacle.
 pub(crate) const PADDING: f64 = 1.0;
-/// The sides an automatic label tries, in order.
-const AUTO_ORDER: [Place; 4] = [Place::Above, Place::Right, Place::Below, Place::Left];
+/// The most passes of [`fit_then_place`]: each fits the limits and places the labels once.
+pub(crate) const MAX_PASSES: usize = 4;
 
 /// The hint of an automatic label with no clear position.
 const CLEAR_HINT: &str = "use place=Place.ABOVE (or another side) to fix the side, a larger figure, or a smaller label size.";
-/// The hint of a fixed-side label that leaves the plot under automatic limits.
+/// The hint of a label that leaves the plot under automatic limits.
 const ROOM_HINT: &str = "enlarge the figure, use another place, or a smaller label size.";
 /// The hint of a fixed-side label that leaves the plot under explicit limits.
 const LIMITS_HINT: &str = "widen xlim or ylim, or let the limits be automatic.";
+
+/// A side of its point that a label takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// Above the point, centred horizontally.
+    Above,
+    /// Right of the point, centred vertically.
+    Right,
+    /// Below the point, centred horizontally.
+    Below,
+    /// Left of the point, centred vertically.
+    Left,
+}
+
+impl Side {
+    /// The sides an automatic label tries, in order.
+    const AUTO_ORDER: [Side; 4] = [Side::Above, Side::Right, Side::Below, Side::Left];
+
+    /// The fixed side of `place`; `None` for [`Place::Auto`].
+    fn fixed(place: Place) -> Option<Side> {
+        match place {
+            Place::Auto => None,
+            Place::Above => Some(Side::Above),
+            Place::Right => Some(Side::Right),
+            Place::Below => Some(Side::Below),
+            Place::Left => Some(Side::Left),
+        }
+    }
+}
+
+/// The side each automatic label of one axes took in one pass: for each annotated mark, in
+/// mark order, the side of each of its labels, in data order; `None` for a label on a fixed
+/// side and for one that was not placed.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Sides(Vec<Vec<Option<Side>>>);
+
+impl Sides {
+    /// The side of the label `point` of the annotated mark `mark`.
+    fn side(&self, mark: usize, point: usize) -> Option<Side> {
+        self.0
+            .get(mark)
+            .and_then(|sides| sides.get(point))
+            .copied()
+            .flatten()
+    }
+
+    /// The first label, as the annotated mark's index and the point's, whose side differs
+    /// between `self` and `other`.
+    fn first_difference(&self, other: &Sides) -> Option<(usize, usize)> {
+        let marks = self.0.len().max(other.0.len());
+        (0..marks).find_map(|mark| {
+            let points = [self, other]
+                .map(|sides| sides.0.get(mark).map_or(0, Vec::len))
+                .into_iter()
+                .max()
+                .unwrap_or(0);
+            (0..points)
+                .find(|&point| self.side(mark, point) != other.side(mark, point))
+                .map(|point| (mark, point))
+        })
+    }
+}
 
 /// One point's label, measured.
 #[derive(Debug, Clone)]
@@ -112,9 +187,12 @@ struct MarkLabels {
 pub(crate) struct ScatterLabels {
     /// One record per annotated mark, in mark order.
     marks: Vec<MarkLabels>,
-    /// Whether either axis has explicit limits, which the hint of a label that leaves the plot
-    /// names.
-    explicit: bool,
+    /// Whether the x and the y axis have explicit limits: an automatic label never leaves the
+    /// plot across them, and the hint of a fixed-side label that leaves the plot names them.
+    explicit: [bool; 2],
+    /// The sides the automatic labels took in the previous pass, which the limit fits make
+    /// room for; `None` in the first pass.
+    held: Option<Sides>,
 }
 
 impl ScatterLabels {
@@ -203,13 +281,14 @@ impl ScatterLabels {
                 points,
             });
         }
-        let explicit = axes.x_limits().is_some()
-            || axes.y_limits().is_some()
-            || axes.x_time_limits().is_some()
-            || axes.y_time_limits().is_some();
+        let explicit = [
+            axes.x_limits().is_some() || axes.x_time_limits().is_some(),
+            axes.y_limits().is_some() || axes.y_time_limits().is_some(),
+        ];
         Ok(ScatterLabels {
             marks: measured,
             explicit,
+            held: None,
         })
     }
 
@@ -218,27 +297,32 @@ impl ScatterLabels {
         self.marks.is_empty()
     }
 
-    /// How far each label on a fixed side reaches past its point, for the fits of automatic
-    /// limits: along the axis of its side, the marker's reach, [`GAP`] and the label's extent,
-    /// towards that side; along the other axis, half the label's extent on each side, since
-    /// the label is centred there. Coordinates on a category axis add no reach.
+    /// Holds `sides`, the sides the automatic labels took in the previous pass: the limit fits
+    /// make room for them ([`end_reaches`](Self::end_reaches)), and [`items`] compares the
+    /// next placement with them.
+    pub(crate) fn hold(&mut self, sides: Sides) {
+        self.held = Some(sides);
+    }
+
+    /// How far each label reaches past its point, for the fits of automatic limits: a label on
+    /// a fixed side, and an automatic label on the side it took in the previous pass ([`hold`](
+    /// Self::hold)). Along the axis of its side, it reaches the marker's reach, [`GAP`] and
+    /// the label's extent, towards that side; along the other axis, half the label's extent on
+    /// each side, since the label is centred there. Coordinates on a category axis add no
+    /// reach.
     ///
-    /// Labels placed automatically add none: [`Place::Auto`] is judged against the limits
-    /// the plot has without them, and never grows them.
+    /// In the first pass automatic labels add none, so the limits are those of the plot without
+    /// them.
     pub(crate) fn end_reaches(&self) -> Vec<EndReach> {
         let mut reaches = Vec::new();
-        for mark in &self.marks {
-            let (reach_x, reach_y) = mark.reach;
-            for point in &mark.points {
-                let (width, height) = point.size();
-                // Low and high reaches along x, then along y, in points.
-                let (x, y) = match mark.place {
-                    Place::Auto => continue,
-                    Place::Above => ((width / 2.0, width / 2.0), (0.0, reach_y + GAP + height)),
-                    Place::Below => ((width / 2.0, width / 2.0), (reach_y + GAP + height, 0.0)),
-                    Place::Left => ((reach_x + GAP + width, 0.0), (height / 2.0, height / 2.0)),
-                    Place::Right => ((0.0, reach_x + GAP + width), (height / 2.0, height / 2.0)),
+        for (m, mark) in self.marks.iter().enumerate() {
+            for (p, point) in mark.points.iter().enumerate() {
+                let side = Side::fixed(mark.place)
+                    .or_else(|| self.held.as_ref().and_then(|held| held.side(m, p)));
+                let Some(side) = side else {
+                    continue;
                 };
+                let (x, y) = reach(side, mark.reach, point.size());
                 for (axis, (low, high), at) in [
                     (ValueAxis::X, x, point.at[0]),
                     (ValueAxis::Y, y, point.at[1]),
@@ -256,17 +340,114 @@ impl ScatterLabels {
         }
         reaches
     }
+
+    /// The error for the label `point` of the annotated mark `mark` that has not settled on a
+    /// side after the last pass.
+    fn unsettled(&self, (mark, point): (usize, usize), context: &'static str) -> Error {
+        let (name, text) = self.named(mark, point);
+        Error::style(
+            context,
+            format!(
+                "the value label {text} of {name} does not settle on a side: each time the \
+                 limits grow to make room for the labels, it takes another."
+            ),
+        )
+        .with_hint(CLEAR_HINT)
+    }
+
+    /// The error for the automatic label `point` of the annotated mark `mark` that stays
+    /// outside the plot on the side whose reach the limits were fitted to hold.
+    fn unfit(&self, (mark, point): (usize, usize), context: &'static str) -> Error {
+        let (name, text) = self.named(mark, point);
+        Error::style(
+            context,
+            format!("the value label {text} of {name} does not fit inside the plot."),
+        )
+        .with_hint(ROOM_HINT)
+    }
+
+    /// How messages name the annotated mark `mark` and the label of its `point`, quoted.
+    fn named(&self, mark: usize, point: usize) -> (&str, String) {
+        let mark = &self.marks[mark];
+        (&mark.name, quoted(&mark.points[point].label.text))
+    }
+}
+
+/// The value labels of one axes, placed by [`items`].
+#[derive(Debug)]
+pub(crate) struct Placed {
+    /// The labels, as one unclipped group; `None` without labels.
+    pub item: Option<Item>,
+    /// Where the automatic labels went, for [`fit_then_place`].
+    pub placement: Placement,
+}
+
+/// Where the automatic labels of one axes went in one pass, and whether that is final.
+#[derive(Debug, Default)]
+pub(crate) struct Placement {
+    /// The side each automatic label took.
+    sides: Sides,
+    /// Why the placement is not final, naming its first label that left the plot or took
+    /// another side than the one held for it; `None` when it is final.
+    unsettled: Option<Error>,
+}
+
+impl Placement {
+    /// The placement with `f` applied to the error it would raise.
+    pub(crate) fn map_error(self, f: impl FnOnce(Error) -> Error) -> Placement {
+        Placement {
+            unsettled: self.unsettled.map(f),
+            ..self
+        }
+    }
+}
+
+/// The output of the first pass of `pass` whose placements are all final, as the module
+/// documentation describes: `pass` fits the limits with the sides it is given held for the
+/// automatic labels of each axes ([`ScatterLabels::hold`]), none in the first pass, places
+/// every label, and returns its output and one [`Placement`] per axes. Each later pass is given
+/// the sides of the pass before, and nothing else carries over.
+///
+/// # Errors
+///
+/// As `pass`; then the error of the first placement that is not final after [`MAX_PASSES`]
+/// passes.
+pub(crate) fn fit_then_place<T>(
+    mut pass: impl FnMut(Option<&[Sides]>) -> Result<(T, Vec<Placement>)>,
+) -> Result<T> {
+    let mut held = None;
+    let mut passes = 0;
+    loop {
+        let (output, placements) = pass(held.as_deref())?;
+        passes += 1;
+        let mut sides = Vec::with_capacity(placements.len());
+        let mut unsettled = None;
+        for placement in placements {
+            unsettled = unsettled.or(placement.unsettled);
+            sides.push(placement.sides);
+        }
+        let Some(error) = unsettled else {
+            return Ok(output);
+        };
+        if passes == MAX_PASSES {
+            return Err(error);
+        }
+        held = Some(sides);
+    }
 }
 
 /// The value labels `labels` of the marks `marks`, resolved as `resolved`, laid out as
-/// `layout` and drawn as `drawn`, placed after the bar labels whose boxes are `placed`, as one
-/// unclipped group; `None` without labels.
+/// `layout` and drawn as `drawn`, placed after the bar labels whose boxes are `placed`, with
+/// where the automatic labels went and whether that is final, as the module documentation
+/// describes.
 ///
 /// # Errors
 ///
 /// `Error::Style` under `context` for the first label, in placing order, that cannot be placed:
-/// a fixed-side label that leaves the plot, or an automatic label with no clear position. The
-/// message names the mark and the label.
+/// a fixed-side label that leaves the plot, an automatic label with no clear position inside
+/// the plot nor across automatic limits, or an automatic label that leaves the plot on the
+/// side held for it, whose reach the limits could not hold. The message names the mark and
+/// the label.
 pub(crate) fn items(
     theme: &Theme,
     resolved: &Resolved,
@@ -275,9 +456,12 @@ pub(crate) fn items(
     labels: &ScatterLabels,
     (drawn, placed): (&DrawnMarks, &[Bounds]),
     context: &'static str,
-) -> Result<Option<Item>> {
+) -> Result<Placed> {
     if labels.is_empty() {
-        return Ok(None);
+        return Ok(Placed {
+            item: None,
+            placement: Placement::default(),
+        });
     }
     let plot = layout.plot;
     let maps = mark_context(theme, resolved, layout, marks).maps;
@@ -291,13 +475,18 @@ pub(crate) fn items(
         obstacles.add_box(bounds);
     }
     let mut items = Vec::new();
-    for mark_labels in &labels.marks {
+    let mut sides = Vec::with_capacity(labels.marks.len());
+    // The first automatic label, in placing order, that leaves the plot.
+    let mut outside = None;
+    for (m, mark_labels) in labels.marks.iter().enumerate() {
+        let mut mark_sides = vec![None; mark_labels.points.len()];
         let Some(ResolvedMark::Scatter { mark, .. }) = marks.get(mark_labels.mark) else {
+            sides.push(mark_sides);
             continue;
         };
         let xs = axis_values(&resolved.x, mark.x());
         let ys = axis_values(&resolved.y, mark.y());
-        for point in &mark_labels.points {
+        for (p, point) in mark_labels.points.iter().enumerate() {
             let (Some(&x), Some(&y)) = (xs.get(point.index), ys.get(point.index)) else {
                 continue;
             };
@@ -308,12 +497,38 @@ pub(crate) fn items(
             {
                 continue;
             }
-            let candidate = |place| candidate(place, centre, mark_labels.reach, point.size());
-            let bounds = match mark_labels.place {
-                Place::Auto => AUTO_ORDER
+            let candidate = |side| candidate(side, centre, mark_labels.reach, point.size());
+            let bounds = if let Some(side) = Side::fixed(mark_labels.place) {
+                let bounds = candidate(side);
+                if !contains(plot, bounds) {
+                    return Err(Error::style(
+                        context,
+                        format!(
+                            "the value label {} of {} does not fit inside the plot.",
+                            quoted(&point.label.text),
+                            mark_labels.name,
+                        ),
+                    )
+                    .with_hint(if labels.explicit.contains(&true) {
+                        LIMITS_HINT
+                    } else {
+                        ROOM_HINT
+                    }));
+                }
+                bounds
+            } else {
+                // An axis whose limits grow: automatic, and not a category axis.
+                let grows = [0, 1].map(|axis| !labels.explicit[axis] && point.at[axis].is_some());
+                let clear = |bounds| !obstacles.hit(padded(bounds));
+                let boxes = Side::AUTO_ORDER.map(|side| (side, candidate(side)));
+                let (side, bounds) = boxes
                     .into_iter()
-                    .map(candidate)
-                    .find(|&bounds| contains(plot, bounds) && !obstacles.hit(padded(bounds)))
+                    .find(|&(_, bounds)| contains(plot, bounds) && clear(bounds))
+                    .or_else(|| {
+                        boxes.into_iter().find(|&(_, bounds)| {
+                            contains(plot, along(plot, bounds, grows)) && clear(bounds)
+                        })
+                    })
                     .ok_or_else(|| {
                         Error::style(
                             context,
@@ -326,26 +541,12 @@ pub(crate) fn items(
                             ),
                         )
                         .with_hint(CLEAR_HINT)
-                    })?,
-                place => {
-                    let bounds = candidate(place);
-                    if !contains(plot, bounds) {
-                        return Err(Error::style(
-                            context,
-                            format!(
-                                "the value label {} of {} does not fit inside the plot.",
-                                quoted(&point.label.text),
-                                mark_labels.name,
-                            ),
-                        )
-                        .with_hint(if labels.explicit {
-                            LIMITS_HINT
-                        } else {
-                            ROOM_HINT
-                        }));
-                    }
-                    bounds
+                    })?;
+                if outside.is_none() && !contains(plot, bounds) {
+                    outside = Some((m, p));
                 }
+                mark_sides[p] = Some(side);
+                bounds
             };
             obstacles.add_box(bounds);
             let mut label = point.label.clone();
@@ -353,8 +554,26 @@ pub(crate) fn items(
             label.y = bounds[1] + f64::from(label.layout.ascent());
             items.push(text(&label, mark_labels.color));
         }
+        sides.push(mark_sides);
     }
-    Ok(Some(Item::Group { clip: None, items }))
+    let sides = Sides(sides);
+    let unsettled = match &labels.held {
+        None => outside,
+        Some(held) if *held == sides => {
+            if let Some(label) = outside {
+                return Err(labels.unfit(label, context));
+            }
+            None
+        }
+        Some(held) => held.first_difference(&sides).or(outside),
+    };
+    Ok(Placed {
+        item: Some(Item::Group { clip: None, items }),
+        placement: Placement {
+            sides,
+            unsettled: unsettled.map(|label| labels.unsettled(label, context)),
+        },
+    })
 }
 
 /// Whether the drawn items of `mark` are obstacles of automatic labels: every data mark, but
@@ -393,33 +612,65 @@ fn obstacle_marks(mark: &ResolvedMark<'_>) -> bool {
     }
 }
 
-/// The box (left, top, right, bottom) of a label of `size` on the side `place` of a point
-/// at `centre` whose marker reaches `reach` along x and y, as the module documentation
-/// describes. [`Place::Auto`] has no box of its own and is taken as above.
+/// The box (left, top, right, bottom) of a label of `size` on the side `side` of a point at
+/// `centre` whose marker reaches `reach` along x and y, as the module documentation describes.
 fn candidate(
-    place: Place,
+    side: Side,
     (x, y): (f64, f64),
     (reach_x, reach_y): (f64, f64),
     (width, height): (f64, f64),
 ) -> Bounds {
-    match place {
-        Place::Auto | Place::Above => {
+    match side {
+        Side::Above => {
             let bottom = y - reach_y - GAP;
             [x - width / 2.0, bottom - height, x + width / 2.0, bottom]
         }
-        Place::Below => {
+        Side::Below => {
             let top = y + reach_y + GAP;
             [x - width / 2.0, top, x + width / 2.0, top + height]
         }
-        Place::Right => {
+        Side::Right => {
             let left = x + reach_x + GAP;
             [left, y - height / 2.0, left + width, y + height / 2.0]
         }
-        Place::Left => {
+        Side::Left => {
             let right = x - reach_x - GAP;
             [right - width, y - height / 2.0, right, y + height / 2.0]
         }
     }
+}
+
+/// How far the box [`candidate`] gives for the same label reaches past its point, for the
+/// limit fits: towards the low and the high end of x, then of y, in points. The high end of
+/// y is up, above the point.
+fn reach(
+    side: Side,
+    (reach_x, reach_y): (f64, f64),
+    (width, height): (f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    match side {
+        Side::Above => ((width / 2.0, width / 2.0), (0.0, reach_y + GAP + height)),
+        Side::Below => ((width / 2.0, width / 2.0), (reach_y + GAP + height, 0.0)),
+        Side::Left => ((reach_x + GAP + width, 0.0), (height / 2.0, height / 2.0)),
+        Side::Right => ((0.0, reach_x + GAP + width), (height / 2.0, height / 2.0)),
+    }
+}
+
+/// The box `bounds` with its extent along each axis whose limits grow (`grows`, x then y)
+/// replaced by the plot's: inside the plot exactly when `bounds` leaves the plot only along
+/// those axes.
+fn along(plot: Area, [left, top, right, bottom]: Bounds, [x, y]: [bool; 2]) -> Bounds {
+    let (left, right) = if x {
+        (plot.x, plot.right())
+    } else {
+        (left, right)
+    };
+    let (top, bottom) = if y {
+        (plot.y, plot.bottom())
+    } else {
+        (top, bottom)
+    };
+    [left, top, right, bottom]
 }
 
 /// The box `bounds` widened by [`PADDING`] on every side.
@@ -492,21 +743,130 @@ mod tests {
     fn fixed_sides_sit_beyond_the_marker_edge() {
         let (centre, reach, size) = ((100.0, 50.0), (4.0, 5.0), (20.0, 10.0));
         assert_eq!(
-            candidate(Place::Above, centre, reach, size),
+            candidate(Side::Above, centre, reach, size),
             [90.0, 32.0, 110.0, 42.0]
         );
         assert_eq!(
-            candidate(Place::Below, centre, reach, size),
+            candidate(Side::Below, centre, reach, size),
             [90.0, 58.0, 110.0, 68.0]
         );
         assert_eq!(
-            candidate(Place::Right, centre, reach, size),
+            candidate(Side::Right, centre, reach, size),
             [107.0, 45.0, 127.0, 55.0]
         );
         assert_eq!(
-            candidate(Place::Left, centre, reach, size),
+            candidate(Side::Left, centre, reach, size),
             [73.0, 45.0, 93.0, 55.0]
         );
+    }
+
+    #[test]
+    fn a_label_leaves_the_plot_only_along_axes_that_grow() {
+        let plot = Area {
+            x: 10.0,
+            y: 20.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        // Above the top edge: only a growing y axis holds it.
+        let above = [40.0, 12.0, 60.0, 18.0];
+        assert!(!contains(plot, along(plot, above, [true, false])));
+        assert!(contains(plot, along(plot, above, [false, true])));
+        // Past the top right corner: both axes must grow.
+        let corner = [105.0, 12.0, 125.0, 18.0];
+        assert!(!contains(plot, along(plot, corner, [false, true])));
+        assert!(contains(plot, along(plot, corner, [true, true])));
+    }
+
+    #[test]
+    fn reaches_match_the_boxes() {
+        let (centre, marker, size) = ((100.0, 50.0), (4.0, 5.0), (20.0, 10.0));
+        for side in Side::AUTO_ORDER {
+            let [left, top, right, bottom] = candidate(side, centre, marker, size);
+            // Screen y grows downwards: the high end of y is the top of the box. A box on one
+            // side of the point reaches nothing towards the other.
+            let clip = |v: f64| v.max(0.0);
+            let ((x_low, x_high), (y_low, y_high)) = reach(side, marker, size);
+            assert_eq!(
+                [x_low, x_high, y_low, y_high],
+                [
+                    clip(centre.0 - left),
+                    clip(right - centre.0),
+                    clip(bottom - centre.1),
+                    clip(centre.1 - top)
+                ],
+                "{side:?}"
+            );
+        }
+    }
+
+    fn placement(sides: &[Option<Side>], unsettled: bool) -> Placement {
+        Placement {
+            sides: Sides(vec![sides.to_vec()]),
+            unsettled: unsettled.then(|| Error::style("Figure.to_scene()", "unsettled".to_owned())),
+        }
+    }
+
+    #[test]
+    fn the_passes_stop_once_placements_settle() {
+        // Final in the first pass: one pass, with nothing held.
+        let mut held = Vec::new();
+        let output = fit_then_place(|sides| {
+            held.push(sides.map(<[Sides]>::to_vec));
+            Ok((held.len(), vec![placement(&[Some(Side::Above)], false)]))
+        })
+        .unwrap();
+        assert_eq!((output, held), (1, vec![None]));
+        // Not final in the first pass: the second is given the first's sides, and only those.
+        let mut held = Vec::new();
+        let output = fit_then_place(|sides| {
+            held.push(sides.map(<[Sides]>::to_vec));
+            let unsettled = held.len() == 1;
+            Ok((held.len(), vec![placement(&[Some(Side::Right)], unsettled)]))
+        })
+        .unwrap();
+        assert_eq!(output, 2);
+        assert_eq!(
+            held,
+            vec![None, Some(vec![Sides(vec![vec![Some(Side::Right)]])])]
+        );
+    }
+
+    #[test]
+    fn placements_that_never_settle_fail_after_the_last_pass() {
+        let mut passes = 0;
+        let err = fit_then_place(|_| {
+            passes += 1;
+            let side = if passes % 2 == 0 {
+                Side::Above
+            } else {
+                Side::Below
+            };
+            Ok(((), vec![placement(&[Some(side)], true)]))
+        })
+        .unwrap_err();
+        assert_eq!(passes, MAX_PASSES);
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        // An error of a pass ends the passes at once.
+        let mut passes = 0;
+        let err = fit_then_place::<()>(|_| {
+            passes += 1;
+            Err(Error::style("Figure.to_scene()", "failed".to_owned()))
+        })
+        .unwrap_err();
+        assert_eq!(
+            (passes, err.to_string()),
+            (1, "Figure.to_scene(): failed".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_first_difference_names_the_first_label_that_moved() {
+        let a = Sides(vec![vec![Some(Side::Above), None], vec![Some(Side::Right)]]);
+        let b = Sides(vec![vec![Some(Side::Above), None], vec![Some(Side::Left)]]);
+        assert_eq!(a.first_difference(&a), None);
+        assert_eq!(a.first_difference(&b), Some((1, 0)));
+        assert_eq!(Sides::default().first_difference(&a), Some((0, 0)));
     }
 
     #[test]

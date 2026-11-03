@@ -1,6 +1,6 @@
 //! The values written next to scatter points, through the public API: which value, its format
-//! and color, the fixed sides and the limits they grow, the automatic place and what it
-//! avoids, and the errors.
+//! and color, the fixed sides and the limits they grow, the automatic place, what it avoids
+//! and the automatic limits it grows, and the errors.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -502,7 +502,8 @@ fn automatic_limits_grow_so_that_fixed_sides_fit() {
             }
         }
     }
-    // The automatic place never grows the limits: the points sit where they sit without labels.
+    // Automatic labels that all fit inside the plot leave the limits as they are without
+    // labels: the points sit where they sit without labels.
     let plain = |labels: PointLabels| {
         let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
         let (xs, ys): (Vec<f64>, Vec<f64>) = data.iter().copied().unzip();
@@ -760,6 +761,250 @@ fn no_clear_position_names_the_series_and_the_value() {
             .contains("the value label \"5\" of scatter 3 has"),
         "{err}"
     );
+}
+
+// ---- Automatic limits that make room for automatic labels -----------------------------------
+
+/// Fold scores of two series on a category x axis, each joined by a thin line, with error bars
+/// on the mean: the highest point has lines on both sides, so only above is clear. `ylim` sets
+/// explicit limits; `annotate` labels the points automatically.
+fn matched_folds(ylim: Option<(f64, f64)>, annotate: bool) -> Figure {
+    let folds = ["Fold 1", "Fold 2", "Fold 3", "Fold 4", "Fold 5", "Mean"];
+    let series = [
+        ("80 epochs", [66.8, 68.1, 65.4, 69.0, 67.3, 67.32], 1.24),
+        ("Long training", [78.4, 80.2, 76.9, 81.7, 79.5, 79.34], 1.6),
+    ];
+    let mut f = Figure::new(6.4, 3.8, Theme::pigment()).unwrap();
+    let mut ax = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
+    if let Some((low, high)) = ylim {
+        ax.ylim(low, high).unwrap();
+    }
+    for (label, values, sd) in series {
+        let mean = values[5];
+        ax.line(
+            names(&folds),
+            &values,
+            LineOptions {
+                width: SizeSpec::pt(0.8).unwrap(),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap()
+        .y_error_bars(
+            names(&["Mean"]),
+            &[mean - sd],
+            &[mean + sd],
+            ErrorBarOptions::default(),
+        )
+        .unwrap()
+        .scatter_shared(
+            names(&folds),
+            nums(&values),
+            ScatterOptions {
+                label: label.into(),
+                labels: PointLabels {
+                    annotate,
+                    format: annotate.then(|| TickFormat::fixed(1).unwrap()),
+                    ..PointLabels::default()
+                },
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f
+}
+
+/// The y value at the scene height `at` in a matched-folds scene: its data markers come first,
+/// six per series, and map y linearly.
+fn folds_value(scene: &Scene, at: f64) -> f64 {
+    let centres: Vec<_> = markers(scene).into_iter().map(|(c, _)| c).collect();
+    // Fold 3 of the first series and Fold 4 of the second.
+    let ((_, low), (_, high)) = (centres[2], centres[9]);
+    65.4 + (at - low) * (81.7 - 65.4) / (high - low)
+}
+
+#[test]
+fn automatic_limits_grow_to_hold_the_label_above_the_highest_point() {
+    let plain = render(&matched_folds(None, false));
+    let old_top = folds_value(&plain, plot(&plain)[1]);
+    let scene = render(&matched_folds(None, true));
+    assert_eq!(side_of(&scene, "81.7", 9), Place::Above);
+    let label = text_box(&scene, text(&scene, "81.7"));
+    assert!(
+        inside(label, plot(&scene)),
+        "{label:?} leaves {:?}",
+        plot(&scene)
+    );
+    // The label reaches past the upper limit the plot has without labels, and the limits grew
+    // to hold it.
+    assert!(
+        folds_value(&scene, label[1]) > old_top,
+        "{} <= {old_top}",
+        folds_value(&scene, label[1])
+    );
+    // Every other label still fits inside the plot.
+    for value in [
+        "66.8", "65.4", "69.0", "67.3", "78.4", "80.2", "76.9", "79.5",
+    ] {
+        let other = text_box(&scene, text(&scene, value));
+        assert!(inside(other, plot(&scene)), "{value} at {other:?}");
+    }
+}
+
+#[test]
+fn explicit_limits_without_room_still_fail() {
+    let err = render_err(&matched_folds(Some((62.0, 82.0)), true));
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "Figure.to_scene(): the value label \"81.7\" of the series \"Long training\" has no \
+         clear position: above, right, below and left of its point each leave the plot or \
+         overlap a mark or a label."
+    );
+    assert_eq!(
+        err.hint(),
+        Some(
+            "use place=Place.ABOVE (or another side) to fix the side, a larger figure, or a \
+             smaller label size."
+        )
+    );
+}
+
+/// A point at the right end of the data, at x = 10, with a horizontal line into it from the
+/// left and a vertical error bar through it, so that only right is clear, labelled
+/// automatically when `annotate`; `xlim` sets explicit x limits.
+fn last_point(xlim: Option<(f64, f64)>, annotate: bool) -> Figure {
+    let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+    let mut ax = axes(&mut f);
+    if let Some((low, high)) = xlim {
+        ax.xlim(low, high).unwrap();
+    }
+    ax.line(
+        nums(&[0.0, 5.0, 10.0]),
+        &[1234.5, 1234.5, 1234.5],
+        LineOptions::default(),
+    )
+    .unwrap()
+    .y_error_bars(
+        nums(&[10.0]),
+        &[1000.0],
+        &[1500.0],
+        ErrorBarOptions::default(),
+    )
+    .unwrap()
+    .scatter(
+        nums(&[10.0]),
+        &[1234.5],
+        if annotate {
+            options(Place::Auto)
+        } else {
+            ScatterOptions::default()
+        },
+    )
+    .unwrap();
+    f
+}
+
+#[test]
+fn automatic_limits_grow_along_x_for_a_label_right_of_the_last_point() {
+    let plain = render(&last_point(None, false));
+    let old_room = plot(&plain)[2] - markers(&plain)[0].0.0;
+    let scene = render(&last_point(None, true));
+    assert_eq!(side_of(&scene, "1234.5", 0), Place::Right);
+    let label = text_box(&scene, text(&scene, "1234.5"));
+    assert!(
+        inside(label, plot(&scene)),
+        "{label:?} leaves {:?}",
+        plot(&scene)
+    );
+    // Without the growth the label would leave the plot: it needs more room than the point
+    // had, and the limits now leave it that room.
+    let centre = markers(&scene)[0].0;
+    assert!(label[2] - centre.0 > old_room, "{label:?} from {centre:?}");
+    assert!(plot(&scene)[2] - centre.0 > old_room);
+}
+
+#[test]
+fn only_automatic_limits_grow_when_the_other_axis_is_explicit() {
+    // Explicit x limits: the label cannot leave across them, and no other side is clear.
+    let err = render_err(&last_point(Some((0.0, 10.0)), true));
+    assert!(matches!(err, Error::Style { .. }), "{err}");
+    assert!(
+        err.to_string()
+            .contains("the value label \"1234.5\" of scatter 1 has no clear position"),
+        "{err}"
+    );
+    // Explicit x limits and automatic y limits: above the highest point of a flat line, with an
+    // error bar below it, is the only clear side; the label grows y, and x stays as it is.
+    let peak = |annotate: bool| {
+        let (xs, ys) = ([1.0, 2.0, 3.0], [4.9, 5.0, 4.9]);
+        let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
+        axes(&mut f)
+            .xlim(0.0, 4.0)
+            .unwrap()
+            .line(nums(&xs), &ys, LineOptions::default())
+            .unwrap()
+            .y_error_bars(nums(&[2.0]), &[0.0], &[5.0], ErrorBarOptions::default())
+            .unwrap()
+            .scatter(
+                nums(&xs),
+                &ys,
+                if annotate {
+                    options(Place::Auto)
+                } else {
+                    ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        f
+    };
+    let (plain, scene) = (render(&peak(false)), render(&peak(true)));
+    assert_eq!(side_of(&scene, "5", 1), Place::Above);
+    let label = text_box(&scene, text(&scene, "5"));
+    assert!(
+        inside(label, plot(&scene)),
+        "{label:?} leaves {:?}",
+        plot(&scene)
+    );
+    // Where the points sit across the plot, and how far the peak sits below its top.
+    let across = |scene: &Scene| -> Vec<f64> {
+        let [left, _, right, _] = plot(scene);
+        markers(scene)[..3]
+            .iter()
+            .map(|((x, _), _)| (x - left) / (right - left))
+            .collect()
+    };
+    for (a, b) in across(&scene).into_iter().zip(across(&plain)) {
+        assert!(close(a, b), "{a} != {b}");
+    }
+    let below_top = |scene: &Scene| markers(scene)[1].0.1 - plot(scene)[1];
+    assert!(below_top(&scene) > below_top(&plain) + 1.0);
+}
+
+#[test]
+fn growing_limits_is_deterministic() {
+    let (a, b) = (matched_folds(None, true), matched_folds(None, true));
+    assert_eq!(render(&a), render(&b));
+    assert_eq!(
+        a.to_svg(SvgText::Editable).unwrap(),
+        b.to_svg(SvgText::Editable).unwrap()
+    );
+    assert_eq!(a.to_png(72).unwrap(), b.to_png(72).unwrap());
+}
+
+#[test]
+fn png_svg_and_pdf_render_labels_that_grew_the_limits() {
+    let f = matched_folds(None, true);
+    let svg = f.to_svg(SvgText::Editable).unwrap();
+    assert!(svg.contains(">81.7</text>"), "{svg}");
+    let png = f.to_png(72).unwrap();
+    assert!(png.starts_with(b"\x89PNG"));
+    let pdf = f.to_pdf().unwrap();
+    assert!(pdf.starts_with(b"%PDF"));
+    // All three come from the scene of the settled pass, which holds each label once.
+    let scene = render(&f);
+    assert_eq!(contents(&scene).iter().filter(|t| **t == "81.7").count(), 1);
 }
 
 // ---- Options and missing points ------------------------------------------------------------

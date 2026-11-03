@@ -1913,7 +1913,9 @@ pub(crate) fn with_layout_input<R>(
 /// canvas as its frame. The figure header follows the panels as its own unclipped group when
 /// non-empty; without axes the scene holds the background and that header. Each axes' marks are
 /// resolved and its legend is built and measured once, before layout, and the same records
-/// serve layout and drawing.
+/// serve layout and drawing. When automatic value labels of scatter points leave the plot,
+/// the figure is measured, laid out and drawn again so that automatic limits hold them
+/// ([`point_labels::fit_then_place`]).
 ///
 /// # Errors
 ///
@@ -1929,28 +1931,61 @@ pub(crate) fn scene(
 
 /// Draws with a cache owned by this scene call, shared by all its panels and layout passes.
 /// The scene's fonts are `fonts`, so the faces of its text items index them.
+///
+/// The value labels of scatter points can make room for themselves: each pass lays the figure
+/// out with the sides its automatic labels took in the pass before, none at first, and draws
+/// it, and the passes end once the labels settle ([`point_labels::fit_then_place`]). Each pass
+/// measures the panels again, so that nothing but those sides carries over.
 fn scene_with_labels(
     figure: &Figure,
     fonts: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<Scene> {
+    let groups = ShareGroups::new(figure);
+    check_contour_levels(figure, &groups, context)?;
+    point_labels::fit_then_place(|held| {
+        let mut panels = panels(figure, &groups, fonts)?;
+        if let Some(held) = held {
+            for (panel, sides) in panels.iter_mut().zip(held) {
+                panel.points.hold(sides.clone());
+            }
+        }
+        draw_scene(figure, &mut panels, &groups, fonts, context, labels)
+    })
+}
+
+/// The scene of `figure` laid out and drawn once, with the records `panels` of its panels, as
+/// [`scene`] describes, and where the automatic value labels of each panel went, in the order
+/// of the panels.
+///
+/// # Errors
+///
+/// As [`scene`].
+fn draw_scene(
+    figure: &Figure,
+    panels: &mut [Panel<'_>],
+    groups: &ShareGroups,
+    fonts: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+) -> Result<(Scene, Vec<point_labels::Placement>)> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
     scene.fonts = fonts.fonts().to_vec();
-    let groups = ShareGroups::new(figure);
-    check_contour_levels(figure, &groups, context)?;
-    let mut panels = panels(figure, &groups, fonts)?;
     if panels.is_empty() {
-        let header = figure_header(figure, &panels, fonts)?;
+        let header = figure_header(figure, panels, fonts)?;
         header.check(figure, context)?;
         if let Some(header) = draw::figure_header(theme, &header) {
             scene.push(header);
         }
-        return Ok(scene);
+        return Ok((scene, Vec::new()));
     }
-    let planned = plan_cells(figure, &mut panels, &groups, fonts, context, labels)?;
+    let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
+    let mut placements: Vec<point_labels::Placement> = std::iter::repeat_with(Default::default)
+        .take(panels.len())
+        .collect();
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2012,11 +2047,14 @@ fn scene_with_labels(
             context,
         )
         .map_err(|err| in_cell(figure, panel.axes, err))?;
+        placements[i] = points
+            .placement
+            .map_error(|err| in_cell(figure, panel.axes, err));
         let layers = [
             drawn.into_item(),
             notes,
             values.map(|values| values.item),
-            points,
+            points.item,
         ];
         for item in layers.into_iter().flatten() {
             scene.push(item);
@@ -2079,7 +2117,7 @@ fn scene_with_labels(
     for notes in annotations {
         scene.push(notes);
     }
-    Ok(scene)
+    Ok((scene, placements))
 }
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a

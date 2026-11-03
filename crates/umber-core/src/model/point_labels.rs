@@ -12,7 +12,10 @@ use crate::{Error, NumberStyle, Result, ScaleKind, SizeSpec, TickFormat};
 ///
 /// [`Place::Auto`] tries above, right, below and left, in that order, and takes the first
 /// position that lies inside the plot and is clear of every mark and label already placed.
-/// It never grows the limits.
+/// When none is, it takes the first side, in the same order, that is clear and leaves the plot
+/// only across automatic limits, and those limits grow just enough to hold the label; the
+/// labels are then placed again against the grown limits. With explicit limits, or on a
+/// category axis, the plot edge stays where it is.
 ///
 /// # Examples
 ///

@@ -182,7 +182,8 @@ class Place(Enum):
 
     A fixed side puts every label of the scatter 3 pt beyond the marker's drawn edge, outline
     included, and never moves it; automatic limits grow so that the labels fit inside the plot.
-    ``AUTO`` takes the first clear side and never grows the limits.
+    ``AUTO`` takes the first clear side inside the plot; when there is none, automatic limits
+    grow to make room on the first clear side that leaves the plot across them.
 
     Example:
         >>> import umber as ub
@@ -192,7 +193,8 @@ class Place(Enum):
 
     AUTO = 0
     """Try above, right, below and left, in that order, and take the first position that lies
-    inside the plot and overlaps no mark and no label placed before."""
+    inside the plot and overlaps no mark and no label placed before; failing that, the first
+    clear one that automatic limits can grow to hold."""
 
     ABOVE = 1
     """Above the point, centred horizontally."""

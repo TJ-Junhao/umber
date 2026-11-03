@@ -771,10 +771,11 @@ impl<'a> AxesMut<'a> {
     ///
     /// With [`PointLabels::annotate`] in `options.labels`, each drawn point shows its value
     /// next to it, as [`PointLabels`] and [`Place`](crate::Place) describe: on a fixed side,
-    /// for which automatic limits grow so that the labels fit, or on the first clear side.
+    /// for which automatic limits grow so that the labels fit, or on the first clear side,
+    /// for which automatic limits grow when no side inside the plot is clear.
     /// Rendering fails with `Error::Style` (see [`Figure::to_scene`](crate::Figure::to_scene))
-    /// for a fixed-side label that leaves the plot, and for an automatic label with no clear
-    /// side. A format, size or place without `annotate`, or a format that does not suit the
+    /// for a label that does not fit inside the plot, for an automatic label with no clear
+    /// side, and for automatic labels whose sides do not settle as the limits grow. A format, size or place without `annotate`, or a format that does not suit the
     /// value axis, is refused (see [`PointLabels`]).
     ///
     /// The mark stores its own copy of `y`, made once. To store values already held in an

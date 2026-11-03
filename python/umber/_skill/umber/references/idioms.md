@@ -79,7 +79,7 @@ ax.scatter(
 svg = ax.figure.to_svg()
 ```
 
-`AUTO` never grows the limits: a point at the edge of the data with lines on both sides may have no clear side, which raises `StyleError` when the figure is rendered. Fix the side with `place=`, or leave room with `ylim()` or a larger figure. Text from `ax.text()` and `ax.annotate()` is not avoided.
+When no side inside the plot is clear, `AUTO` lets automatic limits grow to hold the label, such as above the highest point of a line, so leave the limits automatic rather than setting `ylim()` to make room. With explicit limits a point with no clear side inside the plot raises `StyleError` when the figure is rendered: fix the side with `place=`, widen the limits, or use a larger figure. Category axes never grow. Text from `ax.text()` and `ax.annotate()` is not avoided.
 
 ## Colors, colormaps and color scales
 

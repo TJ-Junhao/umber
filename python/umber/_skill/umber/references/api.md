@@ -1443,9 +1443,12 @@ fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, an
 automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
 and left, and takes the first position inside the plot that overlaps no mark of these
 axes (markers, error bars, lines, bars, areas, bands, boxes and violins; not reference
-lines, spans or color-mapped cells) and no value label placed before; it never grows
-the limits. Labels are placed in call order, point by point, so the same data always
-gives the same figure. Text from ``text()`` and ``annotate()`` is not avoided.
+lines, spans or color-mapped cells) and no value label placed before. When no position
+inside is clear, it takes the first clear side that leaves the plot only across
+automatic limits, and those limits grow just enough to hold it, such as above the
+highest point of a line; explicit limits and category axes never grow. Labels are
+placed in call order, point by point, so the same data always gives the same figure.
+Text from ``text()`` and ``annotate()`` is not avoided.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1486,10 +1489,11 @@ Raises:
     StyleError: If ``label`` is too long or holds a line break or another control
         character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
         ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
-        number format for times). Rendering raises it when a value label on a fixed
-        side does not fit inside the plot, and when no position is clear for a label
-        with ``Place.AUTO``; the message names the series (its label, or ``scatter 2``
-        for the second scatter of the axes) and the value.
+        number format for times). Rendering raises it when a value label does not fit
+        inside the plot, when no position is clear for a label with ``Place.AUTO``, and
+        when the sides of ``Place.AUTO`` labels keep changing as the limits grow; the
+        message names the series (its label, or ``scatter 2`` for the second scatter of
+        the axes) and the value.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         both axes are category axes (type checkers accept such axes, so
         this is raised when the call runs), a ``ColorBy`` comes with a label, or its
@@ -4809,7 +4813,8 @@ Where the value label of a scatter point goes, with ``Axes.scatter(annotate=True
 
 A fixed side puts every label of the scatter 3 pt beyond the marker's drawn edge, outline
 included, and never moves it; automatic limits grow so that the labels fit inside the plot.
-``AUTO`` takes the first clear side and never grows the limits.
+``AUTO`` takes the first clear side inside the plot; when there is none, automatic limits
+grow to make room on the first clear side that leaves the plot across them.
 
 Example:
 
@@ -4834,7 +4839,8 @@ Place.AUTO
 ```
 
 Try above, right, below and left, in that order, and take the first position that lies
-inside the plot and overlaps no mark and no label placed before.
+inside the plot and overlaps no mark and no label placed before; failing that, the first
+clear one that automatic limits can grow to hold.
 
 ### `umber.Place.BELOW`
 

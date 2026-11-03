@@ -1,5 +1,5 @@
 //! Automatic limits that fit whole bubble markers, outlines included, the value labels at
-//! bar ends and the value labels on a fixed side of scatter points, on the final plot.
+//! bar ends and the value labels of scatter points, on the final plot.
 //!
 //! A bubble's extent, like a label's, is in points while an axis domain is in data units, and
 //! the plot size is known only once the layout is solved, so the final layout loop asks the fits
@@ -7,9 +7,12 @@
 //! its centre; a bar's label reaches past the bar's end on one side only ([`EndReach`]), and is
 //! fitted as a bubble is, with no reach on the other side. A point's label on a fixed side
 //! reaches past the point on that side along one axis, and half its extent on both sides along
-//! the other; labels placed automatically add no reach, so they never move the limits. A fit of bar labels alone is made
-//! only once a label reaches past the plot edge, so a range that already holds every label is
-//! kept as it is; a fit holding a bubble is always made. A fit starts from the axis's raw
+//! the other. A label placed automatically reaches as a fixed-side label on the side it took in
+//! the previous placement, and adds no reach in the first one, so a figure whose automatic
+//! labels all fit has the limits it would have without them
+//! ([`crate::draw::point_labels::fit_then_place`]). A fit of labels alone is made only once a
+//! label reaches past the plot edge, so a range that already holds every label is kept as it
+//! is; a fit holding a bubble is always made. A fit starts from the axis's raw
 //! extent, the extent of the data and of any explicit tick positions as resolve sees it, and
 //! widens it to the smallest extent in which every bubble reaches no further than the plot edge
 //! at its share of the plot length. Resolve then pads that extent once (rounding it first on log
@@ -156,7 +159,8 @@ impl Axis {
 /// How far a value label reaches past the coordinate it is placed from, along one axis: the
 /// input of the fits for one label. [`crate::draw::bar_labels`] measures a bar's label past
 /// the bar's value on its value axis; [`crate::draw::point_labels`] measures a point's label on
-/// a fixed side past the point's coordinate on each axis.
+/// its side, fixed or taken in the previous placement, past the point's coordinate on each
+/// axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct EndReach {
     /// The axis.

@@ -1,5 +1,6 @@
 //! Values written next to scatter points in every theme: a horizontal dot-and-whisker chart and
-//! a matched-fold chart with points joined by lines, both placed automatically, and labels on a
+//! a matched-fold chart with points joined by lines, both placed automatically, the second
+//! with automatic limits that grow to hold the label above its highest point, and labels on a
 //! fixed side that grow the automatic limits.
 
 use std::sync::Arc;
@@ -104,10 +105,8 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
 
         let mut f = figure(6.4, 3.8, theme.clone(), ScaleKind::Category, linear());
         let mut ax = axes(&mut f);
-        ax.title("Matched folds")
-            .ylabel("Accuracy (%)")
-            .ylim(62.0, 85.0)
-            .unwrap();
+        // Automatic limits grow to hold the label above the highest point.
+        ax.title("Matched folds").ylabel("Accuracy (%)");
         for (i, (label, marker, values, sd)) in matched.iter().enumerate() {
             let mean = values[5];
             ax.line(
