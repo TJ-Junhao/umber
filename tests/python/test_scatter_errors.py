@@ -3,7 +3,6 @@
 import math
 from collections.abc import Callable
 from typing import Any, cast
-from xml.etree import ElementTree
 
 import numpy as np
 import pytest
@@ -20,21 +19,8 @@ def call(function: object) -> Callable[..., object]:
     return cast(Callable[..., object], function)
 
 
-SVG = "{http://www.w3.org/2000/svg}"
-
-
 def svg(ax: ub.Axes[Any, Any]) -> str:
     return ax.figure.to_svg(text=ub.SvgText.OUTLINES)
-
-
-def strokes(ax: ub.Axes[Any, Any]) -> list[tuple[str | None, str | None, str | None]]:
-    """The stroke color, line cap and outline of every stroked path, in drawing order."""
-    root = ElementTree.fromstring(svg(ax))
-    return [
-        (node.get("stroke"), node.get("stroke-linecap"), node.get("d"))
-        for node in root.iter(f"{SVG}path")
-        if node.get("stroke") not in (None, "none")
-    ]
 
 
 def test_own_bars_and_line_draw_as_standalone_marks_in_the_series_color() -> None:
@@ -48,15 +34,14 @@ def test_own_bars_and_line_draw_as_standalone_marks_in_the_series_color() -> Non
     alone.y_error_bars(folds, low, high, color=color, width=HALF)
     alone.scatter(folds, values, label="80 epochs")
     assert svg(own) == svg(alone)
-    # With the line too, the strokes are the same. Only the clip of the marks differs: a line
-    # of its own widens it for its round ends, which the scatter's points do not need.
+    # With the line too: the scatter's own line widens the clip of the marks as a line does.
     own = ub.Figure().add_axes(x=ub.Scale.category())
     own = own.scatter(folds, values, label="80 epochs", y_error=(low, high), connect=True)
     alone = ub.Figure().add_axes(x=ub.Scale.category())
     alone.line(folds, values, color=color, width=HALF)
     alone.y_error_bars(folds, low, high, color=color, width=HALF)
     alone.scatter(folds, values, label="80 epochs")
-    assert strokes(own) == strokes(alone)
+    assert svg(own) == svg(alone)
 
 
 def test_both_errors_at_once_and_the_following_series_keeps_its_color() -> None:
@@ -88,7 +73,7 @@ def test_groups_join_and_bar_only_their_own_points() -> None:
             xs, [low[i] for i in rows], [high[i] for i in rows], color=color, width=HALF
         )
         alone.scatter(xs, ys, label=name)
-    assert strokes(own) == strokes(alone)
+    assert svg(own) == svg(alone)
 
 
 def test_error_arguments_must_be_pairs_of_columns() -> None:

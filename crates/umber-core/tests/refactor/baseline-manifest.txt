@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 3fc7235ba0ddce1d8fdd494b0eb9e6d691d36f00
+# revision: 2c932f1a3b0d697a5ab7af94673ae448f4468a0d
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt

@@ -107,7 +107,7 @@ fn contours(path: &Path) -> usize {
 
 /// The width of a standalone line or error bar drawn as a scatter's own are: half the automatic.
 fn half() -> SizeSpec {
-    SizeSpec::times(f64::from(umber_core::OWN_STROKE_SHARE)).unwrap()
+    SizeSpec::times(0.5).unwrap()
 }
 
 fn solid(color: Rgba) -> Rgba {

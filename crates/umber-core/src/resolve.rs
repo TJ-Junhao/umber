@@ -371,7 +371,7 @@ impl Resolved {
 /// bars are drawn at ([`ScatterOptions::connect`](crate::ScatterOptions::connect),
 /// [`ScatterOptions::y_error`](crate::ScatterOptions::y_error)): they accompany the points, so
 /// they stay lighter than the marks. The caps of the bars keep the theme's length.
-pub const OWN_STROKE_SHARE: f32 = 0.5;
+pub(crate) const OWN_STROKE_SHARE: f32 = 0.5;
 
 /// Whether two normalized positions are the same, for matching ticks to the baseline.
 pub(crate) fn coincides(a: NormalizedPos, b: NormalizedPos) -> bool {
