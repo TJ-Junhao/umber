@@ -69,6 +69,8 @@ pub struct Axes {
     pub(super) annotations: Vec<Annotation>,
     /// The other numeric y axes in this Cartesian panel, when present.
     pub(super) twin: TwinLink,
+    /// The title of the value column, when one is set.
+    pub(super) value_column: Option<super::ValueColumn>,
 }
 
 /// Stable storage indices connect the two axes without adding a grid cell.
@@ -177,6 +179,7 @@ impl Axes {
             legend_size: SizeSpec::Auto,
             annotations: Vec::new(),
             twin: TwinLink::None,
+            value_column: None,
         }
     }
 
@@ -623,6 +626,26 @@ impl Axes {
     /// The panel subtitle's per-call size.
     pub(crate) fn subtitle_size(&self) -> SizeSpec {
         self.subtitle_size
+    }
+
+    /// The title of the value column and its size, when
+    /// [`AxesMut::value_column`](super::AxesMut::value_column) has set one; `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// assert_eq!(axes.value_column_options(), None);
+    /// axes.value_column("Mean", SizeSpec::Auto);
+    /// assert_eq!(axes.value_column_options().map(|c| c.title()), Some("Mean"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn value_column_options(&self) -> Option<&super::ValueColumn> {
+        self.value_column.as_ref()
     }
 
     /// The x axis title's per-call size.

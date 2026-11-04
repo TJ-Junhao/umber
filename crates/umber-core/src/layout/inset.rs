@@ -17,7 +17,7 @@
 
 /// The largest distance, in points, by which a label may miss its bound and still count as
 /// contained: far below anything visible, and far above the rounding of the solve.
-pub(super) const CONTAINMENT_TOLERANCE: f64 = 1e-6;
+pub(crate) const CONTAINMENT_TOLERANCE: f64 = 1e-6;
 
 /// The rounding, in points, allowed when deciding whether a pair of constraints is compatible
 /// and whether an edge moved at all.

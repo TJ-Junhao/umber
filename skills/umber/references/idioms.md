@@ -85,6 +85,24 @@ svg = ax.figure.to_svg()
 
 When no side inside the plot is clear, `AUTO` lets automatic limits grow to hold the label, such as above the highest point of a line, so leave the limits automatic rather than setting `ylim()` to make room. With explicit limits a point with no clear side inside the plot raises `StyleError` when the figure is rendered: fix the side with `place=`, widen the limits, or use a larger figure. Category axes never grow. Text from `ax.text()` and `ax.annotate()` is not avoided.
 
+For a table of values beside a forest plot, use `place=ub.Place.COLUMN` and `ax.value_column(title=...)`; do not write the values with `ax.text()` at fixed coordinates. With a category y axis the values form a column right of the plot, each level with its point; with values on y they form a row above the plot, each centred on its point. Each scatter, and each group with `by=`, gets its own sub-column in call order, in its series color, so two series on the same categories never collide; the legend names the colors. The layout reserves the column's room, so the plot narrows to make room and the limits do not change. Values in one notation are aligned on the decimal point.
+
+```python
+models = ["Baseline", "Gate", "Gate + aug"]
+ax = ub.Figure(6, 3).add_axes(y=ub.Scale.category())
+for label, means in [("80 epochs", [66.5, 71.6, 73.1]), ("Long training", [68.1, 74.0, 75.4])]:
+    ax.scatter(
+        means,
+        models,
+        label=label,
+        annotate=True,
+        format=ub.TickFormat.fixed(1),
+        place=ub.Place.COLUMN,
+    )
+ax.value_column(title="Mean (%)")
+svg = ax.figure.to_svg()
+```
+
 ## Error bars and lines that belong to a series
 
 For a series' error bars and connecting line use `scatter(..., y_error=(low, high), connect=True)` (or `x_error=` for horizontal bars), which take the series color at half the line width of a standalone line, so they stay lighter than the points; use `y_error_bars()` and `line()` only for marks that stand alone. Separate calls take their own palette colors and legend entries, so they do not match the points and they shift the colors of later series. `low` and `high` hold one value per point; NaN skips a point's bar, which puts a bar on one point only, such as a "Mean" after the folds. A point left out, for a NaN coordinate or a NaN `ColorBy` value, has no marker, label or bar, and breaks the line. With `by=`, each group gets its own bars and line in its color.

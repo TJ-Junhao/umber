@@ -183,12 +183,16 @@ class Place(Enum):
     A fixed side puts every label of the scatter 3 pt beyond the marker's drawn edge, outline
     included, and never moves it; automatic limits grow so that the labels fit inside the plot.
     ``AUTO`` takes the first clear side inside the plot; when there is none, automatic limits
-    grow to make room on the first clear side that leaves the plot across them.
+    grow to make room on the first clear side that leaves the plot across them. ``COLUMN``
+    writes the values outside the plot instead, in a column that ``Axes.value_column()`` titles.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.Figure().add_axes().scatter([1, 2], [3.0, 4.5], annotate=True)
         >>> ax = ax.scatter([1, 2], [1.0, 2.0], annotate=True, place=ub.Place.BELOW)
+        >>> forest = ub.Figure().add_axes(y=ub.Scale.category())
+        >>> forest = forest.scatter([71.2, 74.8], ["Base", "Gate"], annotate=True,
+        ...                         place=ub.Place.COLUMN).value_column("Mean (%)")
     """
 
     AUTO = 0
@@ -207,6 +211,12 @@ class Place(Enum):
 
     RIGHT = 4
     """Right of the point, centred vertically."""
+
+    COLUMN = 5
+    """In a column outside the plot, at the far end of the value axis: right of the plot, level
+    with each point, when x is the value axis; in a row above the plot, centred on each point's
+    x, when y is. Each scatter, and each group with ``by``, has a sub-column of its own. The
+    plot narrows, or gets shorter, to make room, and the limits do not change."""
 
 
 @unique

@@ -61,7 +61,9 @@ pub(crate) fn align_placed(
 }
 
 /// Shares axis bands and orders right ticks, direct labels, colorbars, then the right legend.
-/// Direct labels keep their own y scale and share one horizontal column.
+/// Direct labels keep their own y scale and share one horizontal column. A value row above
+/// the plot raises the y axis labels of both axes; a value column right of the plot never
+/// meets a twin, which needs numeric y axes.
 pub(crate) fn align(inputs: &[LayoutInput<'_>], bands: &mut [PanelBands]) {
     for (i, input) in inputs.iter().enumerate() {
         let parent = match input.axes {
@@ -91,6 +93,8 @@ pub(crate) fn align(inputs: &[LayoutInput<'_>], bands: &mut [PanelBands]) {
             0.0
         };
         right.right_offset = right.right_axis + left.right_colorbar;
+        // The twin's y axis label sits above the panel's value row, as the panel's does.
+        right.row_offset = left.value_row();
         right.bottom_offset = bottom;
         right.x_band = left.x_band;
         right.x_title_band = left.x_title_band;

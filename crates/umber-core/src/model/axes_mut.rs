@@ -777,7 +777,11 @@ impl<'a> AxesMut<'a> {
     /// for a label that does not fit inside the plot, for an automatic label with no clear
     /// side, and for automatic labels whose sides do not settle as the limits grow. A format,
     /// size or place without `annotate`, or a format that does not suit the value axis, is
-    /// refused (see [`PointLabels`]).
+    /// refused (see [`PointLabels`]). [`Place::Column`](crate::Place::Column) writes the values
+    /// in the value column outside the plot instead, in a sub-column of this scatter's own,
+    /// which [`AxesMut::value_column`] titles; rendering fails with `Error::Style` for two
+    /// values of the sub-column whose boxes overlap along the category axis. A twin axes has no
+    /// value column, and refuses it with `Error::Usage`, naming `place`.
     ///
     /// `options.x_error` and `options.y_error` give each point an error bar, and
     /// `options.connect` joins the points with a line in input order
@@ -857,6 +861,9 @@ impl<'a> AxesMut<'a> {
         check_point_color(CONTEXT, axes, &options.color, series.x().len())?;
         check_scatter_label(CONTEXT, &options.color, &options.label)?;
         options.labels.check(CONTEXT, axes.x, axes.y)?;
+        options
+            .labels
+            .check_twin(CONTEXT, matches!(axes.twin, super::axes::TwinLink::Twin(_)))?;
         self.figure
             .check_shared_point_color(self.index, &options.color, CONTEXT)?;
         let mark = Mark::scatter(CONTEXT, (self.x, self.y), series, options)?;
@@ -3176,6 +3183,30 @@ impl<'a> AxesMut<'a> {
         self
     }
 
+    /// Sets the title of the value column, the column of the values that scatters with
+    /// [`Place::Column`](crate::Place::Column) write outside the plot, and the title's size,
+    /// relative to the theme's axis label size or in points ([`ValueColumn`](crate::ValueColumn)).
+    /// Calling it again replaces the earlier setting. An empty title writes none.
+    ///
+    /// Rendering returns `Error::Usage` if no scatter on these axes writes its values in the
+    /// column, and `Error::Style` if the title holds a line break or another control
+    /// character: column titles are one line.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, SizeSpec, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// axes.value_column("Mean (%)", SizeSpec::Auto);
+    /// assert_eq!(axes.value_column_options().map(|c| c.title()), Some("Mean (%)"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn value_column(&mut self, title: &str, size: SizeSpec) -> &mut Self {
+        self.axes_mut().value_column = Some(crate::ValueColumn::new(title, size));
+        self
+    }
+
     /// Sets the x tick label size for the shared x group. A conflicting explicit call on
     /// another member is `Error::Usage` and changes nothing. [`SizeSpec::Auto`] removes this
     /// member's setting: it inherits the remaining agreed explicit size, or the theme size
@@ -3862,6 +3893,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.scatter()";
         check_not_two_categories(CONTEXT, self.x, self.y)?;
         labels.check(CONTEXT, self.x, self.y)?;
+        labels.check_twin(CONTEXT, matches!(self.twin, super::axes::TwinLink::Twin(_)))?;
         let kinds = (self.x, self.y);
         let groups = groups
             .into_iter()

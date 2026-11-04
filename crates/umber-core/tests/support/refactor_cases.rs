@@ -58,6 +58,9 @@
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
+//! - Values written in a column beside the plot: a forest plot with a titled column, a row of
+//!   values above a matched-fold chart, a column outside a colorbar and a row above a
+//!   twin-axes panel (in `corpus/value_column.rs`).
 //!
 //! Not covered:
 //!
@@ -141,6 +144,7 @@ mod corpus {
     pub mod ticks;
     pub mod time;
     pub mod twin_y;
+    pub mod value_column;
     pub mod violin;
     pub mod x_end_label;
 }
@@ -231,6 +235,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::caption::cases(&lib, &mut sink);
     corpus::in_plot::cases(&lib, &mut sink);
     corpus::point_labels::cases(&lib, &mut sink);
+    corpus::value_column::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

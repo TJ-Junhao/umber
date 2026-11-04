@@ -1,5 +1,6 @@
 //! The values written next to scatter points: whether a scatter writes them, in which format
-//! and size, and where they go ([`Place`]).
+//! and size, and where they go ([`Place`]); and the title of the column that
+//! [`Place::Column`] writes them in ([`ValueColumn`]).
 
 use crate::{Error, NumberStyle, Result, ScaleKind, SizeSpec, TickFormat};
 
@@ -16,6 +17,15 @@ use crate::{Error, NumberStyle, Result, ScaleKind, SizeSpec, TickFormat};
 /// only across automatic limits, and those limits grow just enough to hold the label; the
 /// labels are then placed again against the grown limits. With explicit limits, or on a
 /// category axis, the plot edge stays where it is.
+///
+/// [`Place::Column`] writes the values outside the plot, at the far end of the value axis: in a
+/// column right of the plot when x is the value axis, each value level with its point and
+/// centred on it vertically; in a row above the plot when y is, each value centred on its
+/// point's x. Each scatter that writes its values there, and each group of a grouped scatter,
+/// has a sub-column of its own, in mark order: left to right in a column, top to bottom in a
+/// row. The layout reserves the column's room as it does a tick label column, so the plot
+/// narrows, or gets shorter, to make room. Values in a column never change limits and are no
+/// obstacles of labels inside the plot. [`ValueColumn`] sets the column's title.
 ///
 /// # Examples
 ///
@@ -39,6 +49,57 @@ pub enum Place {
     Left,
     /// Right of the point, centred vertically.
     Right,
+    /// In a column outside the plot, at the far end of the value axis.
+    Column,
+}
+
+/// The title of the value column of an axes and its size, set by
+/// [`AxesMut::value_column`](crate::AxesMut::value_column): the column of the values that
+/// scatters with [`Place::Column`] write outside the plot.
+///
+/// The title is set in the axis label style, at `size`; [`SizeSpec::Auto`] is the axis label
+/// size. It is centred over a column right of the plot, its baseline level with the y axis
+/// label's, and written before a row above the plot, right-aligned at the left edge of the
+/// plot, in the y tick label column, at the row's vertical centre. An empty title writes
+/// nothing.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{SizeSpec, ValueColumn};
+///
+/// let column = ValueColumn::new("Mean (%)", SizeSpec::Auto);
+/// assert_eq!((column.title(), column.size()), ("Mean (%)", SizeSpec::Auto));
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValueColumn {
+    /// The title; empty for none.
+    title: String,
+    /// The title's size.
+    size: SizeSpec,
+}
+
+impl ValueColumn {
+    /// A column titled `title` at `size`.
+    #[must_use]
+    pub fn new(title: &str, size: SizeSpec) -> ValueColumn {
+        ValueColumn {
+            title: title.to_owned(),
+            size,
+        }
+    }
+
+    /// The title; empty for none.
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// The title's size.
+    #[must_use]
+    pub fn size(&self) -> SizeSpec {
+        self.size
+    }
 }
 
 /// The values written next to the points of a scatter mark.
@@ -139,6 +200,23 @@ impl PointLabels {
             )
             .with_parameter("format")
             .with_hint("use TickFormat.AUTO or a number format such as TickFormat.fixed(1)."));
+        }
+        Ok(())
+    }
+
+    /// Checks under `context` that the labels may go where they are placed on axes that are
+    /// a twin (`twin`) or not: a column belongs to the plot's primary axes, so a twin y axis
+    /// refuses [`Place::Column`] (`Error::Usage`, parameter `place`).
+    pub(super) fn check_twin(&self, context: &'static str, twin: bool) -> Result<()> {
+        if twin && self.annotate && self.place == Place::Column {
+            return Err(Error::usage(
+                context,
+                "place is Place.COLUMN on twin axes; the value column belongs to the primary \
+                 axes of the plot."
+                    .to_owned(),
+            )
+            .with_parameter("place")
+            .with_hint("draw this scatter on the primary axes, or use another place."));
         }
         Ok(())
     }

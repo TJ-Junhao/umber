@@ -150,6 +150,43 @@ fn resolve_colors(figure: &Figure, panels: &mut [Panel<'_>], groups: &ShareGroup
     }
 }
 
+/// Checks that every axes that sets a value column title
+/// ([`AxesMut::value_column`](crate::AxesMut::value_column)) has a scatter that writes its
+/// values in that column: `Error::Usage` under `context` for the first that has none, named
+/// by its cell, rather than a title over nothing.
+fn check_value_columns(figure: &Figure, context: &'static str) -> Result<()> {
+    for layer in figure.layers() {
+        let Some(axes) = layer.cartesian() else {
+            continue;
+        };
+        if axes.value_column_options().is_none() {
+            continue;
+        }
+        let used = axes.marks().iter().any(|mark| {
+            matches!(mark, crate::model::Mark::Scatter(scatter)
+                if scatter.options().labels.annotate
+                    && scatter.options().labels.place == crate::Place::Column)
+        });
+        if !used {
+            return Err(in_cell(
+                figure,
+                layer,
+                Error::usage(
+                    context,
+                    "value_column() is set on these axes, but none of their scatters writes its \
+                     values in the column."
+                        .to_owned(),
+                )
+                .with_hint(
+                    "pass annotate=True and place=Place.COLUMN to the scatter whose values the \
+                     column shows, or remove the value_column() call.",
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Checks that the color-mapped contours of each color group, which share one colorbar, all
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
 /// naming the panels of the first two whose levels differ. It reads the levels the model
@@ -655,6 +692,7 @@ fn plan(
             figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
+            column: panel.points.column(),
             lib,
             context,
         })
@@ -1866,6 +1904,7 @@ pub(crate) fn with_layout_input<R>(
             figure_title_size: figure.title_size(),
             axes: panel.axes,
             legend: &panel.legend,
+            column: panel.points.column(),
             lib,
             context: "Figure.to_scene()",
         })
@@ -1935,7 +1974,9 @@ pub(crate) fn scene(
 /// The value labels of scatter points can make room for themselves: each pass lays the figure
 /// out with the sides its automatic labels took in the pass before, none at first, and draws
 /// it, and the passes end once the labels settle ([`point_labels::fit_then_place`]). Each pass
-/// measures the panels again, so that nothing but those sides carries over.
+/// measures the panels again, so that nothing but those sides carries over. A value column is
+/// judged against the settled layout: its errors come from the last pass only, since an earlier
+/// one may lay the plot out narrower.
 fn scene_with_labels(
     figure: &Figure,
     fonts: &SceneFonts<'_>,
@@ -1944,6 +1985,7 @@ fn scene_with_labels(
 ) -> Result<Scene> {
     let groups = ShareGroups::new(figure);
     check_contour_levels(figure, &groups, context)?;
+    check_value_columns(figure, context)?;
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
         if let Some(held) = held {
@@ -1952,16 +1994,18 @@ fn scene_with_labels(
             }
         }
         draw_scene(figure, &mut panels, &groups, fonts, context, labels)
-    })
+    })?
 }
 
 /// The scene of `figure` laid out and drawn once, with the records `panels` of its panels, as
 /// [`scene`] describes, and where the automatic value labels of each panel went, in the order
-/// of the panels.
+/// of the panels. The scene is the first error of a value column instead, when one has values
+/// that cannot be written ([`point_labels::column_items`]): the pass still places every
+/// automatic label, so that the caller raises that error only from a settled pass.
 ///
 /// # Errors
 ///
-/// As [`scene`].
+/// As [`scene`], but for the errors of value columns.
 fn draw_scene(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1969,7 +2013,7 @@ fn draw_scene(
     fonts: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
-) -> Result<(Scene, Vec<point_labels::Placement>)> {
+) -> Result<(Result<Scene>, Vec<point_labels::Placement>)> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
     let mut scene = Scene::new(width as f32, height as f32, theme.background());
@@ -1980,7 +2024,7 @@ fn draw_scene(
         if let Some(header) = draw::figure_header(theme, &header) {
             scene.push(header);
         }
-        return Ok((scene, Vec::new()));
+        return Ok((Ok(scene), Vec::new()));
     }
     let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
     let mut layers = draw_layers(figure, panels, &planned, fonts, context)?;
@@ -1988,6 +2032,7 @@ fn draw_scene(
         .take(panels.len())
         .collect();
     let mut points = place_point_labels(figure, panels, &planned, &layers, context)?;
+    let mut column_error = None;
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2024,12 +2069,32 @@ fn draw_scene(
         placements[i] = points
             .placement
             .map_error(|err| in_cell(figure, panel.axes, err));
+        let column = match point_labels::column_items(
+            theme,
+            resolved,
+            layout,
+            &panel.marks,
+            &panel.points,
+            (
+                context,
+                figure.grid().rows() * figure.grid().cols() > 1,
+                width,
+            ),
+        ) {
+            Ok(column) => column,
+            Err(err) => {
+                // Judged against the settled layout only: see `scene_with_labels`.
+                column_error.get_or_insert_with(|| in_cell(figure, panel.axes, err));
+                None
+            }
+        };
         scene.push(draw::chrome(theme, layout));
         let stacked = [
             drawn.into_item(),
             notes,
             values.map(|values| values.item),
             points.item,
+            column,
         ];
         for item in stacked.into_iter().flatten() {
             scene.push(item);
@@ -2092,7 +2157,7 @@ fn draw_scene(
     for notes in annotations {
         scene.push(notes);
     }
-    Ok((scene, placements))
+    Ok((column_error.map_or(Ok(scene), Err), placements))
 }
 
 /// What one Cartesian layer of a panel draws under its point labels: its marks, the values
@@ -2915,6 +2980,7 @@ mod tests {
                 figure_title_size: figure.title_size(),
                 axes: panel.axes,
                 legend: &panel.legend,
+                column: panel.points.column(),
                 lib,
                 context: "Figure.to_scene()",
             })

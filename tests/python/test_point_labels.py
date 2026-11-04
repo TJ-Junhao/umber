@@ -256,4 +256,5 @@ def test_place_members() -> None:
         ("BELOW", 2),
         ("LEFT", 3),
         ("RIGHT", 4),
+        ("COLUMN", 5),
     ]

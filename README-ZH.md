@@ -245,7 +245,7 @@ left.figure.save_png("weather.png")
 
 `ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。`at=ub.InPlot(x, y)` 改用绘图区的比例位置，数据变化时文字仍留在原来的角落；`annotate(..., text_at=ub.InPlot(x, y))` 把文字写在该位置，箭头仍指向数据位置。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。
 
-在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。在 `scatter` 上，`annotate=True` 以 series 的颜色在每个点旁写出数值：依次尝试上、右、下、左，取第一个不与 mark 和其他数值重叠的位置；也可以用 `place=ub.Place.ABOVE` 等固定一侧，此时自动 limits 会扩展以放下数值。
+在 `bar`、`grouped_bar` 和 `stacked_bar` 上传入 `annotate=True` 会写出每根柱子的数值；自动 limits 会扩展到能放下所有数值，`format=` 选择数值的写法。使用显式 limits 时，放不下的数值会抛出指明该柱子的 `StyleError`。在 `scatter` 上，`annotate=True` 以 series 的颜色在每个点旁写出数值：依次尝试上、右、下、左，取第一个不与 mark 和其他数值重叠的位置；也可以用 `place=ub.Place.ABOVE` 等固定一侧，此时自动 limits 会扩展以放下数值。`place=ub.Place.COLUMN` 则把数值写在绘图区旁的一列中，每个 series 一个子列，用 `ax.value_column("Mean (%)")` 设置列标题，就像 forest plot 旁边的数值表。
 
 ```python
 import numpy as np

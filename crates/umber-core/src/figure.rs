@@ -30,7 +30,7 @@
 
 pub use crate::model::{
     AnnotateOptions, Annotation, AnnotationPlacement, InPlot, Place, PointLabels, TextOptions,
-    TextPosition, ValueLabels,
+    TextPosition, ValueColumn, ValueLabels,
 };
 pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,

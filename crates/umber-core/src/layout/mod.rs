@@ -34,12 +34,15 @@ mod program;
 #[cfg(test)]
 mod title_tests;
 pub(crate) mod twin;
+mod value_column;
 
 pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
+pub(crate) use inset::CONTAINMENT_TOLERANCE;
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
+pub(crate) use value_column::{ColumnInput, ColumnSide, PlacedColumn};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -74,7 +77,7 @@ const AXIS_LABEL_GAP: f64 = 4.0;
 const MIN_PLOT: f64 = 1.0;
 /// The smallest gap between an x tick label and the left or right canvas edge: half the outer
 /// padding, so an end label may reach into the padding but never ends flush with the edge.
-const X_LABEL_EDGE_GAP: f64 = PADDING / 2.0;
+pub(crate) const X_LABEL_EDGE_GAP: f64 = PADDING / 2.0;
 /// The largest share of the inner width (inside the outer padding) by which x tick labels may
 /// inset one side of the plot area, and that direct labels may reserve on the right.
 const END_LABEL_SHARE: f64 = 0.25;
@@ -315,6 +318,8 @@ pub(crate) struct Layout {
     pub frame: Frame,
     /// The visible colorbar, placed outside the plot.
     pub colorbar: Option<PlacedColorbar>,
+    /// The value column, placed outside the plot; `None` without one.
+    pub value_column: Option<PlacedColumn>,
 }
 
 /// The baseline as laid out: the line across the plot area at the baseline's position along
@@ -1060,6 +1065,8 @@ pub(crate) struct LayoutInput<'a> {
     pub axes: crate::model::Layer<'a>,
     /// The legend, measured by [`MeasuredLegend::measure`].
     pub legend: &'a MeasuredLegend<'a>,
+    /// The value column, whose room the layout reserves; `None` without one.
+    pub column: Option<&'a ColumnInput>,
     /// The fonts.
     pub lib: &'a SceneFonts<'a>,
     /// The API call that renders, which layout errors are reported in, e.g. `"Figure.to_png()"`.
@@ -1193,14 +1200,17 @@ fn solve_single(
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let mut plot_top = bands.heading.bottom(top) + bands.top_label_band() + bands.top_label_rise();
+    let mut plot_top = bands.heading.bottom(top)
+        + bands.top_label_band()
+        + bands.value_row()
+        + bands.top_label_rise();
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
-    let left = if bands.y_labels.is_empty() {
-        frame.x + PADDING
-    } else {
+    let left = if bands.has_y_column() {
         frame.x + PADDING + bands.y_label_width + Y_LABEL_GAP
+    } else {
+        frame.x + PADDING
     };
     let right = frame.right() - PADDING - bands.right();
     let min_width = bands.min_plot_width(bands.y_tick_column);
@@ -1232,7 +1242,7 @@ fn solve_single(
                 false,
             ));
         }
-        if bands.right_legend > 0.0 || bands.right_colorbar > 0.0 {
+        if bands.right_legend > 0.0 || bands.right_colorbar > 0.0 || bands.value_column() > 0.0 {
             if bands.right_legend > 0.0 {
                 let available = right - left - min_width + bands.right_legend;
                 placement::check_right_width(context, &legend.column(0.0), available)?;
@@ -1298,7 +1308,10 @@ fn solve_single(
         let plain_top = if legend.position == crate::LegendPosition::TopRight {
             top + without.above_with_row(&legend.header_within(plot_left, plot_right))
         } else {
-            without.heading.bottom(top) + without.y_label_band + without.label_rise
+            without.heading.bottom(top)
+                + without.top_label_band()
+                + without.value_row()
+                + without.label_rise
         };
         let plain_below = PADDING
             + without.bottom_legend

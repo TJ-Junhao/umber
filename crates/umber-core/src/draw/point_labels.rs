@@ -47,6 +47,12 @@
 //! A label still outside on that side means the limits cannot hold it, which fails the render;
 //! so does a placement that has not settled after [`MAX_PASSES`] passes.
 //!
+//! **Column.** [`Place::Column`] writes the values outside the plot instead, in the value
+//! column of the axes, which the layout reserves before the marks are drawn
+//! ([`crate::layout::ColumnInput`]); [`mod@column`] describes how they are written there. They
+//! reach nothing past their points, so they never change limits, and they are no obstacles
+//! here.
+//!
 //! Text written by `text()` and `annotate()` is drawn after the labels and is not an obstacle.
 //! Heatmap cell labels need two category axes, on which no scatter is drawn, so they never
 //! meet point labels. The layers of a twin-axes panel share one plot, so they share its
@@ -62,7 +68,7 @@ use super::{DrawnMarks, has_fill, mark_context, marker_outline, marker_reach, so
 use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::color_scale::ResolvedColorScale;
 use crate::error::quoted;
-use crate::layout::{Area, Label, Layout, value_text};
+use crate::layout::{Area, ColumnInput, Label, Layout, value_text};
 use crate::model::{Axes, AxisData, values_on_x};
 use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::Item;
@@ -70,6 +76,9 @@ use crate::text::SceneFonts;
 use crate::ticks::{Tick, TickValues};
 use crate::time::{explicit_labels, iso_label, label_step};
 use crate::{Error, Instant, NumberStyle, Place, Result, Rgba, Theme, TickFormat};
+
+mod column;
+pub(crate) use column::column_items;
 
 /// The gap between a marker's drawn edge and the box of its label, in points.
 pub(crate) const GAP: f64 = bar_labels::END_GAP;
@@ -81,7 +90,8 @@ pub(crate) const MAX_PASSES: usize = 4;
 /// The hint of an automatic label with no clear position.
 const CLEAR_HINT: &str = "use place=Place.ABOVE (or another side) to fix the side, a larger figure, or a smaller label size.";
 /// The hint of a label that leaves the plot under automatic limits.
-const ROOM_HINT: &str = "enlarge the figure, use another place, or a smaller label size.";
+const ROOM_HINT: &str =
+    "enlarge the figure, use place=Place.COLUMN or another place, or a smaller label size.";
 /// The hint of a fixed-side label that leaves the plot under explicit limits.
 const LIMITS_HINT: &str = "widen xlim or ylim, or let the limits be automatic.";
 
@@ -101,15 +111,28 @@ enum Side {
 impl Side {
     /// The sides an automatic label tries, in order.
     const AUTO_ORDER: [Side; 4] = [Side::Above, Side::Right, Side::Below, Side::Left];
+}
 
-    /// The fixed side of `place`; `None` for [`Place::Auto`].
-    fn fixed(place: Place) -> Option<Side> {
+/// Where the labels of one mark go: on a side of their points in the plot, fixed or chosen
+/// automatically, or in the value column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placing {
+    /// In the plot, on the fixed side; `None` for a side chosen automatically.
+    InPlot(Option<Side>),
+    /// In the value column.
+    Column,
+}
+
+impl Placing {
+    /// Where `place` puts the labels.
+    fn of(place: Place) -> Placing {
         match place {
-            Place::Auto => None,
-            Place::Above => Some(Side::Above),
-            Place::Right => Some(Side::Right),
-            Place::Below => Some(Side::Below),
-            Place::Left => Some(Side::Left),
+            Place::Auto => Placing::InPlot(None),
+            Place::Above => Placing::InPlot(Some(Side::Above)),
+            Place::Right => Placing::InPlot(Some(Side::Right)),
+            Place::Below => Placing::InPlot(Some(Side::Below)),
+            Place::Left => Placing::InPlot(Some(Side::Left)),
+            Place::Column => Placing::Column,
         }
     }
 }
@@ -210,8 +233,8 @@ struct MarkLabels {
     /// How messages name the mark: `the series "Long training"`, or `scatter 2` (the second
     /// scatter of the axes) for a mark without a label.
     name: String,
-    /// Where its labels go.
-    place: Place,
+    /// The fixed side of its labels; `None` for a side chosen automatically.
+    side: Option<Side>,
     /// The color of its labels.
     color: Rgba,
     /// How far its markers reach from their centres along x and along y, outline included,
@@ -224,8 +247,14 @@ struct MarkLabels {
 /// The measured value labels of the annotated scatter marks of one axes.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ScatterLabels {
-    /// One record per annotated mark, in mark order.
+    /// One record per annotated mark whose labels go in the plot, in mark order.
     marks: Vec<MarkLabels>,
+    /// One record per annotated mark whose labels go in the value column and that labels a
+    /// point, in mark order: one sub-column each.
+    columns: Vec<column::ColumnValues>,
+    /// The value column as the layout reserves it; `None` when no value goes there and the
+    /// axes set no column title.
+    column: Option<ColumnInput>,
     /// Whether the x and the y axis have explicit limits: an automatic label never leaves the
     /// plot across them, and the hint of a fixed-side label that leaves the plot names them.
     explicit: [bool; 2],
@@ -260,6 +289,7 @@ impl ScatterLabels {
             Limits::new(axes.y_limits(), axes.y_time_limits()),
         ];
         let mut measured = Vec::new();
+        let mut columns = Vec::new();
         let mut scatters = 0;
         for (index, mark) in marks.iter().enumerate() {
             let ResolvedMark::Scatter {
@@ -317,26 +347,43 @@ impl ScatterLabels {
             } else {
                 format!("the series {}", quoted(&options.label))
             };
-            measured.push(MarkLabels {
-                mark: index,
-                name,
-                place: labels.place,
-                color: solid(*color),
-                reach: marker_reach(options.marker, *size, marker_outline(mapped.is_some())),
-                points,
-            });
+            match Placing::of(labels.place) {
+                Placing::InPlot(side) => measured.push(MarkLabels {
+                    mark: index,
+                    name,
+                    side,
+                    color: solid(*color),
+                    reach: marker_reach(options.marker, *size, marker_outline(mapped.is_some())),
+                    points,
+                }),
+                Placing::Column if points.is_empty() => {}
+                Placing::Column => columns.push(column::ColumnValues::measure(
+                    (lib, theme),
+                    (index, name, solid(*color)),
+                    points,
+                    (on_x, format, labels.size),
+                )?),
+            }
         }
         let explicit = within.map(|limits| limits != Limits::Automatic);
+        let column = column::input(axes, on_x, &columns);
         Ok(ScatterLabels {
             marks: measured,
+            columns,
+            column,
             explicit,
             held: None,
         })
     }
 
-    /// Whether no mark writes labels.
+    /// Whether no mark writes labels in the plot.
     pub(crate) fn is_empty(&self) -> bool {
         self.marks.is_empty()
+    }
+
+    /// The value column as the layout reserves it; `None` without one.
+    pub(crate) fn column(&self) -> Option<&ColumnInput> {
+        self.column.as_ref()
     }
 
     /// Holds `sides`, the sides the automatic labels took in the previous pass: the limit fits
@@ -359,7 +406,8 @@ impl ScatterLabels {
         let mut reaches = Vec::new();
         for (m, mark) in self.marks.iter().enumerate() {
             for (p, point) in mark.points.iter().enumerate() {
-                let side = Side::fixed(mark.place)
+                let side = mark
+                    .side
                     .or_else(|| self.held.as_ref().and_then(|held| held.side(m, p)));
                 let Some(side) = side else {
                     continue;
@@ -543,7 +591,7 @@ pub(crate) fn items(
                 continue;
             }
             let candidate = |side| candidate(side, centre, mark_labels.reach, point.size());
-            let bounds = if let Some(side) = Side::fixed(mark_labels.place) {
+            let bounds = if let Some(side) = mark_labels.side {
                 let bounds = candidate(side);
                 if !contains(plot, bounds) {
                     return Err(Error::style(

@@ -579,6 +579,11 @@ pub(crate) struct PanelBands {
     pub bottom_colorbar: f64,
     /// The colorbar texts and metrics, before placement.
     colorbar: Option<super::colorbar::MeasuredColorbar>,
+    /// The value column, measured; `None` without one.
+    column: Option<super::value_column::MeasuredColumn>,
+    /// The value row of the primary axes above a twin's plot, which the twin's y axis label
+    /// sits above too; 0 for primary axes.
+    pub(super) row_offset: f64,
     /// The x tick label row and its gap; 0 without x tick labels.
     pub x_band: f64,
     /// The x axis label row and its gap; 0 without an x axis label.
@@ -593,7 +598,8 @@ pub(crate) struct PanelBands {
     pub(super) heading: Header,
     /// The y tick labels at their ticks' positions, not yet placed.
     pub(super) y_labels: Vec<(NormalizedPos, Label)>,
-    /// The width of the widest y tick label; 0 without y tick labels.
+    /// The width of the widest y tick label, or of the title of a value row above the plot
+    /// when that is wider; 0 without either.
     pub(super) y_label_width: f64,
     /// The x tick labels at their ticks' positions, not yet placed.
     pub(super) x_labels: Vec<(NormalizedPos, Label)>,
@@ -692,10 +698,50 @@ impl PanelBands {
         self.colorbar_tick_width
     }
 
-    /// The label band above both the y ticks and a right colorbar.
+    /// The label band above both the y ticks and a right colorbar, which also holds the title
+    /// of a value column right of the plot.
     pub(super) fn top_label_band(&self) -> f64 {
         self.y_label_band
             .max(self.colorbar.as_ref().map_or(0.0, |bar| bar.label_band()))
+            .max(
+                self.column
+                    .as_ref()
+                    .map_or(0.0, super::value_column::MeasuredColumn::title_band),
+            )
+    }
+
+    /// The room a value column right of the plot takes there, its gap included; 0 without
+    /// one.
+    pub(super) fn value_column(&self) -> f64 {
+        self.column
+            .as_ref()
+            .map_or(0.0, super::value_column::MeasuredColumn::right_band)
+    }
+
+    /// The room a value row takes above the plot, its gap included: the axes' own, or the
+    /// primary axes' above a twin's plot; 0 without one.
+    pub(super) fn value_row(&self) -> f64 {
+        self.column
+            .as_ref()
+            .map_or(0.0, super::value_column::MeasuredColumn::row_band)
+            + self.row_offset
+    }
+
+    /// Whether the panel has a y tick label column left of the plot: y tick labels, or the
+    /// title of a value row.
+    pub(super) fn has_y_column(&self) -> bool {
+        !self.y_labels.is_empty()
+            || self
+                .column
+                .as_ref()
+                .is_some_and(|column| column.row_title_width() > 0.0)
+    }
+
+    /// Where the room of a value column starts right of the plot's right edge: after the room
+    /// of direct labels and the colorbar. A column right of the plot comes with a category y
+    /// axis, so the panel has no twin, whose right ticks and colorbar would lie inside too.
+    fn column_inside(&self) -> f64 {
+        self.direct_reserve + self.right_colorbar
     }
 
     /// The rise of either the y ticks or the right colorbar's ticks.
@@ -731,9 +777,10 @@ impl PanelBands {
         self.heading.height_with_row(row)
     }
 
-    /// Everything above the plot: the header, the y label and the rise of the top y tick label.
+    /// Everything above the plot: the header, the y label, a value row and the rise of the top
+    /// y tick label.
     pub(super) fn above_with_row(&self, row: &LegendRow) -> f64 {
-        self.header_with_row(row) + self.top_label_band() + self.top_label_rise()
+        self.header_with_row(row) + self.top_label_band() + self.value_row() + self.top_label_rise()
     }
 
     /// Everything below the plot: the x tick label row and the x label row, or the bottom y
@@ -756,10 +803,12 @@ impl PanelBands {
         self.right_offset + self.beside_axis() + self.right_legend_offset
     }
 
-    /// Legends and colorbars outside this axis's tick column.
+    /// Legends, colorbars and a value column outside this axis's tick column, in that order
+    /// from the plot out: direct labels, the colorbar, the value column and the right legend.
     pub(super) fn beside_axis(&self) -> f64 {
-        if self.right_colorbar > 0.0 {
-            self.direct_reserve + self.right_colorbar + self.right_legend
+        let column = self.value_column();
+        if self.right_colorbar > 0.0 || column > 0.0 {
+            self.direct_reserve + self.right_colorbar + column + self.right_legend
         } else {
             self.direct_reserve.max(self.right_legend)
         }
@@ -833,10 +882,22 @@ pub(crate) fn measure_panel(
     };
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick)?;
     let (y_tick_ascent, y_tick_descent) = metrics(lib, &ytick)?;
+    // The title of a value column is set in the axis label style.
+    let column = input
+        .column
+        .map(|column| {
+            let style = styles.sized(theme, TextRole::Body, column.size);
+            super::value_column::MeasuredColumn::measure(column, style, y_tick_descent, lib)
+        })
+        .transpose()?;
+    let row_title = column
+        .as_ref()
+        .map_or(0.0, super::value_column::MeasuredColumn::row_title_width);
     let y_label_width = y_labels
         .iter()
         .map(|(_, label)| label.width())
-        .fold(0.0, f64::max);
+        .fold(0.0, f64::max)
+        .max(row_title);
 
     // How far the y tick label of a tick at the plot top reaches above it, and that of a tick
     // at the plot bottom below it.
@@ -879,7 +940,7 @@ pub(crate) fn measure_panel(
     } else {
         0.0
     };
-    let y_tick_column = if y_labels.is_empty() {
+    let y_tick_column = if y_labels.is_empty() && row_title <= 0.0 {
         0.0
     } else {
         y_label_width + Y_LABEL_GAP
@@ -923,6 +984,8 @@ pub(crate) fn measure_panel(
         right_colorbar,
         bottom_colorbar,
         colorbar,
+        column,
+        row_offset: 0.0,
         y_label_band,
         y_label_gap,
         label_rise,
@@ -989,6 +1052,12 @@ pub(crate) fn place_panel(
     } = *slot;
     let axis_below = bands.axis_below();
     let label_rise = bands.top_label_rise();
+    let (column_inside, column_room, value_row) = (
+        bands.column_inside(),
+        bands.value_column(),
+        bands.value_row(),
+    );
+    let has_y_column = bands.has_y_column();
     let PanelBands {
         heading,
         mut y_labels,
@@ -1016,7 +1085,8 @@ pub(crate) fn place_panel(
                     + bands.right_legend_offset
                     + super::placement::RIGHT_GAP
                     + bands.right_colorbar
-                    + if bands.right_colorbar > 0.0 {
+                    + column_room
+                    + if bands.right_colorbar > 0.0 || column_room > 0.0 {
                         bands.direct_reserve
                     } else {
                         0.0
@@ -1060,15 +1130,16 @@ pub(crate) fn place_panel(
         // Left-aligned with the left edge of the y tick label column.
         label.x = match input.axes {
             Layer::Primary(_) => {
-                if y_labels.is_empty() {
-                    plot.x
-                } else {
+                if has_y_column {
                     plot.x - Y_LABEL_GAP - y_label_width
+                } else {
+                    plot.x
                 }
             }
             Layer::Twin { .. } => plot.right() - label.width(),
         };
-        label.y = plot.y - label_rise - bands.y_label_gap;
+        // Above a value row, which sits on the rise of the top y tick label.
+        label.y = plot.y - label_rise - value_row - bands.y_label_gap;
     }
 
     let axis_bottom = if xlabel.is_some() {
@@ -1081,6 +1152,9 @@ pub(crate) fn place_panel(
     } else {
         axis_bottom
     };
+    let value_column = bands
+        .column
+        .map(|column| column.place(plot, column_inside, label_rise));
     let colorbar = bands.colorbar.map(|bar| {
         bar.place(
             plot,
@@ -1156,6 +1230,7 @@ pub(crate) fn place_panel(
         baseline: PlacedBaseline::on(&plot, baseline),
         frame,
         colorbar,
+        value_column,
     }
 }
 

@@ -33,7 +33,7 @@ mod point_labels;
 pub(crate) use panel::Layer;
 pub use panel::Panel;
 pub(crate) use point_labels::values_on_x;
-pub use point_labels::{Place, PointLabels};
+pub use point_labels::{Place, PointLabels, ValueColumn};
 pub(crate) mod pie;
 pub use pie::{PieAxesMut, PieOptions, PiePanel};
 mod render;
