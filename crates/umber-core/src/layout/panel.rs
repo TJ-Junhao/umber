@@ -19,7 +19,7 @@ use crate::error::quoted;
 use crate::model::Layer;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::text::{Lines, SceneFonts};
-use crate::{Align, Figure, Result};
+use crate::{Align, Figure, Result, Rgba, TickHighlight};
 
 /// Axis labels are one line.
 const AXIS_LABELS: Lines = Lines::One("axis labels");
@@ -603,6 +603,9 @@ pub(crate) struct PanelBands {
     pub(super) y_label_width: f64,
     /// The x tick labels at their ticks' positions, not yet placed.
     pub(super) x_labels: Vec<(NormalizedPos, Label)>,
+    /// The color of each x and y tick label, by its index in `x_labels` and `y_labels`
+    /// ([`tick_colors`]).
+    tick_colors: [Vec<Rgba>; 2],
     /// The x axis label, not yet placed; `None` when it is empty.
     xlabel: Option<Label>,
     /// The y axis label, not yet placed; `None` when it is empty.
@@ -870,7 +873,7 @@ pub(crate) fn measure_panel(
 
     // Tick labels; those of highlighted categories in SemiBold.
     let y_tick_size = f64::from(ytick.size);
-    let none = crate::TickHighlight::default();
+    let none = TickHighlight::default();
     let (x_highlight, y_highlight) = axes.cartesian().map_or((&none, &none), |axes| {
         (axes.x_tick_highlight(), axes.y_tick_highlight())
     });
@@ -884,6 +887,10 @@ pub(crate) fn measure_panel(
     } else {
         Vec::new()
     };
+    let tick_colors = [
+        tick_colors(theme, &resolved.x.ticks[..x_labels.len()], x_highlight),
+        tick_colors(theme, &resolved.y.ticks[..y_labels.len()], y_highlight),
+    ];
     let (tick_ascent, tick_descent) = metrics(lib, &styles.tick)?;
     let (y_tick_ascent, y_tick_descent) = metrics(lib, &ytick)?;
     // The title of a value column is set in the axis label style.
@@ -1020,6 +1027,7 @@ pub(crate) fn measure_panel(
         y_labels,
         y_label_width,
         x_labels,
+        tick_colors,
         xlabel,
         ylabel,
         tick_ascent,
@@ -1027,6 +1035,23 @@ pub(crate) fn measure_panel(
         xlabel_ascent,
         xlabel_descent,
     })
+}
+
+/// The color of the label of each of `ticks`, the ticks of one axis whose highlighted categories
+/// are `highlight`: the highlight color, resolved against `theme`, for the label of a
+/// highlighted category, and the theme's muted color for every other label.
+fn tick_colors(theme: &crate::Theme, ticks: &[AxisTick], highlight: &TickHighlight) -> Vec<Rgba> {
+    let highlighted = theme.emphasis(highlight.color());
+    ticks
+        .iter()
+        .map(|tick| {
+            if highlight.contains(&tick.label) {
+                highlighted
+            } else {
+                theme.muted_color()
+            }
+        })
+        .collect()
 }
 
 /// The most by which x tick labels may inset one side of the plot area on a canvas `width` pt
@@ -1067,6 +1092,7 @@ pub(crate) fn place_panel(
         mut y_labels,
         y_label_width,
         mut x_labels,
+        tick_colors: [x_tick_colors, y_tick_colors],
         mut xlabel,
         mut ylabel,
         tick_ascent,
@@ -1229,13 +1255,8 @@ pub(crate) fn place_panel(
         ylabel,
         x_tick_labels: x_labels.into_iter().map(|(_, label)| label).collect(),
         y_tick_labels: y_labels.into_iter().map(|(_, label)| label).collect(),
-        tick_highlight: input
-            .axes
-            .cartesian()
-            .map_or([input.theme.muted_color(); 2], |axes| {
-                [axes.x_tick_highlight(), axes.y_tick_highlight()]
-                    .map(|highlight| input.theme.emphasis(highlight.color()))
-            }),
+        x_tick_colors,
+        y_tick_colors,
         y_grid,
         x_grid,
         baseline: PlacedBaseline::on(&plot, baseline),

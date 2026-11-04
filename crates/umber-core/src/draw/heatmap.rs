@@ -48,7 +48,7 @@ const LABEL_HINT: &str = "enlarge the figure, write fewer decimals with format, 
 const EDGE_WIDTH: f32 = 0.5;
 
 /// The width of the outline of a cell ([`HeatmapOptions::outline`]), in points, when the cell
-/// is at least that wide and tall; a smaller cell is outlined at its own smaller side.
+/// is at least twice that wide and tall; a smaller cell is outlined at half its smaller side.
 ///
 /// [`HeatmapOptions::outline`]: crate::HeatmapOptions::outline
 const OUTLINE_WIDTH: f64 = 1.5;
@@ -275,10 +275,12 @@ fn edges(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMark)
 /// The outlines of the outlined cells of `mark` on the axes `resolved`, mapped by `maps`
 /// ([`HeatmapOptions::outline`](crate::HeatmapOptions::outline)), row by row as its values
 /// are, NaN cells included: each a closed rectangle stroked in the outline color, resolved
-/// against `theme`, whose outer edge lies on its cell's edges. The stroke is [`OUTLINE_WIDTH`]
-/// wide, or as wide as the cell's smaller side when that is less, so it never reaches past the
-/// cell. Nothing without an outline or when either axis is not a category axis, which the
-/// model rules out.
+/// against `theme`, whose outer edge lies on its cell's edges, so it never reaches past the
+/// cell. The stroke is [`OUTLINE_WIDTH`] wide, or half the cell's smaller side when that is
+/// less: the rectangle the stroke follows then keeps half the cell's size, never collapsing to
+/// a point, and on a cell less than twice [`OUTLINE_WIDTH`] across the outline covers the whole
+/// cell in the outline color. Nothing without an outline or when either axis is not a category
+/// axis, which the model rules out.
 fn outlines(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMark) -> Vec<Item> {
     let (AxisScale::Category(columns), AxisScale::Category(rows)) =
         (&resolved.x.scale, &resolved.y.scale)
@@ -301,7 +303,7 @@ fn outlines(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMa
             let [left, top, right, bottom] = cell_bounds(maps, (columns, rows), (r, c));
             let (x0, x1) = (left.min(right), left.max(right));
             let (y0, y1) = (top.min(bottom), top.max(bottom));
-            let width = OUTLINE_WIDTH.min(x1 - x0).min(y1 - y0);
+            let width = OUTLINE_WIDTH.min((x1 - x0).min(y1 - y0) / 2.0);
             let inset = width / 2.0;
             let mut path = Path::new();
             path.move_to(point(x0 + inset, y0 + inset));
@@ -324,34 +326,34 @@ fn outlines(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMa
 }
 
 /// The cells of `mark` appended to `items`: as one image when its options draw it as one
-/// ([`Render`](crate::Render)), else as opaque fills; then its cell edges ([`edges`]) and its
-/// outlines ([`outlines`]), as vector strokes either way. Nothing without a color scale (no
-/// finite value on the axes).
+/// ([`Render`](crate::Render)), else as opaque fills, and none without a color scale (no finite
+/// value on the axes); then its cell edges ([`edges`]) and its outlines ([`outlines`]), as
+/// vector strokes either way, with or without a color scale, so that an outline marks a blank
+/// cell whatever the other cells hold.
 pub(super) fn heatmap_items(
     context: &MarkContext<'_>,
     resolved: &Resolved,
     mark: &HeatmapMark,
     items: &mut Vec<Item>,
 ) {
-    let Some(scale) = &resolved.color else {
-        return;
-    };
     let count = mark
         .x_categories()
         .len()
         .saturating_mul(mark.y_categories().len());
-    if mark.options().render.draws_image(count, true) {
-        items.extend(image(context.maps, resolved, mark, scale));
-    } else {
-        items.extend(
-            cells(context.maps, resolved, mark, scale)
-                .iter()
-                .map(|cell| Item::Fill {
-                    path: cell_path(cell.bounds, cell.reach),
-                    paint: Paint::Solid(cell.color),
-                    rule: FillRule::NonZero,
-                }),
-        );
+    if let Some(scale) = &resolved.color {
+        if mark.options().render.draws_image(count, true) {
+            items.extend(image(context.maps, resolved, mark, scale));
+        } else {
+            items.extend(
+                cells(context.maps, resolved, mark, scale)
+                    .iter()
+                    .map(|cell| Item::Fill {
+                        path: cell_path(cell.bounds, cell.reach),
+                        paint: Paint::Solid(cell.color),
+                        rule: FillRule::NonZero,
+                    }),
+            );
+        }
     }
     items.extend(edges(context.theme, context.maps, resolved, mark));
     items.extend(outlines(context.theme, context.maps, resolved, mark));

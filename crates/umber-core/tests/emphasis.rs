@@ -553,7 +553,8 @@ fn outlines_lie_inside_their_cells() {
 
 #[test]
 fn outlines_of_small_cells_stay_inside_them() {
-    // 1 pt tall cells: the stroke narrows to the cell, so it covers no neighbour.
+    // 1 pt tall cells: the stroke narrows to half the cell, so it covers no neighbour and the
+    // rectangle it follows keeps half the cell's height.
     let y: Vec<String> = (0..200).map(|i| format!("r{i}")).collect();
     let y: Vec<&str> = y.iter().map(String::as_str).collect();
     let mut outline = vec![false; 200];
@@ -576,7 +577,11 @@ fn outlines_of_small_cells_stay_inside_them() {
     let outlines = strokes(&items);
     assert_eq!(outlines.len(), 1);
     let (corners, _, width) = &outlines[0];
-    assert!((f64::from(*width) - h).abs() < 1e-3, "{width} {h}");
+    assert!((f64::from(*width) - h / 2.0).abs() < 1e-3, "{width} {h}");
+    let ys: Vec<f64> = corners.iter().map(|p| p.1).collect();
+    let span =
+        ys.iter().copied().fold(f64::MIN, f64::max) - ys.iter().copied().fold(f64::MAX, f64::min);
+    assert!((span - h / 2.0).abs() < 1e-3, "{corners:?}");
     let cell_top = top + 50.0 * h;
     for (_, y) in corners {
         assert!(
@@ -586,6 +591,161 @@ fn outlines_of_small_cells_stay_inside_them() {
             cell_top + h
         );
     }
+}
+
+/// The figure of a 200 by 200 heatmap of ones with 1.05 pt cells and no colorbar, the cell at
+/// row 100, column 100 outlined if `outlined`.
+fn tiny_cells(outlined: bool) -> Figure {
+    let names: Vec<String> = (0..200).map(|i| format!("c{i}")).collect();
+    let mut outline = vec![false; 200 * 200];
+    outline[100 * 200 + 100] = outlined;
+    let mut f = Figure::new(3.6, 3.533486111111111, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Category, ScaleKind::Category)
+        .unwrap()
+        .heatmap(
+            &names,
+            &names,
+            &vec![1.0; 200 * 200],
+            HeatmapOptions {
+                outline: Some(Arc::from(outline)),
+                ..HeatmapOptions::default()
+            },
+        )
+        .unwrap()
+        .colorbar(umber_core::ColorbarOptions {
+            position: Some(umber_core::ColorbarPosition::None),
+            ..umber_core::ColorbarOptions::default()
+        })
+        .unwrap();
+    f
+}
+
+#[test]
+fn an_outline_on_a_tiny_cell_shows_in_the_outline_color() {
+    let f = tiny_cells(true);
+    let items = marks(&f);
+    let outline: Vec<_> = strokes(&items);
+    assert_eq!(outline.len(), 1);
+    let (corners, color, width) = &outline[0];
+    let xs: Vec<f64> = corners.iter().map(|p| p.0).collect();
+    let (x0, x1) = (
+        xs.iter().copied().fold(f64::MAX, f64::min),
+        xs.iter().copied().fold(f64::MIN, f64::max),
+    );
+    // The cells are about 1.05 pt: the rectangle keeps half of that, and the stroke of half the
+    // cell covers the whole cell.
+    let side = 2.0 * f64::from(*width);
+    assert!(side > 1.0 && side < 1.1, "{side}");
+    assert!((x1 - x0 - side / 2.0).abs() < 1e-3, "{corners:?}");
+    let ys: Vec<f64> = corners.iter().map(|p| p.1).collect();
+    let center = (
+        (x0 + x1) / 2.0,
+        (ys.iter().copied().fold(f64::MAX, f64::min) + ys.iter().copied().fold(f64::MIN, f64::max))
+            / 2.0,
+    );
+    assert_ne!(f.to_png(72).unwrap(), tiny_cells(false).to_png(72).unwrap());
+    // At 1200 dpi the cell is about 17 pixels across; its center pixel is the outline color.
+    let dpi = 1200;
+    let pixels = pdf_check::image::decode_rgba8(&f.to_png(dpi).unwrap()).unwrap();
+    let scale = dpi as f64 / 72.0;
+    let actual = pixels.at((center.0 * scale) as u32, (center.1 * scale) as u32);
+    let expected = [color.r, color.g, color.b, 255];
+    assert_eq!(*color, Theme::pigment().emphasis_color());
+    assert!(
+        actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 3),
+        "outline pixel {actual:?}, expected {expected:?}"
+    );
+}
+
+/// The strokes of every group of `scene`, depth first.
+fn all_strokes(items: &[Item]) -> Vec<Stroke> {
+    let mut out = Vec::new();
+    for item in items {
+        match item {
+            Item::Group { items, .. } => out.extend(all_strokes(items)),
+            other => out.extend(strokes(std::slice::from_ref(other))),
+        }
+    }
+    out
+}
+
+#[test]
+fn an_all_nan_heatmap_keeps_its_edges_and_outlines() {
+    for render in [Render::Vector, Render::Raster] {
+        let f = heatmap(
+            &["a", "b"],
+            &["p", "q"],
+            &[f64::NAN; 4],
+            HeatmapOptions {
+                outline: Some(Arc::from([true, false, false, false].as_slice())),
+                edges: true,
+                render,
+                ..HeatmapOptions::default()
+            },
+        );
+        let items = marks(&f);
+        assert!(
+            !items
+                .iter()
+                .any(|item| matches!(item, Item::Fill { .. } | Item::Image { .. })),
+            "{render:?}: no cell is drawn"
+        );
+        let kinds: Vec<_> = strokes(&items)
+            .iter()
+            .map(|(_, color, width)| (*color, *width))
+            .collect();
+        let theme = Theme::pigment();
+        assert_eq!(
+            kinds,
+            [
+                (theme.grid_color(), 0.5),
+                (theme.grid_color(), 0.5),
+                (theme.emphasis_color(), 1.5)
+            ],
+            "{render:?}"
+        );
+    }
+}
+
+#[test]
+fn an_all_nan_heatmap_keeps_its_outline_whatever_its_color_group_holds() {
+    // The outline of the blank heatmap on the right does not depend on whether the heatmap it
+    // shares colors with on the left has finite values.
+    let outlines = |left: f64| {
+        let grid = Grid::new(1, 2).unwrap().with_share_color(Share::All);
+        let mut f = Figure::with_grid(8.0, 3.0, Theme::pigment(), grid).unwrap();
+        f.add_axes_at(at(0, 0), ScaleKind::Category, ScaleKind::Category)
+            .unwrap()
+            .heatmap(
+                &names(&["a"]),
+                &names(&["p"]),
+                &[left],
+                HeatmapOptions::default(),
+            )
+            .unwrap();
+        f.add_axes_at(at(0, 1), ScaleKind::Category, ScaleKind::Category)
+            .unwrap()
+            .heatmap(
+                &names(&["a", "b"]),
+                &names(&["p"]),
+                &[f64::NAN; 2],
+                HeatmapOptions {
+                    outline: Some(Arc::from([false, true].as_slice())),
+                    ..HeatmapOptions::default()
+                },
+            )
+            .unwrap();
+        let scene = f.to_scene(FontLibrary::global()).unwrap();
+        all_strokes(&scene.items)
+            .into_iter()
+            .filter(|(_, color, width)| {
+                *color == Theme::pigment().emphasis_color() && *width == 1.5
+            })
+            .collect::<Vec<_>>()
+    };
+    let (finite, blank) = (outlines(1.0), outlines(f64::NAN));
+    assert_eq!(finite.len(), 1, "{finite:?}");
+    assert_eq!(blank.len(), 1, "{blank:?}");
 }
 
 #[test]

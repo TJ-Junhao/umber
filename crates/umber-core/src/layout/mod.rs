@@ -305,11 +305,12 @@ pub(crate) struct Layout {
     pub x_tick_labels: Vec<Label>,
     /// The y tick labels, to the left of the plot area.
     pub y_tick_labels: Vec<Label>,
-    /// The colors of the highlighted x and y tick labels
-    /// ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)): the tick labels set in
-    /// the [`highlighted_style`], SemiBold, which no other tick label is. Every other tick label
-    /// is drawn in the theme's muted color.
-    pub tick_highlight: [Rgba; 2],
+    /// The color of each x tick label, by its index in `x_tick_labels`: the highlight color for
+    /// a highlighted category ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)),
+    /// the theme's muted color otherwise.
+    pub x_tick_colors: Vec<Rgba>,
+    /// The color of each y tick label, by its index in `y_tick_labels`, as for `x_tick_colors`.
+    pub y_tick_colors: Vec<Rgba>,
     /// The y coordinates of horizontal gridlines, excluding a drawn baseline's position.
     pub y_grid: Vec<f64>,
     /// The x coordinates of vertical gridlines, excluding a drawn baseline's position;

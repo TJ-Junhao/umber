@@ -7,7 +7,7 @@ use crate::geometry::{Path, Point};
 use crate::layout::{Label, Layout, TextBlock};
 use crate::resolve::ValueAxis;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle, TextItem};
-use crate::{Dash, GridLines, Rgba, Theme, Weight};
+use crate::{Dash, GridLines, Rgba, Theme};
 
 /// The straight path from `from` to `to`.
 pub(super) fn segment(from: Point, to: Point) -> Path {
@@ -107,20 +107,16 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     }
 
     let muted = theme.muted_color();
-    // A highlighted tick label is the one set in SemiBold, in its axis' highlight color.
-    let [x_highlight, y_highlight] = layout.tick_highlight;
-    let tick_color = |label: &Label, highlight: Rgba| {
-        if label.style.weight == Weight::SemiBold {
-            highlight
-        } else {
-            muted
+    // Each tick label in its own color: muted, or the highlight color of its category.
+    let ticks = [
+        (&layout.y_tick_labels, &layout.y_tick_colors),
+        (&layout.x_tick_labels, &layout.x_tick_colors),
+    ];
+    for (labels, colors) in ticks {
+        debug_assert_eq!(labels.len(), colors.len(), "one color per tick label");
+        for (label, &color) in labels.iter().zip(colors) {
+            items.push(text(label, color));
         }
-    };
-    for label in &layout.y_tick_labels {
-        items.push(text(label, tick_color(label, y_highlight)));
-    }
-    for label in &layout.x_tick_labels {
-        items.push(text(label, tick_color(label, x_highlight)));
     }
     if let Some(title) = &layout.title {
         items.extend(block_items(title, theme.text_color()));
