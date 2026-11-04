@@ -1,9 +1,114 @@
 //! The tick settings of one linear, log or time axis: explicit tick positions, with or without
 //! their own labels, and the tick label format, with the rule that keeps given labels and a
-//! format apart.
+//! format apart. Also the highlighted categories of a category axis.
 
 use super::validation::{check_tick_labels, check_tick_positions, check_time_tick_positions};
-use crate::{Error, Instant, NumberStyle, Result, ScaleKind, Tick, TickFormat, Transform};
+use crate::{
+    ColorSpec, Error, Instant, NumberStyle, Result, ScaleKind, Tick, TickFormat, Transform,
+};
+
+/// The highlighted categories of one category axis, set with
+/// [`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight) or
+/// [`AxesMut::ytick_highlight`](crate::AxesMut::ytick_highlight): their tick labels are drawn in
+/// the SemiBold face of the body font, in `color`; every other label is unchanged. Read it with
+/// [`Axes::x_tick_highlight`](crate::Axes::x_tick_highlight) and
+/// [`Axes::y_tick_highlight`](crate::Axes::y_tick_highlight).
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{ColorSpec, Figure, ScaleKind, Theme};
+///
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+/// assert!(axes.x_tick_highlight().is_empty());
+/// axes.xtick_highlight(vec!["North".to_owned()], ColorSpec::AUTO)?;
+/// assert_eq!(axes.x_tick_highlight().categories(), ["North"]);
+/// assert_eq!(axes.x_tick_highlight().color(), ColorSpec::AUTO);
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct TickHighlight {
+    /// The highlighted categories, as given.
+    categories: Vec<String>,
+    /// Their color; [`ColorSpec::AUTO`] for the theme's emphasis color.
+    color: ColorSpec,
+}
+
+impl Default for TickHighlight {
+    fn default() -> Self {
+        TickHighlight {
+            categories: Vec::new(),
+            color: ColorSpec::AUTO,
+        }
+    }
+}
+
+impl TickHighlight {
+    /// The highlight of `categories` in `color`; no category for none.
+    pub(super) fn new(categories: Vec<String>, color: ColorSpec) -> Self {
+        TickHighlight { categories, color }
+    }
+
+    /// The highlighted categories, in the order given; empty when no label is highlighted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorSpec, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// axes.ytick_highlight(vec!["b".to_owned(), "a".to_owned()], ColorSpec::AUTO)?;
+    /// assert_eq!(axes.y_tick_highlight().categories(), ["b", "a"]);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn categories(&self) -> &[String] {
+        &self.categories
+    }
+
+    /// The color of the highlighted labels; [`ColorSpec::AUTO`] for the theme's emphasis color
+    /// ([`Theme::emphasis_color`](crate::Theme::emphasis_color)).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// axes.xtick_highlight(vec!["a".to_owned()], ColorSpec::Fixed(Rgba::BLUE))?;
+    /// assert_eq!(axes.x_tick_highlight().color(), ColorSpec::Fixed(Rgba::BLUE));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn color(&self) -> ColorSpec {
+        self.color
+    }
+
+    /// Whether no label is highlighted.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// assert!(axes.x_tick_highlight().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.categories.is_empty()
+    }
+
+    /// Whether the category `name` is highlighted.
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.categories.iter().any(|category| category == name)
+    }
+}
 
 /// Tick positions set explicitly on one axis, in place of the automatic ticks. Read them with
 /// [`Axes::x_ticks`](crate::Axes::x_ticks) and [`Axes::y_ticks`](crate::Axes::y_ticks).

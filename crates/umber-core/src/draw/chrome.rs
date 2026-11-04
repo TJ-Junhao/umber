@@ -7,7 +7,7 @@ use crate::geometry::{Path, Point};
 use crate::layout::{Label, Layout, TextBlock};
 use crate::resolve::ValueAxis;
 use crate::scene::{Item, LineCap, LineJoin, StrokeStyle, TextItem};
-use crate::{Dash, GridLines, Rgba, Theme};
+use crate::{Dash, GridLines, Rgba, Theme, Weight};
 
 /// The straight path from `from` to `to`.
 pub(super) fn segment(from: Point, to: Point) -> Path {
@@ -107,8 +107,20 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     }
 
     let muted = theme.muted_color();
-    for label in layout.y_tick_labels.iter().chain(&layout.x_tick_labels) {
-        items.push(text(label, muted));
+    // A highlighted tick label is the one set in SemiBold, in its axis' highlight color.
+    let [x_highlight, y_highlight] = layout.tick_highlight;
+    let tick_color = |label: &Label, highlight: Rgba| {
+        if label.style.weight == Weight::SemiBold {
+            highlight
+        } else {
+            muted
+        }
+    };
+    for label in &layout.y_tick_labels {
+        items.push(text(label, tick_color(label, y_highlight)));
+    }
+    for label in &layout.x_tick_labels {
+        items.push(text(label, tick_color(label, x_highlight)));
     }
     if let Some(title) = &layout.title {
         items.extend(block_items(title, theme.text_color()));

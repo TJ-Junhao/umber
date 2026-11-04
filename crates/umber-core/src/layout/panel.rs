@@ -868,15 +868,19 @@ pub(crate) fn measure_panel(
     let row = legend.header_within(span.row_left, span.row_right);
     let heading = Header::measure(axes.title_text(), axes.subtitle_text(), &styles, &row, lib)?;
 
-    // Tick labels.
+    // Tick labels; those of highlighted categories in SemiBold.
     let y_tick_size = f64::from(ytick.size);
+    let none = crate::TickHighlight::default();
+    let (x_highlight, y_highlight) = axes.cartesian().map_or((&none, &none), |axes| {
+        (axes.x_tick_highlight(), axes.y_tick_highlight())
+    });
     let y_labels = if show_labels[1] {
-        labels.ticks(&resolved.y.ticks, ytick)?
+        labels.ticks(&resolved.y.ticks, ytick, y_highlight)?
     } else {
         Vec::new()
     };
     let x_labels = if show_labels[0] {
-        labels.ticks(&resolved.x.ticks, styles.tick)?
+        labels.ticks(&resolved.x.ticks, styles.tick, x_highlight)?
     } else {
         Vec::new()
     };
@@ -1225,6 +1229,13 @@ pub(crate) fn place_panel(
         ylabel,
         x_tick_labels: x_labels.into_iter().map(|(_, label)| label).collect(),
         y_tick_labels: y_labels.into_iter().map(|(_, label)| label).collect(),
+        tick_highlight: input
+            .axes
+            .cartesian()
+            .map_or([input.theme.muted_color(); 2], |axes| {
+                [axes.x_tick_highlight(), axes.y_tick_highlight()]
+                    .map(|highlight| input.theme.emphasis(highlight.color()))
+            }),
         y_grid,
         x_grid,
         baseline: PlacedBaseline::on(&plot, baseline),

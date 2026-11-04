@@ -662,26 +662,23 @@ fn plan(
     let header = figure_header(figure, panels, lib)?;
     header.check(figure, context)?;
     let tick = layout::TickFont::new(lib, theme)?;
+    // The tick labels of each axis, those of its highlighted categories in SemiBold.
     let axis_ticks: Vec<_> = panels
         .iter()
         .map(|panel| {
+            let axes = panel.axes.cartesian();
+            let font = |size: fn(&Axes) -> crate::SizeSpec,
+                        highlight: fn(&Axes) -> &crate::TickHighlight| {
+                let font =
+                    layout::TickFont::sized(lib, theme, axes.map_or(crate::SizeSpec::Auto, size))?;
+                match axes {
+                    Some(axes) => font.highlighted(highlight(axes)),
+                    None => Ok(font),
+                }
+            };
             Ok([
-                layout::TickFont::sized(
-                    lib,
-                    theme,
-                    panel
-                        .axes
-                        .cartesian()
-                        .map_or(crate::SizeSpec::Auto, Axes::xtick_size),
-                )?,
-                layout::TickFont::sized(
-                    lib,
-                    theme,
-                    panel
-                        .axes
-                        .cartesian()
-                        .map_or(crate::SizeSpec::Auto, Axes::ytick_size),
-                )?,
+                font(Axes::xtick_size, Axes::x_tick_highlight)?,
+                font(Axes::ytick_size, Axes::y_tick_highlight)?,
             ])
         })
         .collect::<Result<_>>()?;
@@ -1999,13 +1996,15 @@ fn scene_with_labels(
 
 /// The scene of `figure` laid out and drawn once, with the records `panels` of its panels, as
 /// [`scene`] describes, and where the automatic value labels of each panel went, in the order
-/// of the panels. The scene is the first error of a value column instead, when one has values
-/// that cannot be written ([`point_labels::column_items`]): the pass still places every
+/// of the panels. The scene is an error instead when a highlighted category's label is left
+/// out ([`check_tick_highlights`]), or else the first error of a value column, when one has
+/// values that cannot be written ([`point_labels::column_items`]): the pass still places every
 /// automatic label, so that the caller raises that error only from a settled pass.
 ///
 /// # Errors
 ///
-/// As [`scene`], but for the errors of value columns.
+/// As [`scene`], but for the errors judged against the settled layout; and as
+/// [`check_tick_highlights`] for a highlighted category that is not a category of its axis.
 fn draw_scene(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -2027,12 +2026,14 @@ fn draw_scene(
         return Ok((Ok(scene), Vec::new()));
     }
     let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
+    // Judged against the settled layout only, as the errors of value columns: an earlier pass
+    // may lay the plot out smaller and thin out a highlighted label that the last one shows.
+    let mut settled_error = check_tick_highlights(figure, panels, &planned, context)?;
     let mut layers = draw_layers(figure, panels, &planned, fonts, context)?;
     let mut placements: Vec<point_labels::Placement> = std::iter::repeat_with(Default::default)
         .take(panels.len())
         .collect();
     let mut points = place_point_labels(figure, panels, &planned, &layers, context)?;
-    let mut column_error = None;
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2084,7 +2085,7 @@ fn draw_scene(
             Ok(column) => column,
             Err(err) => {
                 // Judged against the settled layout only: see `scene_with_labels`.
-                column_error.get_or_insert_with(|| in_cell(figure, panel.axes, err));
+                settled_error.get_or_insert_with(|| in_cell(figure, panel.axes, err));
                 None
             }
         };
@@ -2157,7 +2158,7 @@ fn draw_scene(
     for notes in annotations {
         scene.push(notes);
     }
-    Ok((column_error.map_or(Ok(scene), Err), placements))
+    Ok((settled_error.map_or(Ok(scene), Err), placements))
 }
 
 /// What one Cartesian layer of a panel draws under its point labels: its marks, the values
@@ -2285,6 +2286,103 @@ fn place_point_labels(
         }
     }
     Ok(placed)
+}
+
+/// Checks the highlighted categories of every axes of `figure`, whose records are `panels`,
+/// laid out as `planned` ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)).
+/// A twin's x axis is its parent's, and its y axis is numeric, so only primary axes are
+/// checked. Errors are named by the axes' cell, x before y, and in order of the categories.
+///
+/// Returns `Error::Style` under `context` for the first highlighted category whose label the
+/// automatic labels of a crowded axis leave out (they show every k-th category), since its
+/// highlight would not show; `None` when every highlighted label is drawn.
+///
+/// # Errors
+///
+/// `Error::Data` under `context` for the first highlighted name that is not a category of its
+/// axis, before any label is judged.
+fn check_tick_highlights(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    planned: &FigurePlan,
+    context: &'static str,
+) -> Result<Option<Error>> {
+    let axes: Vec<_> = panels
+        .iter()
+        .zip(&planned.panels)
+        .filter_map(|(panel, (resolved, _))| match panel.axes {
+            Layer::Primary(crate::Panel::Cartesian { axes, .. }) => Some((panel, axes, resolved)),
+            Layer::Primary(crate::Panel::Pie(_)) | Layer::Twin { .. } => None,
+        })
+        .flat_map(|(panel, axes, resolved)| {
+            [
+                (panel, "x", axes.x_tick_highlight(), &resolved.x),
+                (panel, "y", axes.y_tick_highlight(), &resolved.y),
+            ]
+        })
+        .filter_map(|(panel, side, highlight, axis)| match &axis.scale {
+            resolve::AxisScale::Category(scale) if !highlight.is_empty() => {
+                Some((panel, side, highlight, axis, scale))
+            }
+            _ => None,
+        })
+        .collect();
+    for &(panel, side, highlight, _, scale) in &axes {
+        if let Some(name) = highlight
+            .categories()
+            .iter()
+            .find(|name| scale.index_of(name).is_none())
+        {
+            let err = Error::data(
+                context,
+                format!(
+                    "{side}tick_highlight() names {}, which is not a category of the {side} axis.",
+                    crate::error::quoted(name)
+                ),
+            )
+            .with_hint("pass names of the axis' categories, exactly as the marks give them.");
+            return Err(in_cell(figure, panel.axes, err));
+        }
+    }
+    for &(panel, side, highlight, axis, scale) in &axes {
+        let shown = |name: &String| axis.ticks.iter().any(|tick| tick.label == *name);
+        let Some(name) = highlight.categories().iter().find(|name| !shown(name)) else {
+            continue;
+        };
+        let index = |tick: &resolve::AxisTick| scale.index_of(&tick.label).unwrap_or(0);
+        let labelled = match axis.ticks.as_slice() {
+            [first, second, ..] => format!(
+                "every {} category",
+                ordinal(index(second).saturating_sub(index(first)))
+            ),
+            _ => "only its first category".to_owned(),
+        };
+        let err = Error::style(
+            context,
+            format!(
+                "the {side} axis labels {labelled} to keep its labels apart, which leaves out \
+                 the highlighted {}.",
+                crate::error::quoted(name)
+            ),
+        )
+        .with_hint(match side {
+            "x" => "enlarge the figure, or set a smaller tick label size with xtick_labels().",
+            _ => "enlarge the figure, or set a smaller tick label size with ytick_labels().",
+        });
+        return Ok(Some(in_cell(figure, panel.axes, err)));
+    }
+    Ok(None)
+}
+
+/// `n` as an English ordinal: `1st`, `2nd`, `3rd`, `4th`, `11th`, `22nd`.
+fn ordinal(n: usize) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (1, hundredth) if hundredth != 11 => "st",
+        (2, hundredth) if hundredth != 12 => "nd",
+        (3, hundredth) if hundredth != 13 => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
 }
 
 /// `err`, an error of the axes `axes` of `figure`, naming the axes' top-left cell first on a

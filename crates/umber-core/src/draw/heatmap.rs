@@ -10,19 +10,26 @@
 //! Drawn as one image ([`Render`](crate::Render)), a heatmap is one pixel per pair of category
 //! bands from its first to its last category on each axis, over exactly those bands: a band of
 //! another heatmap's category between them, and an empty cell, is a transparent pixel.
+//!
+//! Over its cells, in either form, a heatmap draws its cell edges and then its outlines as
+//! vector strokes on the same cell geometry ([`cell_bounds`]): the edges at the boundaries
+//! between neighbouring bands of its extent, the outlines as rectangles inside the edges of
+//! their cells. Values come last, in a group of their own ([`annotations`]).
 
 use super::MarkContext;
 use super::cells::{CLEAR, Reach, cell_path, image_item, reach};
-use super::chrome::text;
-use super::mapping::AxisMaps;
+use super::chrome::{segment, text};
+use super::contrast::relative_luminance;
+use super::mapping::{AxisMaps, point};
 use crate::color_scale::ResolvedColorScale;
 use std::collections::HashSet;
 
 use crate::error::quoted;
+use crate::geometry::Path;
 use crate::layout::{Label, Layout, centered_tick_label, widths};
 use crate::model::HeatmapMark;
 use crate::resolve::{AxisScale, Resolved, ResolvedMark};
-use crate::scene::{FillRule, Item, Paint, Rect};
+use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, Rect, StrokeStyle};
 use crate::text::SceneFonts;
 use crate::{CategoryScale, Error, Result, Rgba, Theme, TickFormat};
 
@@ -34,6 +41,17 @@ const FIT_TOLERANCE: f64 = 1e-6;
 /// The hint of a heatmap whose labels do not fit its cells.
 const LABEL_HINT: &str = "enlarge the figure, write fewer decimals with format, or pass \
                           annotate=False.";
+
+/// The width of the lines between neighbouring cells ([`HeatmapOptions::edges`]), in points.
+///
+/// [`HeatmapOptions::edges`]: crate::HeatmapOptions::edges
+const EDGE_WIDTH: f32 = 0.5;
+
+/// The width of the outline of a cell ([`HeatmapOptions::outline`]), in points, when the cell
+/// is at least that wide and tall; a smaller cell is outlined at its own smaller side.
+///
+/// [`HeatmapOptions::outline`]: crate::HeatmapOptions::outline
+const OUTLINE_WIDTH: f64 = 1.5;
 
 /// The text color on a cell whose black text contrasts more with it than white text would.
 const DARK_TEXT: Rgba = Rgba {
@@ -106,19 +124,13 @@ fn cells(
             let Some((value, color)) = at(r, c) else {
                 continue;
             };
-            let ((left, right), (top, bottom)) = (columns.band(c), rows.band(r));
             let has_right = at(r, c + 1).is_some();
             let has_below = at(r + 1, c).is_some();
             cells.push(Cell {
                 at: (r, c),
                 value,
                 color,
-                bounds: [
-                    maps.x.plot_at(left),
-                    maps.y.plot_at(top),
-                    maps.x.plot_at(right),
-                    maps.y.plot_at(bottom),
-                ],
+                bounds: cell_bounds(maps, (columns, rows), (r, c)),
                 reach: Reach {
                     right: if has_right { reach_right } else { 0.0 },
                     down: if has_below { reach_down } else { 0.0 },
@@ -128,6 +140,31 @@ fn cells(
         }
     }
     cells
+}
+
+/// The left, top, right and bottom edges, in plot points, of the cell on the band of the row `r`
+/// of `rows` and the band of the column `c` of `columns`, the category axes, mapped onto the
+/// plot by `maps`. Cells, cell edges and outlines all lie on these edges.
+fn cell_bounds(
+    maps: AxisMaps,
+    (columns, rows): (&CategoryScale, &CategoryScale),
+    (r, c): (usize, usize),
+) -> [f64; 4] {
+    let ((left, right), (top, bottom)) = (columns.band(c), rows.band(r));
+    [
+        maps.x.plot_at(left),
+        maps.y.plot_at(top),
+        maps.x.plot_at(right),
+        maps.y.plot_at(bottom),
+    ]
+}
+
+/// The indices of the bands from the first to the last category of one mark on an axis, given
+/// [`mark_indices`] of that axis; `None` when the mark has none of its categories.
+fn span(indices: &[Option<usize>]) -> Option<std::ops::Range<usize>> {
+    let first = indices.iter().position(Option::is_some)?;
+    let end = indices.iter().rposition(Option::is_some)? + 1;
+    Some(first..end)
 }
 
 /// For each index of the category axis `axis`, the index of that category among `names`, the
@@ -159,11 +196,6 @@ fn image(
     };
     let column_at = mark_indices(columns, mark.x_categories());
     let row_at = mark_indices(rows, mark.y_categories());
-    let span = |indices: &[Option<usize>]| {
-        let first = indices.iter().position(Option::is_some)?;
-        let end = indices.iter().rposition(Option::is_some)? + 1;
-        Some(first..end)
-    };
     let (x_span, y_span) = (span(&column_at)?, span(&row_at)?);
     let width = mark.x_categories().len();
     let color = |row: Option<usize>, column: Option<usize>| {
@@ -178,20 +210,123 @@ fn image(
                 .map(move |&column| color(row, column).unwrap_or(CLEAR))
         })
         .collect();
-    let (left, top) = (columns.band(x_span.start).0, rows.band(y_span.start).0);
-    let (right, bottom) = (columns.band(x_span.end - 1).1, rows.band(y_span.end - 1).1);
-    let bounds = [
-        maps.x.plot_at(left),
-        maps.y.plot_at(top),
-        maps.x.plot_at(right),
-        maps.y.plot_at(bottom),
-    ];
+    let bounds = extent(maps, (columns, rows), (&x_span, &y_span));
     image_item(bounds, bounds, (x_span.len(), y_span.len()), pixels)
 }
 
+/// The left, top, right and bottom edges, in plot points, of the bands `x_span` of `columns`
+/// and `y_span` of `rows`, which are not empty: the outer edges of the cells over them.
+fn extent(
+    maps: AxisMaps,
+    scales: (&CategoryScale, &CategoryScale),
+    (x_span, y_span): (&std::ops::Range<usize>, &std::ops::Range<usize>),
+) -> [f64; 4] {
+    let [left, top, ..] = cell_bounds(maps, scales, (y_span.start, x_span.start));
+    let [.., right, bottom] = cell_bounds(maps, scales, (y_span.end - 1, x_span.end - 1));
+    [left, top, right, bottom]
+}
+
+/// The lines between neighbouring cells of `mark` on the axes `resolved`, mapped by `maps`
+/// ([`HeatmapOptions::edges`](crate::HeatmapOptions::edges)): one straight stroke at each
+/// boundary between two bands of its extent from its first to its last category, vertical
+/// lines left to right and then horizontal lines top down, each across the whole extent, in the
+/// grid color of `theme`. Nothing along the outer edge, and nothing without edges or when
+/// either axis is not a category axis, which the model rules out.
+fn edges(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMark) -> Vec<Item> {
+    let (AxisScale::Category(columns), AxisScale::Category(rows)) =
+        (&resolved.x.scale, &resolved.y.scale)
+    else {
+        return Vec::new();
+    };
+    if !mark.options().edges {
+        return Vec::new();
+    }
+    let scales = (columns, rows);
+    let spans = (
+        span(&mark_indices(columns, mark.x_categories())),
+        span(&mark_indices(rows, mark.y_categories())),
+    );
+    let (Some(x_span), Some(y_span)) = spans else {
+        return Vec::new();
+    };
+    let [left, top, right, bottom] = extent(maps, scales, (&x_span, &y_span));
+    let style = StrokeStyle {
+        color: theme.grid_color(),
+        width: EDGE_WIDTH,
+        dash: Vec::new(),
+        cap: LineCap::Butt,
+        join: LineJoin::Miter,
+    };
+    let stroke = |path| Item::Stroke {
+        path,
+        style: style.clone(),
+    };
+    let vertical = (x_span.start..x_span.end - 1).map(|c| {
+        let [.., x, _] = cell_bounds(maps, scales, (y_span.start, c));
+        stroke(segment(point(x, top), point(x, bottom)))
+    });
+    let horizontal = (y_span.start..y_span.end - 1).map(|r| {
+        let [.., y] = cell_bounds(maps, scales, (r, x_span.start));
+        stroke(segment(point(left, y), point(right, y)))
+    });
+    vertical.chain(horizontal).collect()
+}
+
+/// The outlines of the outlined cells of `mark` on the axes `resolved`, mapped by `maps`
+/// ([`HeatmapOptions::outline`](crate::HeatmapOptions::outline)), row by row as its values
+/// are, NaN cells included: each a closed rectangle stroked in the outline color, resolved
+/// against `theme`, whose outer edge lies on its cell's edges. The stroke is [`OUTLINE_WIDTH`]
+/// wide, or as wide as the cell's smaller side when that is less, so it never reaches past the
+/// cell. Nothing without an outline or when either axis is not a category axis, which the
+/// model rules out.
+fn outlines(theme: &Theme, maps: AxisMaps, resolved: &Resolved, mark: &HeatmapMark) -> Vec<Item> {
+    let (AxisScale::Category(columns), AxisScale::Category(rows)) =
+        (&resolved.x.scale, &resolved.y.scale)
+    else {
+        return Vec::new();
+    };
+    let Some(outline) = &mark.options().outline else {
+        return Vec::new();
+    };
+    let color = theme.emphasis(mark.options().outline_color);
+    let (x, y) = (mark.x_categories(), mark.y_categories());
+    outline
+        .iter()
+        .enumerate()
+        .filter(|&(_, &outlined)| outlined)
+        .filter_map(|(i, _)| {
+            let (row, column) = (i / x.len().max(1), i % x.len().max(1));
+            let r = rows.index_of(y.get(row)?)?;
+            let c = columns.index_of(x.get(column)?)?;
+            let [left, top, right, bottom] = cell_bounds(maps, (columns, rows), (r, c));
+            let (x0, x1) = (left.min(right), left.max(right));
+            let (y0, y1) = (top.min(bottom), top.max(bottom));
+            let width = OUTLINE_WIDTH.min(x1 - x0).min(y1 - y0);
+            let inset = width / 2.0;
+            let mut path = Path::new();
+            path.move_to(point(x0 + inset, y0 + inset));
+            path.line_to(point(x1 - inset, y0 + inset));
+            path.line_to(point(x1 - inset, y1 - inset));
+            path.line_to(point(x0 + inset, y1 - inset));
+            path.close();
+            Some(Item::Stroke {
+                path,
+                style: StrokeStyle {
+                    color,
+                    width: width as f32,
+                    dash: Vec::new(),
+                    cap: LineCap::Butt,
+                    join: LineJoin::Miter,
+                },
+            })
+        })
+        .collect()
+}
+
 /// The cells of `mark` appended to `items`: as one image when its options draw it as one
-/// ([`Render`](crate::Render)), else as opaque fills; nothing without a color scale (no finite
-/// value on the axes).
+/// ([`Render`](crate::Render)), else as opaque fills; then its cell edges ([`edges`]) and its
+/// outlines ([`outlines`]), as vector strokes either way. Nothing without a color scale (no
+/// finite value on the axes).
 pub(super) fn heatmap_items(
     context: &MarkContext<'_>,
     resolved: &Resolved,
@@ -207,17 +342,19 @@ pub(super) fn heatmap_items(
         .saturating_mul(mark.y_categories().len());
     if mark.options().render.draws_image(count, true) {
         items.extend(image(context.maps, resolved, mark, scale));
-        return;
+    } else {
+        items.extend(
+            cells(context.maps, resolved, mark, scale)
+                .iter()
+                .map(|cell| Item::Fill {
+                    path: cell_path(cell.bounds, cell.reach),
+                    paint: Paint::Solid(cell.color),
+                    rule: FillRule::NonZero,
+                }),
+        );
     }
-    items.extend(
-        cells(context.maps, resolved, mark, scale)
-            .iter()
-            .map(|cell| Item::Fill {
-                path: cell_path(cell.bounds, cell.reach),
-                paint: Paint::Solid(cell.color),
-                rule: FillRule::NonZero,
-            }),
-    );
+    items.extend(edges(context.theme, context.maps, resolved, mark));
+    items.extend(outlines(context.theme, context.maps, resolved, mark));
 }
 
 /// The values of the annotated heatmaps among `marks`, as one group clipped to the plot area:
@@ -351,19 +488,6 @@ pub(super) fn text_color_on(fill: Rgba) -> Rgba {
     } else {
         LIGHT_TEXT
     }
-}
-
-/// The WCAG 2 relative luminance of `color`'s sRGB channels, from 0 (black) to 1 (white).
-fn relative_luminance(color: Rgba) -> f64 {
-    let linear = |channel: u8| {
-        let c = f64::from(channel) / 255.0;
-        if c <= 0.040_45 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
 }
 
 #[cfg(test)]

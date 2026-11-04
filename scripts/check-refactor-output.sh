@@ -95,6 +95,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/colorbar.rs
   crates/umber-core/tests/support/corpus/contour.rs
   crates/umber-core/tests/support/corpus/ecdf.rs
+  crates/umber-core/tests/support/corpus/emphasis.rs
   crates/umber-core/tests/support/corpus/error_bars.rs
   crates/umber-core/tests/support/corpus/events.rs
   crates/umber-core/tests/support/corpus/font_file.rs

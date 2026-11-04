@@ -10,7 +10,7 @@ use pyo3::prelude::*;
 use umber_core::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, Rgba};
 
 use crate::cmap::Cmap;
-use crate::color::{ColorArg, color_spec, concrete, concrete_list};
+use crate::color::{ColorArg, color_spec, concrete, concrete_list, pack};
 use crate::enums::{IntEnum, enum_value};
 use crate::errors::core_error;
 use crate::font::{FontArg, font};
@@ -102,6 +102,18 @@ impl Theme {
     fn with_grid_color(&self, value: ColorArg) -> PyResult<Theme> {
         let with = umber_core::Theme::with_grid_color;
         self.with_color("Theme.with_grid_color()", value, with)
+    }
+
+    /// This theme with the emphasis color `value`: the color of highlighted tick labels and
+    /// outlined heatmap cells.
+    fn with_emphasis_color(&self, value: ColorArg) -> PyResult<Theme> {
+        let with = umber_core::Theme::with_emphasis_color;
+        self.with_color("Theme.with_emphasis_color()", value, with)
+    }
+
+    /// The emphasis color as `0xRRGGBBAA`.
+    fn emphasis_color(&self) -> u32 {
+        pack(self.0.emphasis_color())
     }
 
     /// This theme with the baseline color `value`.

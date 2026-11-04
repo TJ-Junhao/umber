@@ -48,10 +48,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::error::{number, quoted};
-use crate::model::Axes;
+use crate::model::{Axes, TickHighlight};
 use crate::resolve::{AxisTick, Baseline, NormalizedPos, ValueAxis};
 use crate::text::{CheckedStyle, FaceId, Lines, SceneFonts};
-use crate::{Error, FontLibrary, Result, SizeSpec, TextLayout, TextStyle, Theme, Weight};
+use crate::{Error, FontLibrary, Result, Rgba, SizeSpec, TextLayout, TextStyle, Theme, Weight};
 
 /// The outer padding on every side.
 pub(crate) const PADDING: f64 = 12.0;
@@ -305,6 +305,11 @@ pub(crate) struct Layout {
     pub x_tick_labels: Vec<Label>,
     /// The y tick labels, to the left of the plot area.
     pub y_tick_labels: Vec<Label>,
+    /// The colors of the highlighted x and y tick labels
+    /// ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)): the tick labels set in
+    /// the [`highlighted_style`], SemiBold, which no other tick label is. Every other tick label
+    /// is drawn in the theme's muted color.
+    pub tick_highlight: [Rgba; 2],
     /// The y coordinates of horizontal gridlines, excluding a drawn baseline's position.
     pub y_grid: Vec<f64>,
     /// The x coordinates of vertical gridlines, excluding a drawn baseline's position;
@@ -651,15 +656,28 @@ impl<'a> LabelCache<'a> {
         self.with_checked_label(text, checked, Label::width)
     }
 
-    /// The labels of `ticks` in `style`, each with its tick's position.
+    /// The labels of `ticks` in `style`, each with its tick's position; the label of a
+    /// category of `highlight` in the [`highlighted_style`] of `style`.
     ///
     /// # Errors
     ///
     /// As [`measure`], for the first label that cannot be laid out.
-    fn ticks(&self, ticks: &[AxisTick], style: TextStyle) -> Result<Vec<(NormalizedPos, Label)>> {
+    fn ticks(
+        &self,
+        ticks: &[AxisTick],
+        style: TextStyle,
+        highlight: &TickHighlight,
+    ) -> Result<Vec<(NormalizedPos, Label)>> {
         ticks
             .iter()
-            .map(|tick| Ok((tick.pos, self.measure(&tick.label, style)?)))
+            .map(|tick| {
+                let style = if highlight.contains(&tick.label) {
+                    highlighted_style(style)
+                } else {
+                    style
+                };
+                Ok((tick.pos, self.measure(&tick.label, style)?))
+            })
             .collect()
     }
 }
@@ -840,7 +858,8 @@ pub(crate) struct TickRoom<'a> {
 
 /// The tick labels of a figure: their style, checked against the figure's fonts, and the
 /// measures every tick room uses. One per axis size, so that tick rooms measure tick labels
-/// without errors.
+/// without errors. The labels of highlighted categories are set in the SemiBold face
+/// ([`TickFont::highlighted`]), so tick rooms keep them apart at the width they are drawn at.
 pub(crate) struct TickFont<'a> {
     /// The fonts.
     lib: &'a SceneFonts<'a>,
@@ -850,6 +869,9 @@ pub(crate) struct TickFont<'a> {
     line: f64,
     /// The width of a tabular digit, in points.
     digit: f64,
+    /// The highlighted categories of the axis and the SemiBold tick label style, checked
+    /// against the fonts, that their labels are set in; `None` without a highlight.
+    highlight: Option<(&'a TickHighlight, CheckedStyle)>,
 }
 
 impl<'a> TickFont<'a> {
@@ -889,7 +911,45 @@ impl<'a> TickFont<'a> {
             style: checked,
             line: ascent + descent,
             digit,
+            highlight: None,
         })
+    }
+
+    /// These tick labels with the labels of the categories of `highlight` set in the SemiBold
+    /// face of the same font ([`highlighted_style`]); unchanged without a highlighted category.
+    ///
+    /// # Errors
+    ///
+    /// As [`measure`], naming the first highlighted category, when the font has no SemiBold
+    /// face.
+    pub(crate) fn highlighted(self, highlight: &'a TickHighlight) -> Result<TickFont<'a>> {
+        let Some(first) = highlight.categories().first() else {
+            return Ok(self);
+        };
+        let bold = self
+            .lib
+            .check(first, &highlighted_style(self.style.style()))?;
+        Ok(TickFont {
+            highlight: Some((highlight, bold)),
+            ..self
+        })
+    }
+
+    /// The checked style the label `text` is set in: SemiBold for a highlighted category.
+    fn style_of(&self, text: &str) -> &CheckedStyle {
+        match &self.highlight {
+            Some((highlight, bold)) if highlight.contains(text) => bold,
+            _ => &self.style,
+        }
+    }
+}
+
+/// The style of a highlighted tick label: `tick`, the tick label style, in the SemiBold face of
+/// its font, the face every bold text of a figure is set in.
+pub(crate) fn highlighted_style(tick: TextStyle) -> TextStyle {
+    TextStyle {
+        weight: Weight::SemiBold,
+        ..tick
     }
 }
 
@@ -949,9 +1009,10 @@ impl<'a> TickRoom<'a> {
         if let Some(&width) = self.widths.borrow().get(label) {
             return width;
         }
+        let style = self.tick.style_of(label);
         let width = self.labels.map_or_else(
-            || measure_checked(self.tick.lib, label, &self.tick.style).width(),
-            |labels| labels.checked_width(label, &self.tick.style),
+            || measure_checked(self.tick.lib, label, style).width(),
+            |labels| labels.checked_width(label, style),
         );
         self.widths.borrow_mut().insert(label.to_owned(), width);
         width

@@ -45,7 +45,7 @@ const NAMED: [(&str, Rgba); 12] = [
 ];
 
 /// A concrete color as `0xRRGGBBAA`.
-fn pack(color: Rgba) -> u32 {
+pub(crate) fn pack(color: Rgba) -> u32 {
     u32::from_be_bytes([color.r, color.g, color.b, color.a])
 }
 

@@ -211,6 +211,45 @@ class Theme:
             color = _color_argument("Theme.with_grid_color()", "value", value)
             return _wrap(self._native.with_grid_color(color))
 
+    @property
+    def emphasis_color(self) -> Color:
+        """The emphasis color: the color of highlighted tick labels and outlined heatmap cells.
+
+        ``xtick_highlight()``, ``ytick_highlight()`` and ``heatmap(outline=...)`` use it when
+        their color is ``Color.AUTO``, so the labels and the cells of a group read as one mark.
+        Each preset's emphasis color has a contrast ratio of at least 4.5:1 with its
+        background and lies apart from its sequential colormap and first palette colors.
+
+        Example:
+            >>> import umber as ub
+            >>> ub.Theme.PIGMENT.emphasis_color
+            Color.hex("#BF2A17")
+        """
+        return _color.fixed(self._native.emphasis_color())
+
+    def with_emphasis_color(self, value: Color) -> "Theme":
+        """Return this theme with the emphasis color set to ``value``.
+
+        Args:
+            value: A concrete color; ``Color.AUTO`` and ``Color.palette()`` are refused.
+
+        Returns:
+            A new theme; this one is unchanged.
+
+        Raises:
+            TypeError: If ``value`` is not a ``Color``.
+            StyleError: If ``value`` is ``Color.AUTO`` or ``Color.palette()``.
+
+        Example:
+            >>> import umber as ub
+            >>> theme = ub.Theme.PIGMENT.with_emphasis_color(ub.Color.hex("#123456"))
+            >>> theme.emphasis_color
+            Color.hex("#123456")
+        """
+        with api_call():
+            color = _color_argument("Theme.with_emphasis_color()", "value", value)
+            return _wrap(self._native.with_emphasis_color(color))
+
     def with_baseline_color(self, value: Color) -> "Theme":
         """Return this theme with the baseline color set to ``value``.
 
