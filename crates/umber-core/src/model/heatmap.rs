@@ -50,7 +50,9 @@ pub struct HeatmapOptions {
     /// Which cells are outlined: one flag per value, row by row as the values are; `None`
     /// outlines no cell. Each outlined cell keeps its fill and value and gets a rectangle
     /// stroked 1.5 pt wide in `outline_color`, drawn inside the cell edge so that it never
-    /// covers a neighbour; a NaN cell can be outlined too. Outlines are drawn over the cells and
+    /// covers a neighbour; on a cell less than 3 pt across, the stroke narrows to half the
+    /// cell's smaller side, so the outline covers the whole cell. A NaN cell can be outlined
+    /// too. Outlines are drawn over the cells and
     /// their edges and under the values, as vector shapes in both [`Render`] modes, and have
     /// no legend entry.
     pub outline: Option<Arc<[bool]>>,

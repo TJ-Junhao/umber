@@ -2960,7 +2960,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             outline: The cells to outline, as a boolean matrix of the shape of ``values``,
                 such as a NumPy array or a list of rows of bools; ``AUTO`` outlines no cell.
                 Each ``True`` cell gets a 1.5 pt rectangle inside its edge, over its fill and
-                under its value; a NaN cell can be outlined too. Outlines have no legend entry.
+                under its value; on cells less than 3 pt across, the stroke narrows to half the
+                cell's smaller side, so the outline covers the whole cell. A NaN cell can be
+                outlined too. Outlines have no legend entry.
             outline_color: The color of the outlines. ``Color.AUTO`` is the theme's emphasis
                 color (``Theme.with_emphasis_color()``), which highlighted tick labels share.
             edges: Whether 0.5 pt lines in the theme's grid color separate neighbouring cells,
