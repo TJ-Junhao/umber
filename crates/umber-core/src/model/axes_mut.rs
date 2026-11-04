@@ -33,14 +33,16 @@ use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band, check_format_axis,
-    check_limits, check_no_time_x, check_numeric_y, check_reference_value, check_series_y,
-    check_span, check_step_order, check_tick_axis, check_time_error_bars, check_time_limits,
-    check_time_span, check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
+    check_highlight_axis, check_limits, check_no_time_x, check_numeric_y, check_reference_value,
+    check_series_y, check_span, check_step_order, check_tick_axis, check_time_error_bars,
+    check_time_limits, check_time_span, check_time_tick_axis, check_vline_x, check_x_error_bars,
+    check_y_error_bars,
 };
 use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
-    Align, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec, TickFormat,
+    Align, ColorSpec, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
+    TickFormat,
 };
 
 /// Whether an axes draws its baseline, independently of any shared axis settings.
@@ -3255,6 +3257,98 @@ impl<'a> AxesMut<'a> {
             Setting::TickSize,
             settings,
             "Axes.ytick_labels()",
+        )?;
+        Ok(self)
+    }
+
+    /// Highlights the tick labels of `categories` on a category x axis: they are drawn in the
+    /// SemiBold face of the body font, in `color`, where [`ColorSpec::AUTO`] is the theme's
+    /// emphasis color ([`Theme::emphasis_color`](crate::Theme::emphasis_color)). Every other
+    /// label is unchanged. Calling it again replaces the set, and an empty `categories` removes
+    /// it.
+    ///
+    /// The highlight is a setting of the shared x group, as explicit ticks are: a member may
+    /// replace its own highlight, but a different one already set by another member is an
+    /// `Error::Usage`. Set on a twin, it highlights the x labels its parent draws.
+    ///
+    /// Rendering returns `Error::Data` naming the first highlighted category that is not a
+    /// category of the axis, and `Error::Style` when a highlighted category is among the labels
+    /// that automatic labels on a crowded axis leave out (they show every k-th category), since
+    /// its highlight would not be drawn.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` on a linear, log or time x axis, and
+    /// for a highlight that differs from one another member of the shared x group set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BarOptions, ColorSpec, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let regions = vec!["North".to_owned(), "South".to_owned(), "East".to_owned()];
+    /// axes.bar(regions, &[3.0, 5.0, 4.0], BarOptions::default())?
+    ///     .xtick_highlight(vec!["South".to_owned()], ColorSpec::AUTO)?;
+    /// assert_eq!(axes.x_tick_highlight().categories(), ["South"]);
+    /// assert!(axes.ytick_highlight(vec!["South".to_owned()], ColorSpec::AUTO).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xtick_highlight(
+        &mut self,
+        categories: Vec<String>,
+        color: ColorSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xtick_highlight()";
+        check_highlight_axis(CONTEXT, SharedAxis::X, self.x)?;
+        let mut settings = (*self.x_settings).clone();
+        settings.highlight = super::TickHighlight::new(categories, color);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Highlight,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Highlights the tick labels of `categories` on a category y axis. Same rules as
+    /// [`AxesMut::xtick_highlight`], for the shared y group; a twin's y axis is numeric, so it
+    /// takes no highlight.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as for [`AxesMut::xtick_highlight`], on the y axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ColorSpec, Figure, Rgba, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Category)?;
+    /// axes.ytick_highlight(vec!["b".to_owned()], ColorSpec::Fixed(Rgba::BLUE))?;
+    /// axes.ytick_highlight(Vec::new(), ColorSpec::AUTO)?;
+    /// assert!(axes.y_tick_highlight().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ytick_highlight(
+        &mut self,
+        categories: Vec<String>,
+        color: ColorSpec,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ytick_highlight()";
+        check_highlight_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let mut settings = (*self.y_settings).clone();
+        settings.highlight = super::TickHighlight::new(categories, color);
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Highlight,
+            settings,
+            CONTEXT,
         )?;
         Ok(self)
     }

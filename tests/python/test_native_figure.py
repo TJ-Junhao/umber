@@ -129,6 +129,7 @@ SETTERS: list[tuple[str, object, object]] = [
     ("with_muted_color", RED, BLUE),
     ("with_grid_color", RED, BLUE),
     ("with_baseline_color", RED, BLUE),
+    ("with_emphasis_color", RED, BLUE),
     ("with_grid_lines", 0, 3),
     ("with_grid_dash", 0, 2),
     ("with_title_font", (0, 0), (0, 4)),
@@ -171,7 +172,7 @@ def test_with_methods_return_a_new_theme_and_keep_the_original(
 @pytest.mark.parametrize(
     "name",
     ["with_background", "with_text_color", "with_muted_color", "with_grid_color"]
-    + ["with_baseline_color"],
+    + ["with_baseline_color", "with_emphasis_color"],
 )
 @pytest.mark.parametrize(
     ("color", "shown"), [(AUTO, "Color.AUTO"), ((1, 3, 0.5), "Color.palette(3)")]

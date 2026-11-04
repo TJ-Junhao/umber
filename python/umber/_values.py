@@ -778,3 +778,110 @@ def _row_floats(context: str, name: str, index: int, row: object, hint: str) -> 
     if found is not None:
         raise _value_error(context, name, f"{label}[{found[0]}]", found[1], mixed=False)
     return _checked_objects(array)
+
+
+_FLAGS_HINT: Final = "pass a boolean matrix of the shape of values, e.g. values > 0."
+
+
+def bool_matrix(
+    context: str,
+    name: str,
+    values: object,
+    shape: tuple[int, int],
+    *,
+    lengths: str,
+) -> list[bool]:
+    """Convert a two-dimensional boolean mask, such as heatmap outlines, to a flat ``list``.
+
+    A two-dimensional NumPy array of dtype ``bool`` or an object with ``__array__``, such as a
+    pandas DataFrame, or a sequence of rows, each a sequence or an array of bools, is accepted.
+    The mask must have ``shape``: ``shape[0]`` rows of ``shape[1]`` flags. An empty sequence
+    has no rows. The flags are returned row by row.
+
+    Args:
+        context: The API call, such as ``"Axes.heatmap()"``.
+        name: The parameter name.
+        values: The mask passed.
+        shape: The required number of rows and of flags in each row.
+        lengths: How a message writes ``shape``, such as ``"(len(y), len(x))"``.
+
+    Returns:
+        The flags, row by row.
+
+    Raises:
+        TypeError: The mask is text, a single value or a container without an order, an array
+            whose dtype is not ``bool``, or holds an element that is not a ``bool``, named by
+            its row and column.
+        DataError: The mask is a masked array, is not two-dimensional, has another shape, or
+            has rows of different lengths.
+
+    Example:
+        >>> from umber._values import bool_matrix
+        >>> lengths = "(len(y_categories), len(x_categories))"
+        >>> bool_matrix("Axes.heatmap()", "outline", [[True, False]], (1, 2), lengths=lengths)
+        [True, False]
+    """
+    _check_container(context, name, values, str_hint=_FLAGS_HINT, masked_hint=_FLAGS_HINT)
+    if hasattr(values, "__array__"):
+        array = np.asarray(values)
+        _check_flags_dtype(context, name, name, array)
+    else:
+        array = _rows_flags(context, name, cast(Sequence[object], values), shape[1])
+    if array.ndim != 2:
+        dimensions = "dimension" if array.ndim == 1 else "dimensions"
+        message = f"{name} has {array.ndim} {dimensions}; {name} must be two-dimensional."
+        raise _data_error(context, name, message, _FLAGS_HINT)
+    if array.shape != shape:
+        given = f"({array.shape[0]}, {array.shape[1]})"
+        required = f"{lengths} = ({shape[0]}, {shape[1]})"
+        message = f"{name} has shape {given}; it must be the shape of values, {required}."
+        raise _data_error(context, name, message, _FLAGS_HINT)
+    return cast(list[bool], array.reshape(-1).tolist())
+
+
+def _check_flags_dtype(context: str, name: str, label: str, array: npt.NDArray[Any]) -> None:
+    """Refuse an array of flags, or the part ``label`` of one, whose dtype is not ``bool``."""
+    if array.dtype != np.bool_:
+        message = f"{label} has dtype {array.dtype}; {name} must hold bools."
+        raise new_error(TypeError, context, message, parameter=name, hint=_FLAGS_HINT)
+
+
+def _rows_flags(
+    context: str, name: str, rows: Sequence[object], width: int
+) -> npt.NDArray[np.bool_]:
+    """Check and convert a sequence of rows of bools to a two-dimensional ``bool`` array.
+
+    Each row must be a sequence or an array; every element of a sequence must be a ``bool``
+    or a NumPy ``bool``, and an array must have dtype ``bool``. Errors name the row, as
+    ``outline[1]``, or the element, as ``outline[1][2]``. An empty sequence is no rows of
+    ``width`` flags.
+    """
+    if len(rows) == 0:
+        return np.empty((0, width), dtype=np.bool_)
+    converted: list[npt.NDArray[np.bool_]] = []
+    for index, row in enumerate(rows):
+        label = f"{name}[{index}]"
+        if not _is_nested(row):
+            message = f"{label} is {short_repr(_scalar(row))}; each row must be a sequence."
+            raise _data_error(context, name, message, _FLAGS_HINT)
+        if isinstance(row, np.ndarray):
+            array = cast(npt.NDArray[Any], row)
+            _check_flags_dtype(context, name, label, array)
+        else:
+            items = cast(Sequence[object], row)
+            for column, item in enumerate(items):
+                if not isinstance(item, _BOOLS):
+                    message = f"{label}[{column}] is {type_name(item)}; {name} must hold bools."
+                    raise new_error(TypeError, context, message, parameter=name, hint=_FLAGS_HINT)
+            array = np.asarray(items, dtype=np.bool_)
+        if array.ndim != 1:
+            message = f"{label} has {array.ndim} dimensions; each row must be one-dimensional."
+            raise _data_error(context, name, message, _FLAGS_HINT)
+        if converted and len(array) != len(converted[0]):
+            message = (
+                f"{label} has {len(array)} flags but {name}[0] has "
+                f"{len(converted[0])}; every row must have the same length."
+            )
+            raise _data_error(context, name, message, _FLAGS_HINT)
+        converted.append(cast(npt.NDArray[np.bool_], array))
+    return np.stack(converted)

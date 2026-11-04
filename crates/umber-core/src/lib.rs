@@ -51,7 +51,8 @@
 //!   grid: [`Grid`] with its limit [`MAX_GRID`], [`Share`], [`LegendMode`], [`GridIndex`],
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
-//!   methods), [`ExplicitTicks`], [`AxisData`], [`LineOptions`],
+//!   methods), [`ExplicitTicks`], the [`TickHighlight`] of a category axis, [`AxisData`],
+//!   [`LineOptions`],
 //!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, the [`ScatterGroup`]
 //!   of a grouped scatter, [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
@@ -180,7 +181,7 @@ pub use figure::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
     LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
-    SeriesView, Share, Step, StepMark, StepOptions,
+    SeriesView, Share, Step, StepMark, StepOptions, TickHighlight,
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};

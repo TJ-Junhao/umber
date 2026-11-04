@@ -25,6 +25,7 @@ COLOR_SETTERS = [
     "with_muted_color",
     "with_grid_color",
     "with_baseline_color",
+    "with_emphasis_color",
 ]
 # (setter, enum class name, two members, a member of another enum)
 ENUM_SETTERS: list[tuple[str, str, tuple[str, str], str]] = [

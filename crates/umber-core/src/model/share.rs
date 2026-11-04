@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::axes::{scale_name, size_name};
-use super::{Axes, AxisTicks, Cell, CellRange, Figure, Grid, Share};
+use super::{Axes, AxisTicks, Cell, CellRange, Figure, Grid, Share, TickHighlight};
 use crate::error::number;
 use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, SizeSpec};
 
@@ -41,6 +41,8 @@ pub(super) struct AxisSettings {
     pub ticks: AxisTicks,
     /// The tick label size shared independently of ticks and their format.
     pub tick_size: SizeSpec,
+    /// The highlighted categories of a category axis.
+    pub highlight: TickHighlight,
 }
 
 /// A coordinate axis.
@@ -123,6 +125,8 @@ pub(super) enum Setting {
     Format,
     /// Tick label size.
     TickSize,
+    /// Highlighted categories.
+    Highlight,
 }
 
 /// Records an explicit setter unless it changes a value set by another member. Inheriting a
@@ -151,6 +155,8 @@ pub(super) struct Group {
     format_by: Vec<Cell>,
     /// Members that set an explicit tick label size; AUTO removes a member's setting.
     tick_size_by: Vec<Cell>,
+    /// Members that set highlighted categories, including setting none.
+    highlight_by: Vec<Cell>,
 }
 
 impl Group {
@@ -208,6 +214,13 @@ impl Group {
                 size_name(self.settings.tick_size),
                 "size",
             ),
+            Setting::Highlight => (
+                self.settings.highlight == proposed.highlight,
+                &mut self.highlight_by,
+                "tick highlight",
+                "another highlight".to_owned(),
+                "categories",
+            ),
         };
         if let Err(other) = record_setter(by, cell, same) {
             if matches!(setting, Setting::TickSize) {
@@ -224,7 +237,7 @@ impl Group {
                 .with_parameter("size")
                 .with_hint("set the same size on every panel."));
             }
-            let verb = if matches!(setting, Setting::Format) {
+            let verb = if matches!(setting, Setting::Format | Setting::Highlight) {
                 "is"
             } else {
                 "are"

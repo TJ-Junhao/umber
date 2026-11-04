@@ -1896,6 +1896,27 @@ pub(super) fn check_format_axis(
     Ok(())
 }
 
+/// Checks that `axis`, of scale kind `kind`, is a category axis, whose labels the highlight
+/// setter `context` marks: `Error::Usage` on a linear, log or time axis, whose labels are not
+/// categories.
+pub(super) fn check_highlight_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    let scale = match kind {
+        ScaleKind::Category => return Ok(()),
+        ScaleKind::Linear => "linear",
+        ScaleKind::Log { .. } => "log",
+        ScaleKind::Time => "time",
+    };
+    Err(Error::usage(
+        context,
+        format!("this is a {scale} axis; tick highlights apply to category axes only."),
+    )
+    .with_hint(axis.category_scale_hint()))
+}
+
 /// Checks that `axis`, of scale kind `kind`, takes the time tick positions the setter `context`
 /// sets: `Error::Usage` unless it is a time axis.
 pub(super) fn check_time_tick_axis(

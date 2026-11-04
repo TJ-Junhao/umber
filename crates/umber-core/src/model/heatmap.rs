@@ -10,7 +10,7 @@ use super::figure::Figure;
 use super::mark::Mark;
 use super::render::Render;
 use crate::color_scale::ColorScaleSpec;
-use crate::{Error, NumberStyle, Result, ScaleKind, TickFormat, Transform};
+use crate::{ColorSpec, Error, NumberStyle, Result, ScaleKind, TickFormat, Transform};
 
 /// The hint of a heatmap whose values do not have one row per y category.
 const ROWS_HINT: &str = "pass one row per y category.";
@@ -27,6 +27,8 @@ const ROWS_HINT: &str = "pass one row per y category.";
 /// assert!(!options.annotate);
 /// assert_eq!(options.format, None);
 /// assert_eq!(options.render, Render::Auto);
+/// assert_eq!(options.outline, None);
+/// assert!(!options.edges);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeatmapOptions {
@@ -43,8 +45,26 @@ pub struct HeatmapOptions {
     /// annotated heatmaps take one.
     pub format: Option<TickFormat>,
     /// Whether the cells are drawn as vector shapes or as one image (see [`Render`]). The
-    /// values of annotated cells are text over the cells either way.
+    /// values of annotated cells, cell edges and outlines are drawn over the cells either way.
     pub render: Render,
+    /// Which cells are outlined: one flag per value, row by row as the values are; `None`
+    /// outlines no cell. Each outlined cell keeps its fill and value and gets a rectangle
+    /// stroked 1.5 pt wide in `outline_color`, drawn inside the cell edge so that it never
+    /// covers a neighbour; on a cell less than 3 pt across, the stroke narrows to half the
+    /// cell's smaller side, so the outline covers the whole cell. A NaN cell can be outlined
+    /// too. Outlines are drawn over the cells and
+    /// their edges and under the values, as vector shapes in both [`Render`] modes, and have
+    /// no legend entry.
+    pub outline: Option<Arc<[bool]>>,
+    /// The color of the outlines; [`ColorSpec::AUTO`] for the theme's emphasis color
+    /// ([`Theme::emphasis_color`](crate::Theme::emphasis_color)), which highlighted tick labels
+    /// share. Only a heatmap with `outline` takes another color.
+    pub outline_color: ColorSpec,
+    /// Whether thin lines separate neighbouring cells: 0.5 pt in the theme's grid color, at
+    /// every boundary between two category bands from the heatmap's first to its last category
+    /// on each axis, across its whole extent, and not along its outer edge. They are drawn over
+    /// the cells and under outlines and values, as vector shapes in both [`Render`] modes.
+    pub edges: bool,
 }
 
 impl Default for HeatmapOptions {
@@ -56,6 +76,9 @@ impl Default for HeatmapOptions {
             annotate: false,
             format: None,
             render: Render::Auto,
+            outline: None,
+            outline_color: ColorSpec::AUTO,
+            edges: false,
         }
     }
 }
@@ -116,12 +139,14 @@ impl HeatmapMark {
     ///    (`Error::Style`);
     /// 6. a format comes with `annotate` (`Error::Usage`) and is a number format
     ///    (`Error::Style`);
-    /// 7. the colormap, scale and center are those of the axes' other color-mapped marks
+    /// 7. `outline` has one flag per value (`Error::Data`, naming both lengths), and an
+    ///    `outline_color` other than [`ColorSpec::AUTO`] comes with `outline` (`Error::Usage`);
+    /// 8. the colormap, scale and center are those of the axes' other color-mapped marks
     ///    (`Error::Usage`, naming the first that differs);
-    /// 8. the color limits of the axes are positive on a log scale and hold the center
+    /// 9. the color limits of the axes are positive on a log scale and hold the center
     ///    (`Error::Style`);
-    /// 9. the panel stays within one color-sharing group and agrees with its other members
-    ///    (`Error::Usage`).
+    /// 10. the panel stays within one color-sharing group and agrees with its other members
+    ///     (`Error::Usage`).
     pub(super) fn new(
         context: &'static str,
         figure: &Figure,
@@ -163,6 +188,7 @@ impl HeatmapMark {
         )?;
         check_center(context, options.center, options.scale)?;
         check_format(context, &options)?;
+        check_outline(context, &options, (rows, columns))?;
         let mark = HeatmapMark {
             x: Arc::from(x),
             y: Arc::from(y),
@@ -352,6 +378,41 @@ fn check_format(context: &'static str, options: &HeatmapOptions) -> Result<()> {
         )
         .with_parameter("format")
         .with_hint("use TickFormat.AUTO or a number format such as TickFormat.fixed(2)."));
+    }
+    Ok(())
+}
+
+/// Checks the outline of `options` for a heatmap of `rows` by `columns` values: one flag per
+/// value (`Error::Data` about `outline`, naming both lengths), and an `outline_color` only with
+/// an outline, since it would color nothing (`Error::Usage` about `outline_color`).
+fn check_outline(
+    context: &'static str,
+    options: &HeatmapOptions,
+    (rows, columns): (usize, usize),
+) -> Result<()> {
+    let Some(outline) = &options.outline else {
+        if options.outline_color != ColorSpec::AUTO {
+            return Err(Error::usage(
+                context,
+                "outline_color is given but outline is not; only outlined cells take it.",
+            )
+            .with_parameter("outline_color")
+            .with_hint("pass outline= with one flag per cell, or leave outline_color out."));
+        }
+        return Ok(());
+    };
+    let cells = rows * columns;
+    if outline.len() != cells {
+        return Err(Error::data(
+            context,
+            format!(
+                "outline has {} flags; it must have one per value, len(y_categories) * \
+                 len(x_categories) = {rows} * {columns} = {cells}.",
+                outline.len()
+            ),
+        )
+        .with_parameter("outline")
+        .with_hint("pass a boolean matrix of the shape of values."));
     }
     Ok(())
 }

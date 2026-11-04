@@ -134,6 +134,23 @@ ax.colorbar("Change")
 svg = ax.figure.to_svg()
 ```
 
+## Empty cells and a marked group in a heatmap
+
+To leave zero cells blank, pass NaN: a NaN cell is not drawn and gets no value. To mark a group, such as a group of classes in a confusion matrix, use `xtick_highlight()` and `ytick_highlight()`, which draw the group's labels bold in the theme's emphasis color, and `outline=` with a boolean mask of the shape of `values`, which draws a rectangle inside each `True` cell in the same color. Do not draw circles or boxes over cells with `scatter()` or `text()` at computed positions. Which cells to outline is one line of NumPy; umber does not infer it. `edges=True` draws thin lines between the cells, which helps to follow a row of a large, sparse matrix. A highlighted label must be drawn: on a crowded axis that labels only every k-th category, rendering raises `StyleError`, so make the figure large enough for every label.
+
+```python
+names = ["bird", "dog", "drill", "saw"]
+counts = np.array([[9, 1, 0, 0], [2, 7, 0, 1], [0, 0, 6, 3], [0, 1, 2, 8]])
+group = ["drill", "saw"]
+in_group = np.isin(names, group)
+mask = in_group[:, None] & in_group[None, :] & ~np.eye(4, dtype=bool) & (counts > 0)
+ax = ub.Figure(5, 4).add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+values = np.where(counts > 0, counts, np.nan)
+ax.heatmap(names, names, values, annotate=True, outline=mask, edges=True)
+ax.xtick_highlight(group).ytick_highlight(group)
+svg = ax.figure.to_svg()
+```
+
 ## Ticks and number formats
 
 `xticks([...])`, `xticks_labeled([...], [...])`, `xlim(low, high)`, and `xtick_format(ub.TickFormat.percent(1))` (also `fixed(decimals)`, `scientific()`, `iso()` for times, and `.affix(prefix=, suffix=)`). The y methods mirror them.

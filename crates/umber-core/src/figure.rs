@@ -36,7 +36,7 @@ pub use crate::model::{
     AreaMark, AreaOptions, Axes, AxesMut, AxisData, BarGroupMark, BarMark, BarOptions, Cell,
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
     LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
-    SeriesView, Share, Step, StepMark, StepOptions,
+    SeriesView, Share, Step, StepMark, StepOptions, TickHighlight,
 };
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};

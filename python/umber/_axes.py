@@ -57,10 +57,11 @@ from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._time import MicrosArray
-from umber._types import Time, Values
+from umber._types import SupportsArray, Time, Values
 from umber._values import (
     FloatArray,
     axis_values,
+    bool_matrix,
     check_axis_type,
     check_floats_type,
     check_names_type,
@@ -2918,13 +2919,23 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         annotate: bool = False,
         format: TickFormat | Auto = AUTO,
         render: Render | Auto = AUTO,
+        outline: Sequence[Values[bool]] | SupportsArray | Auto = AUTO,
+        outline_color: Color = Color.AUTO,
+        edges: bool = False,
     ) -> "Axes[str, str]":
         """Add a heatmap: one cell per pair of an x and a y category, colored by its value.
 
         The x categories run left to right and the y categories top to bottom, and the cells
-        fill their category bands exactly, with no gridlines over them. A NaN value leaves its
-        cell empty. The colors come from the color scale of these axes, which every
-        color-mapped mark shares; ``clim()`` sets its range, and the colorbar explains it.
+        fill their category bands exactly, with no gridlines over them unless ``edges`` asks
+        for them. A NaN value leaves its cell empty. The colors come from the color scale of
+        these axes, which every color-mapped mark shares; ``clim()`` sets its range, and the
+        colorbar explains it.
+
+        To mark a group of cells, such as the confusions within a group of classes, pass
+        ``outline=`` a boolean matrix: each ``True`` cell keeps its fill and value and gets a
+        rectangle inside its edge, so it never covers a neighbour. With the group's tick
+        labels highlighted by ``xtick_highlight()`` and ``ytick_highlight()``, the outlines
+        take the same theme emphasis color.
 
         Args:
             x_categories: The column names, left to right, each at most once.
@@ -2944,31 +2955,52 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             render: ``Render.VECTOR`` draws one rectangle per cell, ``Render.RASTER`` one
                 image with one pixel per cell (see ``Render``). ``AUTO`` draws an image from
                 10,000 cells (``len(x_categories) * len(y_categories)``) and vector shapes
-                below that. Annotations are text over the cells either way.
+                below that. Annotations, edges and outlines are drawn over the cells either
+                way, as text and vector lines.
+            outline: The cells to outline, as a boolean matrix of the shape of ``values``,
+                such as a NumPy array or a list of rows of bools; ``AUTO`` outlines no cell.
+                Each ``True`` cell gets a 1.5 pt rectangle inside its edge, over its fill and
+                under its value; on cells less than 3 pt across, the stroke narrows to half the
+                cell's smaller side, so the outline covers the whole cell. A NaN cell can be
+                outlined too. Outlines have no legend entry.
+            outline_color: The color of the outlines. ``Color.AUTO`` is the theme's emphasis
+                color (``Theme.with_emphasis_color()``), which highlighted tick labels share.
+            edges: Whether 0.5 pt lines in the theme's grid color separate neighbouring cells,
+                which helps to follow a row of a large, sparse matrix. They lie between cells
+                only, not along the outer edge, under the outlines and values.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If an argument has the wrong type, or ``scale`` is not linear or log.
+            TypeError: If an argument has the wrong type, ``scale`` is not linear or log, or
+                ``outline`` holds something other than bools.
             DataError: If ``values`` is not shaped ``(len(y_categories), len(x_categories))``,
-                a category repeats, or a value is infinite, beyond 1e300 in magnitude, or not
-                positive on a log scale.
+                ``outline`` is not shaped like ``values``, a category repeats, or a value is
+                infinite, beyond 1e300 in magnitude, or not positive on a log scale.
                 It is also raised for a line break or other control character in a category name.
             StyleError: If a category name is too long, ``center`` is not finite or comes
                 with a log scale, ``format`` is ``TickFormat.iso()``, or the color range set by
                 ``clim()`` does not suit ``scale`` or ``center``.
             UsageError: If either axis is not a category axis (type checkers refuse such
-                axes), ``format`` is given without ``annotate``, or ``cmap``, ``scale`` or
-                ``center`` differs from those of the other color-mapped marks of these axes.
+                axes), ``format`` is given without ``annotate``, ``outline_color`` without
+                ``outline``, or ``cmap``, ``scale`` or ``center`` differs from those of the
+                other color-mapped marks of these axes.
 
         Example:
+            >>> import numpy as np
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
             >>> days, periods = ["Mon", "Tue", "Wed"], ["Day", "Night"]
             >>> ax = ax.heatmap(days, periods, [[12, 18, 15], [4, 7, 6]], annotate=True)
             >>> im = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
             >>> im = im.heatmap(days, periods, [[1, 2, 3], [4, 5, 6]], render=ub.Render.RASTER)
+            >>> counts = np.array([[9, 1, 0], [2, 7, 1], [0, 3, 8]])
+            >>> names = ["cat", "dog", "fox"]
+            >>> group = np.isin(names, ["dog", "fox"])
+            >>> mask = group[:, None] & group[None, :] & ~np.eye(3, dtype=bool) & (counts > 0)
+            >>> cm = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+            >>> cm = cm.heatmap(names, names, np.where(counts > 0, counts, np.nan), outline=mask)
         """
         with api_call():
             context = "Axes.heatmap()"
@@ -2982,6 +3014,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
             )
             drawn = _render_argument(context, render)
+            native_outline_color = _color.native(
+                instance(context, "outline_color", outline_color, Color, _COLOR_HINT)
+            )
+            draws_edges = _args.boolean(context, "edges", edges)
             if (self._x, self._y) != (_CATEGORY, _CATEGORY):
                 # The core refuses the axes before it reads the data, with its own error.
                 empty = np.empty(0, dtype=np.float64)
@@ -2998,6 +3034,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                     shows,
                     checked,
                     drawn,
+                    None,
+                    native_outline_color,
+                    draws_edges,
                 )
             x_names = names(context, "x_categories", x_categories)
             y_names = names(context, "y_categories", y_categories)
@@ -3008,6 +3047,17 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 (len(y_names), len(x_names)),
                 lengths="(len(y_categories), len(x_categories))",
                 hint="pass one row per y category.",
+            )
+            flags = (
+                None
+                if outline is AUTO
+                else bool_matrix(
+                    context,
+                    "outline",
+                    outline,
+                    (len(y_names), len(x_names)),
+                    lengths="(len(y_categories), len(x_categories))",
+                )
             )
             self._native.heatmap(
                 self._target,
@@ -3022,6 +3072,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 shows,
                 checked,
                 drawn,
+                flags,
+                native_outline_color,
+                draws_edges,
             )
             return self
 
@@ -3075,6 +3128,90 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         with api_call():
             instance("Axes.ytick_labels()", "size", size, Size, _SIZE_HINT)
             self._native.ytick_labels(self._target, self._col, _size.native(size))
+            return self
+
+    def xtick_highlight(self, categories: Values[str], *, color: Color = Color.AUTO) -> Self:
+        """Highlight the x tick labels of some categories: bold, in a color of their own.
+
+        The labels of ``categories`` are drawn in the bold face of the theme's body font, in
+        ``color``; every other label is unchanged. Together with ``outline=`` on a heatmap, this
+        marks a group, such as a group of classes in a confusion matrix. Calling it again
+        replaces the set, and an empty list removes it. Like the other tick settings, the
+        highlight belongs to the shared x axis: a twin's call highlights the labels of the x
+        axis it shares.
+
+        Args:
+            categories: Names of categories of this x axis, which must be a category axis.
+            color: The color of the highlighted labels. ``Color.AUTO`` is the theme's emphasis
+                color (``Theme.with_emphasis_color()``), which outlined heatmap cells share.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``categories`` is not a sequence of names or ``color`` is not a
+                ``Color``.
+            DataError: If a name holds a line break or other control character. Rendering
+                raises it for a name that is not a category of the axis.
+            StyleError: If a name is longer than 1,000 characters. Rendering raises it when
+                automatic labels on a crowded axis, which show every k-th category, would
+                leave out a highlighted category: enlarge the figure or set a smaller size
+                with ``xtick_labels()``.
+            UsageError: If the x axis is not a category axis, or another panel sharing it set a
+                different highlight.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+            >>> ax = ax.bar(["North", "South", "East"], [3, 5, 4]).xtick_highlight(["South"])
+        """
+        with api_call():
+            context = "Axes.xtick_highlight()"
+            check_names_type(context, "categories", categories)
+            native_color = _color_argument(context, color)
+            chosen = names(context, "categories", categories)
+            self._native.xtick_highlight(self._target, self._col, chosen, native_color)
+            return self
+
+    def ytick_highlight(self, categories: Values[str], *, color: Color = Color.AUTO) -> Self:
+        """Highlight the y tick labels of some categories: bold, in a color of their own.
+
+        The same as ``xtick_highlight()``, for a category y axis. A twin's y axis is numeric
+        and takes no highlight.
+
+        Args:
+            categories: Names of categories of this y axis, which must be a category axis.
+            color: The color of the highlighted labels. ``Color.AUTO`` is the theme's emphasis
+                color (``Theme.with_emphasis_color()``), which outlined heatmap cells share.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If ``categories`` is not a sequence of names or ``color`` is not a
+                ``Color``.
+            DataError: If a name holds a line break or other control character. Rendering
+                raises it for a name that is not a category of the axis.
+            StyleError: If a name is longer than 1,000 characters. Rendering raises it when
+                automatic labels on a crowded axis, which show every k-th category, would
+                leave out a highlighted category: enlarge the figure or set a smaller size
+                with ``ytick_labels()``.
+            UsageError: If the y axis is not a category axis, or another panel sharing it set a
+                different highlight.
+
+        Example:
+            >>> import umber as ub
+            >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+            >>> names = ["cat", "dog", "fox"]
+            >>> ax = ax.heatmap(names, names, [[9, 1, 0], [2, 7, 1], [0, 3, 8]])
+            >>> ax = ax.xtick_highlight(["dog", "fox"]).ytick_highlight(["dog", "fox"])
+        """
+        with api_call():
+            context = "Axes.ytick_highlight()"
+            check_names_type(context, "categories", categories)
+            native_color = _color_argument(context, color)
+            chosen = names(context, "categories", categories)
+            self._native.ytick_highlight(self._target, self._col, chosen, native_color)
             return self
 
     def events(

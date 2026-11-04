@@ -1558,8 +1558,9 @@ impl Figure {
     /// row, one row per y category; the colormap (`None` for the theme's), the linear or log
     /// scale argument `(scale, base)`, the center and the format (`None` for the y tick format)
     /// are converted as those of a `ColorBy` and of `colorbar`; `render` is a `Render` value,
-    /// or `None` for `AUTO`.
-    #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format, render))]
+    /// or `None` for `AUTO`. `outline` holds one flag per value, row by row, or is `None` to
+    /// outline no cell; `outline_color` is a color argument and `edges` a flag.
+    #[pyo3(signature = (row, col, x_categories, y_categories, values, cmap, scale, base, center, annotate, format, render, outline, outline_color, edges))]
     fn heatmap(
         &mut self,
         row: AxesRow,
@@ -1574,6 +1575,9 @@ impl Figure {
         annotate: bool,
         format: Option<TickFormatArg>,
         render: Option<i64>,
+        outline: Option<Vec<bool>>,
+        outline_color: ColorArg,
+        edges: bool,
     ) -> PyResult<()> {
         let options = HeatmapOptions {
             cmap: cmap_choice(cmap),
@@ -1582,6 +1586,9 @@ impl Figure {
             annotate,
             format: format.map(tick_format).transpose()?,
             render: render_choice(render)?,
+            outline: outline.map(std::sync::Arc::from),
+            outline_color: color_spec(outline_color)?,
+            edges,
         };
         let (x, y) = (names(x_categories)?, names(y_categories)?);
         self.axes(row, col)?
@@ -1875,6 +1882,36 @@ impl Figure {
         let size = size_spec(size)?;
         self.axes(row, col)?
             .ytick_labels(size)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Highlights the x tick labels of the category names `categories` in `color`.
+    fn xtick_highlight(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let (categories, color) = (names(categories)?, color_spec(color)?);
+        self.axes(row, col)?
+            .xtick_highlight(categories, color)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Highlights the y tick labels of the category names `categories` in `color`.
+    fn ytick_highlight(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        categories: &Bound<'_, PyAny>,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let (categories, color) = (names(categories)?, color_spec(color)?);
+        self.axes(row, col)?
+            .ytick_highlight(categories, color)
             .map(drop)
             .map_err(core_error)
     }

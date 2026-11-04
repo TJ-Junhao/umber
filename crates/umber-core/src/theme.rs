@@ -16,7 +16,7 @@
 //! ```
 
 use crate::error::number;
-use crate::{Cmap, Error, Font, Result, Rgba, SizeSpec};
+use crate::{Cmap, ColorSpec, Error, Font, Result, Rgba, SizeSpec};
 
 /// The largest accepted `font_scale`.
 const MAX_FONT_SCALE: f64 = 10.0;
@@ -255,6 +255,7 @@ pub struct Theme {
     text_color: Rgba,
     muted_color: Rgba,
     grid_color: Rgba,
+    emphasis_color: Rgba,
     grid_lines: GridLines,
     grid_dash: Dash,
     grid_width: f32,
@@ -459,6 +460,7 @@ impl Theme {
             text_color: rgb(0x2B211B),
             muted_color: rgb(0x8C8076),
             grid_color: rgb(0xDDD3C7),
+            emphasis_color: rgb(0xBF2A17),
             grid_lines: GridLines::Horizontal,
             grid_dash: Dash::Dotted,
             grid_width: 0.75,
@@ -512,6 +514,7 @@ impl Theme {
             text_color: rgb(0x111111),
             muted_color: rgb(0x737373),
             grid_color: rgb(0xEBEBEB),
+            emphasis_color: rgb(0xC8301E),
             grid_lines: GridLines::Horizontal,
             grid_dash: Dash::Solid,
             grid_width: 0.75,
@@ -565,6 +568,7 @@ impl Theme {
             text_color: rgb(0xE7E9EF),
             muted_color: rgb(0x868D9C),
             grid_color: rgb(0x272B34),
+            emphasis_color: rgb(0xFF7438),
             grid_lines: GridLines::Horizontal,
             grid_dash: Dash::Dashed,
             grid_width: 0.75,
@@ -706,6 +710,38 @@ impl Theme {
     #[must_use]
     pub fn grid_color(&self) -> Rgba {
         self.grid_color
+    }
+
+    /// The emphasis color: the color of highlighted category labels
+    /// ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)) and of outlined heatmap
+    /// cells ([`HeatmapOptions::outline`](crate::HeatmapOptions::outline)) whose color is
+    /// automatic, so the two read as one mark.
+    ///
+    /// Each preset's emphasis color has a WCAG contrast ratio of at least 4.5:1 with its
+    /// background, since it colors text, and lies apart from its sequential colormap and its
+    /// first four palette colors.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::Theme;
+    ///
+    /// assert_eq!(Theme::pigment().emphasis_color().to_hex(), "#BF2A17");
+    /// assert_eq!(Theme::graphite().emphasis_color().to_hex(), "#C8301E");
+    /// assert_eq!(Theme::midnight().emphasis_color().to_hex(), "#FF7438");
+    /// ```
+    #[must_use]
+    pub fn emphasis_color(&self) -> Rgba {
+        self.emphasis_color
+    }
+
+    /// The color `spec` stands for where the emphasis color is automatic: the emphasis color
+    /// at the opacity of [`ColorSpec::Auto`], a palette slot or a fixed color as given.
+    pub(crate) fn emphasis(&self, spec: ColorSpec) -> Rgba {
+        match spec {
+            ColorSpec::Auto(alpha) => self.emphasis_color.with_alpha(alpha),
+            ColorSpec::Palette { .. } | ColorSpec::Fixed(_) => spec.resolve(&self.palette, 0),
+        }
     }
 
     /// Which gridlines are drawn.
@@ -1281,6 +1317,27 @@ impl Theme {
         })
     }
 
+    /// Replace the emphasis color (see [`Theme::emphasis_color`]).
+    ///
+    /// Returns a new theme; `self` is unchanged.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Rgba, Theme};
+    ///
+    /// let theme = Theme::pigment().with_emphasis_color(Rgba::BLUE)?;
+    /// assert_eq!(theme.emphasis_color(), Rgba::BLUE);
+    /// assert_eq!(Theme::pigment().emphasis_color().to_hex(), "#BF2A17");
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn with_emphasis_color(&self, value: Rgba) -> Result<Theme> {
+        Ok(Theme {
+            emphasis_color: value,
+            ..self.clone()
+        })
+    }
+
     /// Replace the baseline color.
     ///
     /// Returns a new theme; `self` is unchanged.
@@ -1665,6 +1722,7 @@ mod tests {
         assert_eq!(p.text_color().to_hex(), "#2B211B");
         assert_eq!(p.muted_color().to_hex(), "#8C8076");
         assert_eq!(p.grid_color().to_hex(), "#DDD3C7");
+        assert_eq!(p.emphasis_color().to_hex(), "#BF2A17");
         assert_eq!(
             (p.grid_lines(), p.grid_dash()),
             (GridLines::Horizontal, Dash::Dotted)
@@ -1700,6 +1758,7 @@ mod tests {
         assert_eq!(g.text_color().to_hex(), "#111111");
         assert_eq!(g.muted_color().to_hex(), "#737373");
         assert_eq!(g.grid_color().to_hex(), "#EBEBEB");
+        assert_eq!(g.emphasis_color().to_hex(), "#C8301E");
         assert_eq!(
             (g.grid_lines(), g.grid_dash()),
             (GridLines::Horizontal, Dash::Solid)
@@ -1735,6 +1794,7 @@ mod tests {
         assert_eq!(m.text_color().to_hex(), "#E7E9EF");
         assert_eq!(m.muted_color().to_hex(), "#868D9C");
         assert_eq!(m.grid_color().to_hex(), "#272B34");
+        assert_eq!(m.emphasis_color().to_hex(), "#FF7438");
         assert_eq!(
             (m.grid_lines(), m.grid_dash()),
             (GridLines::Horizontal, Dash::Dashed)
@@ -1810,6 +1870,12 @@ mod tests {
         assert_eq!(
             t.with_baseline_color(Rgba::RED).unwrap().baseline_color(),
             Rgba::RED
+        );
+        let emphasised = t.with_emphasis_color(Rgba::BLUE).unwrap();
+        assert_eq!(emphasised.emphasis_color(), Rgba::BLUE);
+        assert_eq!(
+            (emphasised.background(), t.emphasis_color().to_hex()),
+            (t.background(), "#BF2A17".to_owned())
         );
         assert_eq!(
             t.with_grid_lines(GridLines::Both).unwrap().grid_lines(),

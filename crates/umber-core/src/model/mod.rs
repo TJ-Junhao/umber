@@ -88,7 +88,7 @@ pub(crate) use step::{Edge, holds};
 pub use step::{Step, StepMark, StepOptions};
 pub use strip::{StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub(crate) use ticks::AxisTicks;
-pub use ticks::ExplicitTicks;
+pub use ticks::{ExplicitTicks, TickHighlight};
 pub(crate) use validation::{MAX_FIGURE_IN, check_text};
 
 #[cfg(test)]

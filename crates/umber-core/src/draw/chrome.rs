@@ -107,8 +107,16 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     }
 
     let muted = theme.muted_color();
-    for label in layout.y_tick_labels.iter().chain(&layout.x_tick_labels) {
-        items.push(text(label, muted));
+    // Each tick label in its own color: muted, or the highlight color of its category.
+    let ticks = [
+        (&layout.y_tick_labels, &layout.y_tick_colors),
+        (&layout.x_tick_labels, &layout.x_tick_colors),
+    ];
+    for (labels, colors) in ticks {
+        debug_assert_eq!(labels.len(), colors.len(), "one color per tick label");
+        for (label, &color) in labels.iter().zip(colors) {
+            items.push(text(label, color));
+        }
     }
     if let Some(title) = &layout.title {
         items.extend(block_items(title, theme.text_color()));

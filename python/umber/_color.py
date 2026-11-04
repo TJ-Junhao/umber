@@ -392,6 +392,23 @@ def native_sequence(context: str, colors: Sequence[Color]) -> list[tuple[int, in
     return arguments
 
 
+def fixed(packed: int) -> Color:
+    """Return the fixed color packed as ``0xRRGGBBAA``, as the native module returns colors.
+
+    Args:
+        packed: The color, ``0xRRGGBBAA``.
+
+    Returns:
+        The color.
+
+    Example:
+        >>> from umber._color import fixed
+        >>> fixed(0x3366B8FF)
+        Color.BLUE
+    """
+    return _new(_FIXED, packed, 1.0)
+
+
 def _new(kind: int, payload: int, alpha: float) -> "Color":
     """Build a color; the class has no public constructor."""
     color = object.__new__(Color)

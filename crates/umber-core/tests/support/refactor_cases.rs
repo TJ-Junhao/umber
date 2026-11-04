@@ -61,6 +61,9 @@
 //! - Values written in a column beside the plot: a forest plot with a titled column, a row of
 //!   values above a matched-fold chart, a column outside a colorbar and a row above a
 //!   twin-axes panel (in `corpus/value_column.rs`).
+//! - Emphasis: a confusion matrix with a group of classes highlighted on both axes and the
+//!   confusions within it outlined, with cell edges, an explicit outline color, and raster
+//!   cells (in `corpus/emphasis.rs`).
 //!
 //! Not covered:
 //!
@@ -113,6 +116,7 @@ mod corpus {
     pub mod colorbar;
     pub mod contour;
     pub mod ecdf;
+    pub mod emphasis;
     pub mod error_bars;
     pub mod events;
     pub mod font_file;
@@ -236,6 +240,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::in_plot::cases(&lib, &mut sink);
     corpus::point_labels::cases(&lib, &mut sink);
     corpus::value_column::cases(&lib, &mut sink);
+    corpus::emphasis::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

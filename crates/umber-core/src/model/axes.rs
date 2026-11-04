@@ -8,7 +8,7 @@ use super::annotation::Annotation;
 use super::grid::CellRange;
 use super::mark::Mark;
 use super::share::{AxisSettings, ExplicitLimits};
-use super::ticks::{AxisTicks, ExplicitTicks};
+use super::ticks::{AxisTicks, ExplicitTicks, TickHighlight};
 use crate::error::number;
 use crate::text::Lines;
 use crate::{
@@ -461,6 +461,42 @@ impl Axes {
     #[must_use]
     pub fn x_ticks(&self) -> Option<&ExplicitTicks> {
         self.x_settings.ticks.explicit()
+    }
+
+    /// The highlighted categories of a category x axis
+    /// ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)); empty when none is.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// assert!(axes.x_tick_highlight().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_tick_highlight(&self) -> &TickHighlight {
+        &self.x_settings.highlight
+    }
+
+    /// The highlighted categories of a category y axis
+    /// ([`AxesMut::ytick_highlight`](crate::AxesMut::ytick_highlight)); empty when none is.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// assert!(axes.y_tick_highlight().is_empty());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_tick_highlight(&self) -> &TickHighlight {
+        &self.y_settings.highlight
     }
 
     /// The explicit y ticks; `None` when the y axis uses the automatic ticks.
