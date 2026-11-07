@@ -16,7 +16,9 @@
 //! **Style.** Every label is set in the tick label style at the size of its mark's labels, in
 //! the mark's resolved color at full opacity: the series color, each group's own with `by=`,
 //! and the theme's text color for a color-mapped mark, whose per-point colors can lie close to
-//! the background. Its box is its advance width by its ascent and descent.
+//! the background. A series color moves in lightness only as far as it needs to reach a
+//! contrast of 4.5:1 with the background ([`readable_text`]); the markers keep it.
+//! Its box is its advance width by its ascent and descent.
 //!
 //! **Fixed sides.** [`Place::Above`] and [`Place::Below`] put the box [`GAP`] beyond the
 //! marker's drawn edge (its shape's extent plus its outline, [`marker_reach`]), centred
@@ -62,6 +64,7 @@
 
 use super::bar_labels::{self, contains};
 use super::chrome::text;
+use super::contrast::readable_text;
 use super::mapping::{AxisPoint, axis_values};
 use super::obstacles::{Bounds, Obstacles};
 use super::{DrawnMarks, has_fill, mark_context, marker_outline, marker_reach, solid};
@@ -347,19 +350,25 @@ impl ScatterLabels {
             } else {
                 format!("the series {}", quoted(&options.label))
             };
+            // A color-mapped mark's labels are in the theme's text color, not a series color.
+            let text_color = if mapped.is_some() {
+                solid(*color)
+            } else {
+                readable_text(solid(*color), theme)
+            };
             match Placing::of(labels.place) {
                 Placing::InPlot(side) => measured.push(MarkLabels {
                     mark: index,
                     name,
                     side,
-                    color: solid(*color),
+                    color: text_color,
                     reach: marker_reach(options.marker, *size, marker_outline(mapped.is_some())),
                     points,
                 }),
                 Placing::Column if points.is_empty() => {}
                 Placing::Column => columns.push(column::ColumnValues::measure(
                     (lib, theme),
-                    (index, name, solid(*color)),
+                    (index, name, text_color),
                     points,
                     (on_x, format, labels.size),
                 )?),

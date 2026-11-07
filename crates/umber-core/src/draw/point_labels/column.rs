@@ -3,7 +3,8 @@
 //! ([`crate::layout::ColumnInput`] describes the room the layout reserves for them).
 //!
 //! **Which values.** The same as next to the points: one per drawn point, measured and written
-//! as the module of the parent describes, in the color of its mark at full opacity. A point
+//! as the module of the parent describes, in the color of its mark at full opacity, moved in
+//! lightness as far as it needs to reach a contrast of 4.5:1 with the background. A point
 //! whose centre lies outside the plot gets none.
 //!
 //! **Sub-columns.** Each annotated mark that writes its values in the column and has a value

@@ -109,8 +109,9 @@ impl ValueColumn {
 /// A point that is not drawn gets no label: a NaN or missing coordinate, a color-mapped value
 /// that maps to no color, or a centre outside explicit limits.
 ///
-/// Labels take the resolved color of their mark at full opacity, whatever the marker alpha;
-/// a color-mapped mark's labels take the theme's text color.
+/// Labels take the resolved color of their mark at full opacity, whatever the marker alpha,
+/// moved in lightness only as far as it needs to reach a contrast of 4.5:1 with the
+/// background; a color-mapped mark's labels take the theme's text color.
 ///
 /// # Examples
 ///
