@@ -38,7 +38,7 @@ mod title_tests;
 pub(crate) mod twin;
 mod value_column;
 
-pub(crate) use aspect::fit_equal_aspect;
+pub(crate) use aspect::{check_equal_aspect_size, fit_equal_aspect};
 pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};

@@ -569,10 +569,11 @@ impl<'a> AxesMut<'a> {
     /// Makes one data unit equally long on both axes, for data in physical space, where a
     /// circle must stay a circle. A second call changes nothing.
     ///
-    /// The limits and the figure size stay as they are. The plot shrinks along one side until
-    /// both axes have the same points per data unit, and it is centred along that side in the
-    /// room the layout gave it; the other side keeps the size it had. A panel on a grid is
-    /// centred in its own cell and leaves the plots of other panels as they are.
+    /// The limits and the figure size stay as they are, except that automatic hexbin limits
+    /// grow to hold whole cells. The plot shrinks along one side until both axes have the same
+    /// points per data unit, and it is centred along that side in the room it has without this
+    /// setting; the other side keeps the size it had. A panel on a grid is centred in its own
+    /// cell and leaves the other panels as they are.
     ///
     /// Ticks, tick labels, axis labels, the colorbar, the value column, direct labels and text
     /// at positions in the plot follow the smaller plot. So do the panel's title, subtitle and
@@ -580,9 +581,10 @@ impl<'a> AxesMut<'a> {
     /// they are wider than the plot. The figure's header, caption and a colorbar shared by
     /// several panels belong to the grid, and stay where they are.
     ///
-    /// Marks that reach by a number of points, such as bubbles and value labels, change
-    /// automatic limits, and so the shape of the plot, as the layout settles. The scales are
-    /// equal for the limits of the final layout.
+    /// Marks that reach by a number of points, such as bubbles and value labels, widen
+    /// automatic limits at the largest scale that holds them in the room, and the shape of the
+    /// plot follows. The scales are equal for the limits of the final layout. Tick labels wider
+    /// than those of the same figure without the setting take room from this plot alone.
     ///
     /// # Errors
     ///

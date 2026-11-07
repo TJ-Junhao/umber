@@ -733,6 +733,16 @@ impl Figure {
         Ok(AxesMut::new(self, right))
     }
 
+    /// This figure with no axes having equal aspect, as the layout of a figure with the setting
+    /// starts from.
+    pub(crate) fn without_equal_aspect(&self) -> Figure {
+        let mut plain = self.clone();
+        for axes in &mut plain.axes {
+            axes.equal_aspect = false;
+        }
+        plain
+    }
+
     /// Refuses equal aspect on `axes` while another panel shares one of its axes: a shared axis
     /// is sized by its whole row or column, so one panel cannot shrink alone. `Error::Usage`
     /// under `context` naming the axis, x first. [`AxesMut::equal_aspect`] checks the panels on

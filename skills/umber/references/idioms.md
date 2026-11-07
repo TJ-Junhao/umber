@@ -67,7 +67,7 @@ For text at a fixed place in the plot, use `at=ub.InPlot(x, y)`, not data coordi
 
 ## Physical space
 
-For physical space, where a circle must stay a circle, use `ax.equal_aspect()`; do not tune the figure size. One data unit is then equally long on both axes: the limits and the figure stay as they are, and the plot shrinks along one side and is centred in its room. Ticks, labels, the colorbar and `InPlot` positions follow the smaller plot. Both axes must be linear and belong to this panel alone: no `twin_y()`, and no axis shared with another panel.
+For physical space, where a circle must stay a circle, use `ax.equal_aspect()`; do not tune the figure size. One data unit is then equally long on both axes: the limits and the figure stay as they are, except that automatic hexbin limits grow to hold whole cells, and the plot shrinks along one side and is centred in its room. Ticks, labels, the colorbar and `InPlot` positions follow the smaller plot. Both axes must be linear and belong to this panel alone: no `twin_y()`, and no axis shared with another panel.
 
 ```python
 angle = np.linspace(0, 2 * np.pi, 200)

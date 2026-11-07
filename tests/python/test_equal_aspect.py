@@ -155,3 +155,82 @@ def test_in_plot_positions_are_fractions_of_the_smaller_plot() -> None:
         return (ax.equal_aspect() if equal else ax).figure
 
     assert position(build(True), "Note")[0] < position(build(False), "Note")[0]
+
+
+def test_tick_labels_that_grow_keep_the_padding() -> None:
+    def build(equal: bool) -> ub.Figure:
+        fig = ub.Figure(12, 4, cols=2, legend=ub.Legend.PER_PANEL)
+        left = fig.add_axes(col=0).bubbles([0, 20], [1, 6], [1, 1])
+        if equal:
+            left.equal_aspect()
+        fig.add_axes(col=1).line([0, 1], [0, 1]).text("End", at=ub.InPlot(1, 0.5))
+        return fig
+
+    assert position(build(True), "2.5")[0] >= 12
+    assert position(build(True), "End") == position(build(False), "End")
+
+
+def test_bubbles_on_a_flat_domain_fit_at_the_figure_size() -> None:
+    ax = unit_ticks(ub.Figure(6, 4).add_axes().bubbles([0, 40], [0, 1], [1, 1])).equal_aspect()
+    x, y = unit_lengths(ax.figure)
+    assert x == pytest.approx(y, rel=1e-3)
+
+
+def test_a_flat_hexbin_gets_its_height_from_whole_cells() -> None:
+    ax = ub.Figure(6, 4).add_axes().hexbin([0, 1e6], [0, 0], gridsize=30).equal_aspect()
+    assert ax.figure.to_svg()
+
+
+def right_of_hexbin(equal: bool) -> ub.Figure:
+    fig = ub.Figure(6, 9, cols=2, legend=ub.Legend.PER_PANEL)
+    left = fig.add_axes(col=0).hexbin([0, 0.6, 0.2], [0, 4, 8], gridsize=3)
+    if equal:
+        left.equal_aspect()
+    fig.add_axes(col=1).line([0, 1], [0, 1]).text("End", at=ub.InPlot(1, 0.5), align=ub.Align.RIGHT)
+    return fig
+
+
+def test_a_hexbin_leaves_the_panel_beside_it() -> None:
+    assert position(right_of_hexbin(True), "End") == position(right_of_hexbin(False), "End")
+
+
+def test_a_direct_label_only_has_to_fit_the_final_plot() -> None:
+    def build(equal: bool) -> ub.Figure:
+        fig = ub.Figure(12, 3, cols=2, legend=ub.Legend.PER_PANEL)
+        left = fig.add_axes(col=0).line([0, 1], [0, 1], label="W" * 14)
+        left.legend(ub.LegendStyle.DIRECT)
+        if equal:
+            left.equal_aspect()
+        fig.add_axes(col=1).line([0, 1], [0, 1])
+        return fig
+
+    with pytest.raises(ub.StyleError, match="direct label"):
+        build(False).to_svg()
+    assert build(True).to_svg()
+
+
+def test_automatic_ticks_keep_the_side_that_does_not_shrink() -> None:
+    def build(equal: bool) -> ub.Figure:
+        ax = circle(ub.Figure(3, 9).add_axes()).text(
+            "End", at=ub.InPlot(1, 0.5), align=ub.Align.RIGHT
+        )
+        return (ax.equal_aspect() if equal else ax).figure
+
+    assert position(build(True), "End")[0] == position(build(False), "End")[0]
+
+
+def test_a_tall_legend_is_not_told_to_make_the_figure_taller() -> None:
+    def build(height: float) -> ub.Figure:
+        ax = ub.Figure(9, height).add_axes().xlim(0, 10).ylim(0, 1)
+        for i in range(8):
+            ax.line([0, 1], [0, 1], label=f"Series {i}")
+        ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
+        return ax.equal_aspect().figure
+
+    for height in [4, 12]:
+        with pytest.raises(ub.StyleError, match="the legend is") as caught:
+            build(height).to_svg()
+        hint = details(caught.value)
+        assert hint is not None
+        assert "wider" in str(hint[1])
+        assert "taller" not in str(hint[1])

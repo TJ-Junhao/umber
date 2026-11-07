@@ -243,7 +243,7 @@ left.figure.save_png("weather.png")
 
 ## Physical space
 
-`ax.equal_aspect()` makes one data unit equally long on both axes, so a circle stays a circle at any figure size. The limits stay as they are: the plot shrinks along one side and is centred in its room, and its ticks, labels and colorbar follow it. Both axes must be linear and not shared with another panel.
+`ax.equal_aspect()` makes one data unit equally long on both axes, so a circle stays a circle at any figure size. The limits stay as they are, except that automatic hexbin limits grow to hold whole cells: the plot shrinks along one side and is centred in its room, and its ticks, labels and colorbar follow it. Both axes must be linear and not shared with another panel.
 
 ```python
 import numpy as np

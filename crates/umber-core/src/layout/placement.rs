@@ -170,11 +170,18 @@ pub(super) fn check(input: &LayoutInput<'_>, layout: &Layout, single: bool) -> R
         } else {
             format!("the plot has {room} pt")
         };
+        // A plot that equal aspect made shorter than its room gets no taller with the figure.
+        let hint = if layout.plot.height < layout.room.height {
+            "make the figure wider, use fewer legend entries or another legend position, or \
+             remove equal_aspect()."
+        } else {
+            "make the figure taller, or use fewer legend entries."
+        };
         return Err(Error::style(
             input.context,
             format!("the legend is {height} pt tall; {available}."),
         )
-        .with_hint("make the figure taller, or use fewer legend entries."));
+        .with_hint(hint));
     }
     Ok(())
 }

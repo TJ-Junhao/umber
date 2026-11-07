@@ -833,10 +833,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Use it for physical space, where a circle must stay a circle. Calling it twice is the
         same as calling it once.
 
-        The limits and the figure size stay as they are. The plot shrinks along one side until
-        both axes have the same points per data unit, and it is centred along that side in the
-        room the layout gave it. On a grid each panel is centred in its own cell, and other
-        panels keep their plots.
+        The limits and the figure size stay as they are, except that automatic hexbin limits
+        grow to hold whole cells. The plot shrinks along one side until both axes have the same
+        points per data unit, and it is centred along that side in the room it has without this
+        setting. On a grid each panel is centred in its own cell, and other panels keep their
+        plots.
 
         Ticks, labels, the colorbar, the value column and direct labels follow the smaller
         plot, and ``InPlot`` positions are fractions of it. The panel's title, subtitle and
@@ -844,8 +845,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         wider than the plot. The figure's own header and caption and a shared colorbar stay
         where they are.
 
-        Bubbles and value labels that widen automatic limits change the shape of the plot as
-        the layout settles; the scales are equal for the final limits.
+        Bubbles and value labels widen automatic limits at the largest scale that holds them
+        in the room, so the shape of the plot follows; the scales are equal for the final
+        limits.
 
         Returns:
             These axes.

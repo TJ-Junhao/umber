@@ -352,21 +352,50 @@ struct FigurePlan {
     bubbles_settled: bool,
 }
 
-/// Where a plan takes the rooms of the plots from.
+/// The same figure without equal aspect, as far as a figure with the setting takes anything from
+/// it: where the grid put the panels, and the hexbin counts of each panel, in mark order.
+#[derive(Debug, Clone)]
+pub(crate) struct Reference {
+    /// The solve of the grid.
+    solution: layout::GridSolution,
+    /// The hexbin counts of each panel, in the order of the panels.
+    hexbins: Vec<Vec<crate::bin2d::HexBins>>,
+}
+
+/// Where a plan takes the rooms of the plots from, and how much it refuses.
 #[derive(Debug, Clone, Copy)]
-enum Rooms<'a> {
-    /// Each solve of the grid gives them, and plots with equal aspect shrink inside them.
+pub(crate) enum Rooms<'a> {
+    /// A figure without equal aspect: each solve of the grid gives the plots.
     Solved,
-    /// Each solve of the grid gives them, and every plot fills its room: the figure as it is
-    /// without equal aspect, as [`Rooms::Given`] needs it.
-    Plain,
-    /// The grid keeps this solve, and plots with equal aspect shrink inside its rooms, so that
-    /// no change of their limits or tick labels reaches the other panels.
-    Given(&'a layout::GridSolution),
+    /// The figure that a figure with equal aspect is without the setting, laid out only for its
+    /// rooms, which land in this cell after each plan: each solve of the grid gives the plots,
+    /// and nothing is refused that depends on where things are placed, since it is the final
+    /// figure that has to hold them.
+    Reference(&'a std::cell::RefCell<Option<Reference>>),
+    /// A figure with equal aspect: the grid keeps the solve of this reference, and the plots
+    /// with equal aspect shrink inside its rooms, so that no change of their limits or tick
+    /// labels reaches the other panels.
+    Given(&'a Reference),
+    /// As [`Rooms::Given`], on the way to the final layout: hexbin cells are still changing the
+    /// limits, so nothing is refused for the size or shape of this plan.
+    Provisional(&'a Reference),
+}
+
+impl Rooms<'_> {
+    /// The rooms for a figure with the reference `reference`, `None` for a figure without
+    /// equal aspect.
+    fn of(reference: Option<&Reference>) -> Rooms<'_> {
+        reference.map_or(Rooms::Solved, Rooms::Given)
+    }
+
+    /// Whether this plan is a final one, whose checks of limits, sizes and contents apply.
+    fn is_final(self) -> bool {
+        matches!(self, Rooms::Solved | Rooms::Given(_))
+    }
 }
 
 /// Why a layout was not made: an error, or bubbles that no automatic limits hold, which
-/// [`plan_cells`] turns into an error naming a figure size that holds them.
+/// [`plan_panels`] turns into an error naming a figure size that holds them.
 #[derive(Debug)]
 enum Unplanned {
     /// The layout fails with this error.
@@ -669,20 +698,19 @@ fn resolve_groups(
 /// those plots, before padding (and log-axis rounding), and later whenever a bubble reaches past a
 /// plot edge, shared panels with hidden tick labels included. A changed extent resolves the
 /// axes and solves the grid again, with the same tick choices. Bubbles that no extent holds
-/// fail the layout ([`BubbleFits::failure`]; [`plan_cells`] names a figure size that holds
+/// fail the layout ([`BubbleFits::failure`]; [`plan_panels`] names a figure size that holds
 /// them), and so does a grid that cannot hold the fitted limits. Only a fit still unsettled
 /// after the rounds leaves its axis with the limits of the data positions, and the plot clips
 /// its bubbles; on axes with equal aspect that is an error.
 ///
-/// Every solve ends by shrinking the plots of the panels with equal aspect for the limits it
-/// was made with ([`layout::fit_equal_aspect`]), so ticks, bubble fits and everything placed
-/// around a plot read the smaller plot, and the scales are equal on the final layout. The
-/// function explains why the passes end. A plot that shrinks gets other ticks, whose labels
-/// could move the bands of the grid and so the plots of other panels. A figure of several panels
-/// is therefore planned twice: first without equal aspect ([`Rooms::Plain`]), and then on the
-/// solve of that plan ([`Rooms::Given`]), so that each panel without the setting lays out
-/// exactly as it does without it, and each panel with it shrinks in the room it had. Its tick
-/// labels sit by its plot, in the band of that solve.
+/// A figure with equal aspect takes its rooms from the same figure without the setting, laid
+/// out to the end first ([`reference_rooms`]): the grid keeps that solve ([`Rooms::Given`]), so
+/// each panel without the setting lays out as it does there, and each panel with it stays in the
+/// room it has there. Every solve ends by shrinking those plots for the limits it was made with
+/// ([`layout::fit_equal_aspect`]), so ticks, bubble fits and everything placed around a plot read
+/// the smaller plot, and the scales are equal on the final layout. Their bubbles and value
+/// labels are fitted on one scale for both axes ([`BubbleFits::update`]). That function explains
+/// why the passes end.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -695,23 +723,6 @@ fn resolve_groups(
 /// ([`BubbleFits::failure`]); then as [`layout::check_panel_contents`], for the final layout
 /// only.
 fn plan(
-    figure: &Figure,
-    panels: &[Panel<'_>],
-    groups: &ShareGroups,
-    lib: &SceneFonts<'_>,
-    context: &'static str,
-    labels: &layout::LabelCache<'_>,
-) -> std::result::Result<FigurePlan, Unplanned> {
-    if panels.len() > 1 && panels.iter().any(has_equal_aspect) {
-        let plain = plan_rooms(figure, panels, groups, lib, context, labels, Rooms::Plain)?;
-        let rooms = Rooms::Given(&plain.solution);
-        return plan_rooms(figure, panels, groups, lib, context, labels, rooms);
-    }
-    plan_rooms(figure, panels, groups, lib, context, labels, Rooms::Solved)
-}
-
-/// [`plan`] with the rooms of the plots taken from `rooms`.
-fn plan_rooms(
     figure: &Figure,
     panels: &[Panel<'_>],
     groups: &ShareGroups,
@@ -786,10 +797,7 @@ fn plan_rooms(
             }
         })
         .collect();
-    let equal_aspect: Vec<_> = panels
-        .iter()
-        .map(|panel| has_equal_aspect(panel) && !matches!(rooms, Rooms::Plain))
-        .collect();
+    let equal_aspect: Vec<_> = panels.iter().map(has_equal_aspect).collect();
     let solve_rooms =
         |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
             let colorbars: Vec<_> = color_cells
@@ -823,8 +831,8 @@ fn plan_rooms(
         };
     let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
         let mut solution = match rooms {
-            Rooms::Solved | Rooms::Plain => solve_rooms(resolved, bands)?,
-            Rooms::Given(solution) => solution.clone(),
+            Rooms::Solved | Rooms::Reference(_) => solve_rooms(resolved, bands)?,
+            Rooms::Given(reference) | Rooms::Provisional(reference) => reference.solution.clone(),
         };
         // Every solve ends here, so whatever reads a plot below reads the final rectangle.
         for (i, slot) in solution.panels.iter_mut().enumerate() {
@@ -834,7 +842,12 @@ fn plan_rooms(
                 resolved[i].x.continuous(),
                 resolved[i].y.continuous(),
             ) {
-                layout::fit_equal_aspect(slot, x, y, context)
+                let cells = panels[i].axes.cells();
+                let outer = [
+                    cells.col() == 0,
+                    cells.col() + cells.col_span() == figure.grid().cols(),
+                ];
+                layout::fit_equal_aspect(slot, &bands[i], outer, [x, y], context)
                     .map_err(|error| in_cell(figure, panels[i].axes, error))?;
             }
         }
@@ -1157,8 +1170,17 @@ fn plan_rooms(
             .iter()
             .map(|slot| slot.plot.size())
             .collect();
-        let refitted = fits.update(&resolved, &plots);
-        if let Some(failure) = fits.failure(&marks) {
+        // The plots with equal aspect have one scale for both axes, in the room they may take.
+        let joint: Vec<_> = solution
+            .panels
+            .iter()
+            .zip(&equal_aspect)
+            .map(|(slot, &equal)| equal.then(|| slot.plot_room.size()))
+            .collect();
+        let refitted = fits.update(&resolved, &plots, &joint);
+        // A reference has data limits where bubbles do not fit: the final figure reports them.
+        if let (false, Some(failure)) = (matches!(rooms, Rooms::Reference(_)), fits.failure(&marks))
+        {
             return Err(Unplanned::Bubbles(failure));
         }
         if refitted {
@@ -1406,7 +1428,11 @@ fn plan_rooms(
 
     // Check only final domains: shared data, cells and bubble fitting can widen them, and
     // provisional layouts may deliberately omit automatic x ticks.
-    for (i, r) in resolved.iter().enumerate() {
+    for (i, r) in resolved.iter().enumerate().filter(|_| rooms.is_final()) {
+        if let (true, Some(x), Some(y)) = (equal_aspect[i], r.x.continuous(), r.y.continuous()) {
+            layout::check_equal_aspect_size(&solution.panels[i], [x, y], context)
+                .map_err(|error| in_cell(figure, panels[i].axes, error))?;
+        }
         for (side, axis, name) in [(Side::X, &r.x, "x"), (Side::Y, &r.y, "y")] {
             if let resolve::AxisLimits::Continuous(limits) = limits[i].axis(side.axis())
                 && limits.transform == crate::Transform::Linear
@@ -1486,7 +1512,15 @@ fn plan_rooms(
         planned[i].1.legend = layout::placement::best(input.legend, &layout.plot, &marks);
     }
     let (resolved, layouts): (Vec<Resolved>, Vec<Layout>) = planned.into_iter().unzip();
-    layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
+    if rooms.is_final() {
+        layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
+    }
+    if let Rooms::Reference(reference) = rooms {
+        reference.replace(Some(Reference {
+            solution: solution.clone(),
+            hexbins: panels.iter().map(hexbin_counts).collect(),
+        }));
+    }
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
@@ -1508,10 +1542,11 @@ fn plan_rooms(
 /// cells cannot count it exactly, and is an error.
 ///
 /// On axes with equal aspect the plot takes its shape from the limits, so the lattice cannot
-/// adapt to the plot: it is counted once, on the first plan, in the metric of the axes, whose
-/// data units are equally long, so its hexagons are regular on any plot with those scales. An
-/// independent lattice would round its rows, and leave them stretched. Automatic limits then
-/// grow to hold whole cells, and the next pass finds nothing left to do.
+/// adapt to the plot: it is counted once, in the metric of the first limits, whose data units
+/// are equally long, so its hexagons are regular on any plot with equal scales. An independent
+/// lattice would round its rows, and leave them stretched. Automatic limits then grow to hold
+/// whole cells, and the next pass finds nothing left to do. Those limits can give a very
+/// different plot from the first, so only the settled layout is checked ([`Rooms::Provisional`]).
 ///
 /// A lone automatic hexbin is fitted tightly: its whole cells plus the least room, on one
 /// axis, that gives the plot's shape. That room moves the automatic ticks, and their labels
@@ -1526,6 +1561,28 @@ fn plan_rooms(
 /// figure that settles within [`TIGHT_PASSES`] passes lays out as with tight fits alone; one
 /// that needed more tight passes may lay out differently. The passes are still bounded, and a
 /// layout that does not settle within them is an error.
+fn plan_panels(
+    figure: &Figure,
+    panels: &mut [Panel<'_>],
+    groups: &ShareGroups,
+    lib: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+    rooms: Rooms<'_>,
+) -> Result<FigurePlan> {
+    match lay_out(figure, panels, groups, lib, context, labels, rooms) {
+        Ok(planned) => Ok(planned),
+        Err(Unplanned::Failed(error)) => Err(error),
+        Err(Unplanned::Bubbles(failure)) => Err(in_cell(
+            figure,
+            panels[failure.panel].axes,
+            bubbles_error(figure, failure, lib, context, labels),
+        )),
+    }
+}
+
+/// [`plan_panels`] for a figure as [`scene`] lays it out, its rooms found first.
+#[cfg(test)]
 fn plan_cells(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1534,14 +1591,62 @@ fn plan_cells(
     context: &'static str,
     labels: &layout::LabelCache<'_>,
 ) -> Result<FigurePlan> {
-    match lay_out(figure, panels, groups, lib, context, labels) {
-        Ok(planned) => Ok(planned),
-        Err(Unplanned::Failed(error)) => Err(error),
-        Err(Unplanned::Bubbles(failure)) => Err(in_cell(
-            figure,
-            panels[failure.panel].axes,
-            bubbles_error(figure, failure, lib, context, labels),
-        )),
+    let reference = reference_rooms(figure, groups, lib, context, labels)?;
+    let rooms = Rooms::of(reference.as_ref());
+    plan_panels(figure, panels, groups, lib, context, labels, rooms)
+}
+
+/// The hexbin counts of `panel`, in mark order.
+fn hexbin_counts(panel: &Panel<'_>) -> Vec<crate::bin2d::HexBins> {
+    panel
+        .marks
+        .iter()
+        .filter_map(|mark| match mark {
+            ResolvedMark::Hexbin { bins, .. } => Some(bins.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The same figure as `figure` without equal aspect, for the plots of `figure` to shrink in;
+/// `None` for a figure without the setting, which solves the grid itself.
+///
+/// The reference is that figure laid out to the end, with its own hexbin counts and the sides
+/// of its own value labels, so its rooms hold nothing that the setting changed. Only the rooms
+/// matter here, so an error of drawing, of hexbin cells that do not settle or of the labels of a
+/// later pass keeps the rooms of the last plan. Since the bubbles of a reference never fail
+/// ([`Rooms::Reference`]), an error before any plan is one that the figure has with or without
+/// the setting.
+///
+/// # Errors
+///
+/// As [`plan_panels`], when no plan was made.
+fn reference_rooms(
+    figure: &Figure,
+    groups: &ShareGroups,
+    fonts: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+) -> Result<Option<Reference>> {
+    if !figure.all_cartesian_axes().any(Axes::has_equal_aspect) {
+        return Ok(None);
+    }
+    let plain = figure.without_equal_aspect();
+    let reference = std::cell::RefCell::new(None);
+    let outcome = point_labels::fit_then_place(|held| {
+        let mut panels = panels(&plain, groups, fonts)?;
+        if let Some(held) = held {
+            for (panel, sides) in panels.iter_mut().zip(held) {
+                panel.points.hold(sides.clone());
+            }
+        }
+        let rooms = Rooms::Reference(&reference);
+        draw_scene(&plain, &mut panels, groups, fonts, context, labels, rooms)
+    });
+    match (reference.into_inner(), outcome) {
+        (Some(reference), _) => Ok(Some(reference)),
+        (None, Err(error)) => Err(error),
+        (None, Ok(_)) => Ok(None),
     }
 }
 
@@ -1587,7 +1692,10 @@ fn bubbles_error(
         let resized = figure.resized(size[0] / 72.0, size[1] / 72.0);
         let groups = ShareGroups::new(&resized);
         let mut records = panels(&resized, &groups, lib).map_err(|_| None)?;
-        match lay_out(&resized, &mut records, &groups, lib, context, labels) {
+        let reference =
+            reference_rooms(&resized, &groups, lib, context, labels).map_err(|_| None)?;
+        let rooms = Rooms::of(reference.as_ref());
+        match lay_out(&resized, &mut records, &groups, lib, context, labels, rooms) {
             Ok(planned) if planned.bubbles_settled => Ok(()),
             Ok(_) | Err(Unplanned::Failed(_)) => Err(None),
             Err(Unplanned::Bubbles(failure)) => Err(Some(failure)),
@@ -1609,17 +1717,8 @@ fn bubbles_error(
             })
         }
     };
-    // The limits set the shape of a plot with equal aspect, so a side may need the other to
-    // grow: a side of the figure only lengthens the plot when it is the side that limits it.
-    let both = |panel: usize| {
-        figure
-            .layers()
-            .nth(panel)
-            .and_then(|layer| layer.cartesian())
-            .is_some_and(Axes::has_equal_aspect)
-    };
     let plot = [failure.plot.width, failure.plot.height];
-    let mut grows = [both(failure.panel); 2];
+    let mut grows = [false; 2];
     grows[failure.side()] = true;
     let mut size = own;
     for side in 0..2 {
@@ -1645,7 +1744,7 @@ fn bubbles_error(
         };
         let mut sides = grows;
         if let Some(failed) = failed {
-            sides = [both(failed.panel); 2];
+            sides = [false; 2];
             sides[failed.side()] = true;
             last = failed;
         }
@@ -1689,7 +1788,7 @@ fn bubbles_error(
     last.needs_figure(context, size, own)
 }
 
-/// [`plan_cells`] without naming a figure size for bubbles that no automatic limits hold.
+/// [`plan_panels`] without naming a figure size for bubbles that no automatic limits hold.
 fn lay_out(
     figure: &Figure,
     panels: &mut [Panel<'_>],
@@ -1697,16 +1796,37 @@ fn lay_out(
     lib: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
+    rooms: Rooms<'_>,
 ) -> std::result::Result<FigurePlan, Unplanned> {
-    let mut planned = plan(figure, panels, groups, lib, context, labels)?;
     if !panels.iter().any(|panel| {
         panel
             .marks
             .iter()
             .any(|mark| matches!(mark, ResolvedMark::Hexbin { .. }))
     }) {
-        return Ok(planned);
+        return plan(figure, panels, groups, lib, context, labels, rooms);
     }
+    // Cells set the limits only once counted, so the plans before that decide nothing. A panel
+    // without equal aspect has the cells of its reference, which fit the plot it has there.
+    let passing = match rooms {
+        Rooms::Given(reference) => {
+            for (panel, counts) in panels.iter_mut().zip(&reference.hexbins) {
+                if !has_equal_aspect(panel) {
+                    let marks = panel.marks.iter_mut().filter_map(|mark| match mark {
+                        ResolvedMark::Hexbin { bins, .. } => Some(bins),
+                        _ => None,
+                    });
+                    for (bins, count) in marks.zip(counts) {
+                        bins.clone_from(count);
+                    }
+                }
+            }
+            resolve_colors(figure, panels, groups);
+            Rooms::Provisional(reference)
+        }
+        Rooms::Solved | Rooms::Reference(_) | Rooms::Provisional(_) => rooms,
+    };
+    let mut planned = plan(figure, panels, groups, lib, context, labels, passing)?;
     let axis_scales = |planned: &FigurePlan| {
         planned
             .panels
@@ -1749,6 +1869,10 @@ fn lay_out(
             let Some(axes) = panel.axes.cartesian() else {
                 continue;
             };
+            let equal = has_equal_aspect(panel);
+            if matches!(passing, Rooms::Provisional(_)) && !equal {
+                continue;
+            }
             let limits = [axes.x_limits(), axes.y_limits()];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
@@ -1760,7 +1884,6 @@ fn lay_out(
                     matches!(m, ResolvedMark::Hexbin { mark, .. } if !mark.extents[0].is_empty())
                 })
                 .count();
-            let equal = has_equal_aspect(panel);
             let independent = !shared && !equal && limits == [None, None] && hexbins <= 1;
             let only_hexbin = panel
                 .marks
@@ -1787,13 +1910,18 @@ fn lay_out(
                                 aspects[i],
                             )
                         } else {
+                            let [x, y] = counting_scales[i].map(|scale| {
+                                let (lo, hi) = scale.domain();
+                                hi - lo
+                            });
                             crate::bin2d::HexBins::on_axes(
                                 &mark.x,
                                 &mark.y,
                                 mark.gridsize,
                                 counting_scales[i],
-                                aspects[i],
-                                // The room for end caps would make the metric unequal.
+                                // The shape of the limits, which a provisional plot may not
+                                // have, and no room for end caps: both keep the metric equal.
+                                if equal { x / y } else { aspects[i] },
                                 if equal { [None, None] } else { limits },
                             )
                         };
@@ -1839,7 +1967,7 @@ fn lay_out(
             }
         }
         resolve_colors(figure, panels, groups);
-        planned = plan(figure, panels, groups, lib, context, labels)?;
+        planned = plan(figure, panels, groups, lib, context, labels, passing)?;
         if planned
             .panels
             .iter()
@@ -1858,7 +1986,10 @@ fn lay_out(
         {
             #[cfg(test)]
             SETTLED_PASS.with(|settled| settled.set(pass));
-            return Ok(planned);
+            return match passing {
+                Rooms::Provisional(_) => plan(figure, panels, groups, lib, context, labels, rooms),
+                Rooms::Solved | Rooms::Reference(_) | Rooms::Given(_) => Ok(planned),
+            };
         }
     }
     Err(crate::Error::data(
@@ -1871,14 +2002,14 @@ fn lay_out(
     .into())
 }
 
-/// The passes after which [`plan_cells`] stops fitting lone hexbins tightly.
+/// The passes after which [`plan_panels`] stops fitting lone hexbins tightly.
 pub(crate) const TIGHT_PASSES: usize = 32;
 
 #[cfg(test)]
 thread_local! {
-    /// Whether [`plan_cells`] keeps fitting lone hexbins tightly through every pass.
+    /// Whether [`plan_panels`] keeps fitting lone hexbins tightly through every pass.
     pub(crate) static KEEP_TIGHT_FITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// The pass at which [`plan_cells`] last settled.
+    /// The pass at which [`plan_panels`] last settled.
     pub(crate) static SETTLED_PASS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -2104,6 +2235,8 @@ fn scene_with_labels(
     check_contour_levels(figure, &groups, context)?;
     check_value_columns(figure, context)?;
     check_equal_aspect(figure, context)?;
+    let reference = reference_rooms(figure, &groups, fonts, context, labels)?;
+    let rooms = Rooms::of(reference.as_ref());
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
         if let Some(held) = held {
@@ -2111,7 +2244,7 @@ fn scene_with_labels(
                 panel.points.hold(sides.clone());
             }
         }
-        draw_scene(figure, &mut panels, &groups, fonts, context, labels)
+        draw_scene(figure, &mut panels, &groups, fonts, context, labels, rooms)
     })?
 }
 
@@ -2133,6 +2266,7 @@ fn draw_scene(
     fonts: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
+    rooms: Rooms<'_>,
 ) -> Result<(Result<Scene>, Vec<point_labels::Placement>)> {
     let theme = figure.theme();
     let (width, height) = (figure.width_in() * 72.0, figure.height_in() * 72.0);
@@ -2146,7 +2280,7 @@ fn draw_scene(
         }
         return Ok((Ok(scene), Vec::new()));
     }
-    let planned = plan_cells(figure, panels, groups, fonts, context, labels)?;
+    let planned = plan_panels(figure, panels, groups, fonts, context, labels, rooms)?;
     // Judged against the settled layout only, as the errors of value columns: an earlier pass
     // may lay the plot out smaller and thin out a highlighted label that the last one shows.
     let mut settled_error = check_tick_highlights(figure, panels, &planned, context)?;
@@ -2942,6 +3076,7 @@ mod tests {
                 &fonts,
                 "Figure.to_scene()",
                 &layout::LabelCache::new(&fonts),
+                crate::pipeline::Rooms::Solved,
             ) else {
                 panic!("the figure lays out")
             };

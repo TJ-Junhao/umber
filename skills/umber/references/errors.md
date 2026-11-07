@@ -70,7 +70,8 @@ These errors cannot be found when the mark is added, because they depend on the 
 | `ub.UsageError` | An axis with `equal_aspect()` is shared with a panel added after the call. The message names the axis and, on a grid, the cell. | Stop sharing that axis, or remove `equal_aspect()`. |
 | `ub.StyleError` | `equal_aspect()` leaves the plot less than 1 pt on a side, because the x and y ranges are too far apart. The message names both ranges. | Bring the ranges closer together, or remove `equal_aspect()`. |
 | `ub.StyleError` | The y axis label is wider than a plot that `equal_aspect()` made narrow. A wider figure need not help, since the limits set the plot's shape. | Shorten the label, use a smaller `size=`, or remove `equal_aspect()`. |
-| `ub.StyleError` | The bubbles on axes with `equal_aspect()` do not settle: each fit of the limits changes the plot's shape again. | Make the figure larger, or set explicit limits, which clip the bubbles. |
+| `ub.StyleError` | The bubbles on axes with `equal_aspect()` do not settle: tick labels keep taking room from the plot that held them. | Make the figure larger, or set explicit limits, which clip the bubbles. |
+| `ub.StyleError` | A legend beside or inside a plot that `equal_aspect()` made short is taller than the plot. A taller figure does not help, since the width sets the plot. | Make the figure wider, use fewer entries or another legend position, or remove `equal_aspect()`. |
 | `ub.StyleError` | Contours that share a colorbar have different levels, on one axes or on panels that share the colorbar. | Give them identical `levels`. |
 | `ub.StyleError` | `swarm()` points do not fit their category band. | Use `strip()` or `violin()` for many points. |
 | `ub.StyleError` | Pie labels cannot be placed outside the circle without overlap. | Merge small slices into "Other", enlarge the figure, or use `legend(ub.LegendStyle.HEADER)` or `ub.LegendStyle.CHIPS`. |

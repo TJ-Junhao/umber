@@ -243,7 +243,7 @@ left.figure.save_png("weather.png")
 
 ## 物理空间
 
-`ax.equal_aspect()` 让一个数据单位在两条轴上等长，因此无论 figure 多大，圆都保持为圆。limits 不变：plot 沿一边缩小，并在它的空间内居中，ticks、标签和 colorbar 随之移动。两条轴都必须是线性轴，且不与其他 panel 共享。
+`ax.equal_aspect()` 让一个数据单位在两条轴上等长，因此无论 figure 多大，圆都保持为圆。limits 不变（只有自动的 hexbin limits 会扩大，以容纳完整的 cell）：plot 沿一边缩小，并在它的空间内居中，ticks、标签和 colorbar 随之移动。两条轴都必须是线性轴，且不与其他 panel 共享。
 
 ```python
 import numpy as np
