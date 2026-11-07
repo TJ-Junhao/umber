@@ -334,15 +334,23 @@ fn pie_slot(
         .header_for_plot((left, right), (left, plot_right));
     let plot_top = top + bands.above_with_row(&row);
     let plot_bottom = bottom - bands.axis_below() - panel.legend.bottom_reserve(left, right);
+    let plot = Area {
+        x: left,
+        y: plot_top,
+        width: plot_right - left,
+        height: plot_bottom - plot_top,
+    };
     PanelSlot {
-        plot: Area {
-            x: left,
-            y: plot_top,
-            width: plot_right - left,
-            height: plot_bottom - plot_top,
-        },
+        plot,
         aligned,
-        header: HeaderBox { left, right, top },
+        room: plot,
+        plot_room: plot,
+        header: HeaderBox {
+            left,
+            right,
+            top,
+            inset: (0.0, 0.0),
+        },
         xlabel_baseline: plot_bottom,
         frame,
     }
@@ -382,6 +390,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             left: canvas.x + PADDING,
             right: canvas.right() - PADDING,
             top: input.top,
+            inset: (0.0, 0.0),
         };
         let panels = input
             .panels
@@ -391,6 +400,8 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                 solve_single(panel, bands, canvas, input.top, input.caption).map(|plot| PanelSlot {
                     plot,
                     aligned: plot,
+                    room: plot,
+                    plot_room: plot,
                     header,
                     xlabel_baseline: plot.bottom()
                         + bands.x_band
@@ -467,10 +478,13 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             PanelSlot {
                 plot: aligned,
                 aligned,
+                room: aligned,
+                plot_room: aligned,
                 header: HeaderBox {
                     left: header_left,
                     right: header_right,
                     top: rows.row_top[cells.row()],
+                    inset: (0.0, 0.0),
                 },
                 xlabel_baseline: bottom + (rows.below[last_row] - rows.legends[last_row])
                     - bands.xlabel_descent,

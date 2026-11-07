@@ -394,8 +394,8 @@ fn pies_keep_clear_of_shared_colorbars() {
         }
         donut(&mut f, pie, LegendStyle::Direct, None);
         let plan = planned(&f).unwrap();
-        assert_eq!(plan.colorbars.len(), 1);
-        let bar = &plan.colorbars[0].1;
+        assert_eq!(plan.solution.colorbars.len(), 1);
+        let bar = &plan.solution.colorbars[0].1;
         let (_, layout, placed) = pie_of(&f, &plan);
         let mut texts = placed.labels.iter().map(|label| &label.text);
         match position {

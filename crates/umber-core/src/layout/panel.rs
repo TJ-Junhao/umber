@@ -74,6 +74,23 @@ pub(crate) struct HeaderBox {
     pub right: f64,
     /// The top of the header.
     pub top: f64,
+    /// How far the header moves in from the left and the right end of the box to stay over a
+    /// plot narrower than its room ([`super::aspect::fit_equal_aspect`]); 0 otherwise. Rows
+    /// still wrap within the whole box, as the header was measured.
+    pub inset: (f64, f64),
+}
+
+impl HeaderBox {
+    /// The span a text `width` wide is aligned in: the box without its inset, or the whole box
+    /// when the text is wider than that, so that it keeps to the panel's room.
+    fn text_span(&self, width: f64) -> (f64, f64) {
+        let (left, right) = (self.left + self.inset.0, self.right - self.inset.1);
+        if width <= right - left {
+            (left, right)
+        } else {
+            (self.left, self.right)
+        }
+    }
 }
 
 /// Where a panel goes on the canvas: its plot area, its header box, the baseline of its x axis
@@ -87,6 +104,12 @@ pub(crate) struct PanelSlot {
     /// the plot area itself, except for a pie panel on a grid, whose plot area is its whole
     /// cell below its header.
     pub aligned: Area,
+    /// The room the layout gave the plot: the plot area itself, except with equal aspect, whose
+    /// plot is centred in this area ([`super::aspect::fit_equal_aspect`]).
+    pub room: Area,
+    /// The part of the room that the plot may take: all of it, unless wider tick labels need
+    /// some of it ([`super::aspect::fit_equal_aspect`]).
+    pub plot_room: Area,
     /// The header box.
     pub header: HeaderBox,
     /// The baseline of the x axis label: under the panel's own x tick labels for a figure of
@@ -283,9 +306,8 @@ impl Header {
         let stacked = self.stack_with_row(box_.top, row);
         let at = |line: HeaderLine, baseline: f64| {
             let mut block = line.label;
-            block.place(baseline, |width| {
-                align.position(width, box_.left, box_.right)
-            });
+            let (left, right) = box_.text_span(block.width());
+            block.place(baseline, |width| align.position(width, left, right));
             block
         };
         PlacedHeader {
@@ -315,6 +337,8 @@ pub(super) enum TextKind {
     Caption,
     XLabel,
     YLabel,
+    /// A y axis label over a plot that equal aspect made narrower than its room.
+    NarrowedYLabel,
     LeftYLabel,
     RightYLabel,
 }
@@ -330,6 +354,10 @@ impl TextKind {
             (Self::Caption, crate::SizeSpec::Points(_)) => {
                 "break the line with \"\\n\", make the figure wider or pass a smaller size=."
             }
+            // A wider figure need not widen the plot: the limits set its shape.
+            (Self::NarrowedYLabel, _) => {
+                "shorten the label, use a smaller size, or remove equal_aspect()."
+            }
             _ => text_size_hint(size),
         }
     }
@@ -340,7 +368,7 @@ impl TextKind {
             Self::Subtitle => "subtitle",
             Self::Caption => "caption",
             Self::XLabel => "x axis label",
-            Self::YLabel => "y axis label",
+            Self::YLabel | Self::NarrowedYLabel => "y axis label",
             Self::LeftYLabel => "left y axis label",
             Self::RightYLabel => "right y axis label",
         }
@@ -392,14 +420,27 @@ pub(super) fn check_text_width(
     Ok(())
 }
 
-/// The x label is centered on the plot; the right y label ends at its right edge.
-/// The left y label starts at the left edge of its tick column and may reach the plot's right.
+/// The x label is centered on the plot, and may use the room on both sides of it, since nothing
+/// else is in its row; the right y label ends at its right edge.
+/// The left y label starts at the left edge of its tick column and may reach the plot's right,
+/// since the title of a colorbar or a value column can share its band beyond that.
 pub(super) fn check_axis_titles(
     layout: &Layout,
     axes: &crate::Axes,
     y_kind: TextKind,
     context: &'static str,
 ) -> Result<()> {
+    let y_kind = if layout.plot.width < layout.room.width {
+        TextKind::NarrowedYLabel
+    } else {
+        y_kind
+    };
+    let x_room = if layout.plot == layout.room {
+        layout.plot.width
+    } else {
+        let centre = layout.plot.x + layout.plot.width / 2.0;
+        2.0 * (centre - layout.room.x).min(layout.room.right() - centre)
+    };
     let y_room = match y_kind {
         TextKind::RightYLabel => layout.plot.width,
         _ => layout
@@ -411,7 +452,7 @@ pub(super) fn check_axis_titles(
         (
             layout.xlabel.as_ref(),
             axes.xlabel_size(),
-            layout.plot.width,
+            x_room,
             TextKind::XLabel,
         ),
         (layout.ylabel.as_ref(), axes.ylabel_size(), y_room, y_kind),
@@ -468,6 +509,7 @@ impl FigureHeader {
             left: PADDING,
             right: figure.width_in() * 72.0 - PADDING,
             top: PADDING,
+            inset: (0.0, 0.0),
         };
         let row = legend.row_within(box_.left, box_.right);
         let header = Header::measure(
@@ -1075,9 +1117,11 @@ pub(crate) fn place_panel(
     let PanelSlot {
         plot,
         aligned,
+        room,
         header: header_box,
         xlabel_baseline,
         frame,
+        ..
     } = *slot;
     let axis_below = bands.axis_below();
     let label_rise = bands.top_label_rise();
@@ -1100,9 +1144,15 @@ pub(crate) fn place_panel(
         ..
     } = bands;
     let position = input.legend.position;
+    // Rows wrap as they were measured, within the room, then move in with the plot.
     let row = input
         .legend
-        .header_for_plot((header_box.left, header_box.right), (plot.x, plot.right()));
+        .header_for_plot((header_box.left, header_box.right), (room.x, room.right()));
+    let row = if position == crate::LegendPosition::TopRight {
+        row.moved_within(-header_box.inset.1, room.x, room.right())
+    } else {
+        row.moved_within(header_box.inset.0, header_box.left, header_box.right)
+    };
     let row_height = (!row.is_empty()).then(|| row.height());
     let header = heading.place(header_box, input.theme.title_align(), row_height);
     let row = match position {
@@ -1132,6 +1182,7 @@ pub(crate) fn place_panel(
             input
                 .legend
                 .row_within(header_box.left, header_box.right)
+                .moved_within(header_box.inset.0, header_box.left, header_box.right)
                 .placed(axis_bottom + super::placement::BOTTOM_GAP)
         }
         // The final resolved mark geometry chooses the position after layout.
@@ -1245,6 +1296,7 @@ pub(crate) fn place_panel(
     Layout {
         plot,
         aligned,
+        room,
         #[cfg(test)]
         header_bottom: header.bottom,
         title: header.title,
@@ -1505,6 +1557,7 @@ mod tests {
             let mut bits = Bits::default();
             bits.area("plot", &layout.plot);
             bits.area("aligned", &layout.aligned);
+            bits.area("room", &layout.room);
             bits.num("header_bottom", layout.header_bottom);
             bits.labels("title", layout.title.iter().flat_map(TextBlock::lines));
             bits.labels(
@@ -1573,11 +1626,14 @@ mod tests {
         PanelSlot {
             plot,
             aligned: plot,
+            room: plot,
+            plot_room: plot,
             xlabel_baseline: plot.bottom() + bands.x_band + AXIS_LABEL_GAP + bands.xlabel_ascent,
             header: HeaderBox {
                 left: PADDING,
                 right: grid.width - PADDING,
                 top: PADDING,
+                inset: (0.0, 0.0),
             },
             frame: Frame {
                 x: 0.0,

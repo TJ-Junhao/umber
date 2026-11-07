@@ -473,6 +473,32 @@ impl HexBins {
     }
 }
 
+impl HexBins {
+    /// Fits a lattice counted on the equal scales of `scales` ([`HexBins::on_axes`]): an axis
+    /// with explicit limits keeps them, and an automatic axis holds whole cells and its domain.
+    /// The plot takes its shape from these limits, so nothing is added to give it a shape.
+    pub fn fit_equal_aspect(
+        &mut self,
+        scales: [ContinuousScale; 2],
+        limits: [Option<(f64, f64)>; 2],
+    ) {
+        if let Self::Occupied(cells) = self {
+            let c = cells.coordinates;
+            let bounds = cells.bounds;
+            cells.domains = std::array::from_fn(|i| {
+                let (lo, hi) = limits[i].unwrap_or(scales[i].domain());
+                match limits[i] {
+                    Some(_) => [lo, hi],
+                    None => [
+                        c[i].value(bounds[2 * i]).min(lo),
+                        c[i].value(bounds[2 * i + 1]).max(hi),
+                    ],
+                }
+            });
+        }
+    }
+}
+
 /// A fixed window can be too small for a whole row or column of regular cells.
 fn window_error(context: &'static str, hint: &'static str) -> crate::Error {
     crate::Error::data(

@@ -241,6 +241,20 @@ left.twin_y().line(months, [4, 5, 9, 13, 18, 22], label="Temperature").ylabel("�
 left.figure.save_png("weather.png")
 ```
 
+## 物理空间
+
+`ax.equal_aspect()` 让一个数据单位在两条轴上等长，因此无论 figure 多大，圆都保持为圆。limits 不变（只有自动的 hexbin limits 会扩大，以容纳完整的 cell）：plot 沿一边缩小，并在它的空间内居中，ticks、标签和 colorbar 随之移动。两条轴都必须是线性轴，且不与其他 panel 共享。
+
+```python
+import numpy as np
+import umber as ub
+
+angle = np.linspace(0, 2 * np.pi, 200)
+ax = ub.Figure(8, 4).add_axes().equal_aspect()
+ax.line(np.cos(angle), np.sin(angle)).xlabel("x (m)").ylabel("y (m)")
+ax.figure.save_png("domain.png")
+```
+
 ## 文字与标注
 
 `ax.text(text, (x, y))` 在数据位置写文字，`ax.annotate(text, (x, y), offset=(dx, dy))` 把文字写在离该位置一段距离（单位为 pt）的地方，并画箭头指向它，除非传入 `arrow=False`。位置使用各轴自己的值：数值、时间或类别名。`at=ub.InPlot(x, y)` 改用绘图区的比例位置，数据变化时文字仍留在原来的角落；`annotate(..., text_at=ub.InPlot(x, y))` 把文字写在该位置，箭头仍指向数据位置。文字和标注从不改变坐标轴范围。`"\n"` 把它们分成多行：第一行的位置与单行时相同，其余各行依次排在下方。

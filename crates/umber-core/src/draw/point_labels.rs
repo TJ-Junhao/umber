@@ -504,6 +504,11 @@ pub(crate) struct Placement {
 }
 
 impl Placement {
+    /// Takes this placement as final, whatever would have made it not.
+    pub(crate) fn accept(&mut self) {
+        self.unsettled = None;
+    }
+
     /// The placement with `f` applied to the error it would raise.
     pub(crate) fn map_error(self, f: impl FnOnce(Error) -> Error) -> Placement {
         Placement {

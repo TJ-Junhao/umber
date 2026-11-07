@@ -65,6 +65,17 @@ svg = ax.figure.to_svg()
 
 For text at a fixed place in the plot, use `at=ub.InPlot(x, y)`, not data coordinates: `x` and `y` are fractions of the plot area (0, 0 is the lower left corner), so a note such as `ax.text("n = 5 folds", at=ub.InPlot(0.02, 0.96))` stays put when the data range changes. `ax.annotate("best", (x, y), text_at=ub.InPlot(0.9, 0.9))` writes its text there, with the arrow to the data point.
 
+## Physical space
+
+For physical space, where a circle must stay a circle, use `ax.equal_aspect()`; do not tune the figure size. One data unit is then equally long on both axes: the limits and the figure stay as they are, except that automatic hexbin limits grow to hold whole cells, and the plot shrinks along one side and is centred in its room. Ticks, labels, the colorbar and `InPlot` positions follow the smaller plot. Both axes must be linear and belong to this panel alone: no `twin_y()`, and no axis shared with another panel.
+
+```python
+angle = np.linspace(0, 2 * np.pi, 200)
+ax = ub.Figure(8, 4).add_axes().equal_aspect()
+ax.line(np.cos(angle), np.sin(angle)).xlabel("x (m)").ylabel("y (m)")
+svg = ax.figure.to_svg()
+```
+
 ## Values next to points
 
 Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color (darkened or lightened just enough to read at 4.5:1 against the background), and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
