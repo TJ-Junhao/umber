@@ -769,7 +769,8 @@ impl<'a> AxesMut<'a> {
     /// non-empty label is an `Error::Usage`. Mapped fills stay opaque and get a 0.5 pt outline
     /// that contrasts with the background for nearby fill colors, fading to the background
     /// color as the Oklab distance grows. Uniform colors keep the theme's marker alpha and
-    /// their 0.8 pt background-colored outline.
+    /// their 0.8 pt background-colored outline. The outlines of a scatter are drawn under all
+    /// its fills, so overlapping markers never cut into each other.
     ///
     /// With [`PointLabels::annotate`] in `options.labels`, each drawn point shows its value
     /// next to it, as [`PointLabels`] and [`Place`](crate::Place) describe: on a fixed side,

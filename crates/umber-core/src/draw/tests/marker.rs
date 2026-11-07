@@ -1,7 +1,7 @@
 //! Marker shapes.
 
 use super::super::marker::marker_shape;
-use super::{mark_group, scatter_figure, subpaths};
+use super::{mark_group, merged_layers, scatter_figure, subpaths};
 use crate::geometry::Point;
 use crate::scene::Item;
 use crate::{FontLibrary, Marker, Theme};
@@ -63,9 +63,13 @@ fn marker_shapes_have_expected_bounds() {
         let scene = scatter_figure(theme.clone(), &[0.5], &[0.5], m)
             .to_scene(FontLibrary::global())
             .unwrap();
-        let [Item::Markers { shape, .. }] = mark_group(&scene).1 else {
+        let layers = merged_layers(mark_group(&scene).1);
+        let [Item::Markers { shape, .. }] = layers.as_slice() else {
             panic!("expected one marker batch")
         };
-        assert_eq!(shape, &marker_shape(m, theme.marker_size()));
+        assert_eq!(
+            shape,
+            &marker_shape(m, theme.drawn_fill_size(crate::SizeSpec::Auto))
+        );
     }
 }

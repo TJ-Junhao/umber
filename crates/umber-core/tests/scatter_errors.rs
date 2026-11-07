@@ -296,8 +296,9 @@ fn the_line_then_the_bars_lie_under_the_markers() {
             _ => "other",
         })
         .collect();
-    // Both errors at once: the horizontal bars, then the vertical ones.
-    assert_eq!(kinds, ["line", "bars", "bars", "markers"]);
+    // Both errors at once: the horizontal bars, then the vertical ones. The markers are
+    // their outlines, then their fills.
+    assert_eq!(kinds, ["line", "bars", "bars", "markers", "markers"]);
 }
 
 #[test]
@@ -721,7 +722,8 @@ fn without_bars_or_line_a_scatter_draws_only_its_markers() {
         .unwrap();
     let scene = render(&f);
     assert!(stroke_items(&scene).is_empty());
-    assert_eq!(mark_items(&scene).len(), 1);
+    // The outlines, then the fills.
+    assert_eq!(mark_items(&scene).len(), 2);
 }
 
 // ---- Automatic limits -----------------------------------------------------------------------

@@ -10,7 +10,7 @@ use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
 use super::fill::AREA_ALPHA;
 use super::mapping::{AxisPoint, axis_value};
-use super::scatter::scatter_item;
+use super::scatter::{MARKER_OUTLINE, scatter_layers};
 use crate::geometry::Path;
 use crate::resolve::{AxisScale, ResolvedAxis, ResolvedDistribution};
 use crate::scene::{FillRule, Item, Paint};
@@ -136,12 +136,14 @@ fn box_group(
     }
     let xs = vec![center; stats.outliers.len()];
     let ys: Vec<f64> = stats.outliers.iter().map(|&v| y(v)).collect();
-    items.extend(scatter_item(
+    // Outliers keep the size they were drawn at when their outline covered the fill's edge.
+    let nominal = context.theme.drawn_marker_size(SizeSpec::Auto) * 0.8;
+    items.extend(scatter_layers(
         context,
         &xs,
         &ys,
         color,
         Marker::Circle,
-        context.theme.drawn_marker_size(SizeSpec::Auto) * 0.8,
+        (nominal - MARKER_OUTLINE).max(0.0),
     ));
 }

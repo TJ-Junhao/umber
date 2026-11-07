@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::MarkContext;
 use super::mapping::{AxisMaps, axis_value};
-use super::scatter::scatter_item;
+use super::scatter::scatter_layers;
 use crate::resolve::swarm::{Placement, pack};
 use crate::resolve::{AxisScale, Resolved, ResolvedAxis, ResolvedMark};
 use crate::scene::Item;
@@ -162,25 +162,24 @@ pub(crate) fn check(
 }
 
 /// Draws category points as one circular-marker batch, using the scatter alpha and outline.
+/// Points are packed by their `size` and drawn with a fill of diameter `fill_size`.
 pub(super) fn items(
     context: &MarkContext<'_>,
     axes: (&ResolvedAxis, &ResolvedAxis),
     names: &[String],
     groups: &[Arc<[f64]>],
-    (color, size, placement): (Rgba, f32, Placement),
+    (color, (size, fill_size), placement): (Rgba, (f32, f32), Placement),
     items: &mut Vec<Item>,
 ) {
     let points = coordinates(context.maps, axes, names, groups, size, placement);
-    if let Some(item) = scatter_item(
+    items.extend(scatter_layers(
         context,
         &points.along,
         &points.values,
         color,
         Marker::Circle,
-        size,
-    ) {
-        items.push(item);
-    }
+        fill_size,
+    ));
 }
 
 #[cfg(test)]

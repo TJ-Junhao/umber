@@ -19,7 +19,7 @@ fn figure(theme: Theme, y: ScaleKind) -> Figure {
 fn items(f: &Figure) -> Vec<Item> {
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    super::mark_items(&scene).to_vec()
+    super::merged_layers(super::mark_items(&scene))
 }
 
 #[track_caller]
@@ -89,7 +89,8 @@ fn box_geometry_matches_the_theme_ratios() {
         let (a, b) = shape.bounds().unwrap();
         near(
             f64::from(b.x - a.x),
-            f64::from(theme.drawn_marker_size(SizeSpec::Auto) * 0.8),
+            // Outliers are 0.8 of the theme's marker size, less the outline their fill hides.
+            f64::from(theme.drawn_marker_size(SizeSpec::Auto) * 0.8 - 0.8),
         );
     }
 }
@@ -157,6 +158,7 @@ fn box_coverage_counts_fills_whiskers_medians_and_outliers() {
         let Item::Group { items, .. } = item else {
             panic!("box group expected")
         };
+        let items = super::merged_layers(&items);
         assert_eq!(items.len(), if grouped { 8 } else { 4 });
         for group in items.chunks_exact(4) {
             let [

@@ -107,24 +107,29 @@ fn text_box(scene: &Scene, item: &TextItem) -> [f64; 4] {
     [x, y - ascent, x + f64::from(item.width), y + descent]
 }
 
-/// The centres of every marker of `scene` and the reach of each from its centre, its shape's
-/// half extent plus its whole outline width (the reach of a square, whose miter corner reaches
-/// that far), along x and y.
+/// The centres of every marker of `scene` and the reach of each from its centre, along x and y.
+/// The outline of a batch of markers is an item of its own, under the fills, so only these
+/// items are read. Labels stand off from the marker as it is sized by the theme: the fill is
+/// that size less the outline's width, so its half extent is grown back by the same ratio. The
+/// reach is that half extent plus the whole stroke width (the reach of a square, whose miter
+/// corner reaches that far).
 fn markers(scene: &Scene) -> Vec<((f64, f64), (f64, f64))> {
+    let size = f64::from(Theme::pigment().marker_size());
+    let grow = size / (size - 0.8);
     leaves(&scene.items)
         .into_iter()
         .filter_map(|item| match item {
             Item::Markers {
                 shape,
-                stroke,
+                stroke: Some(stroke),
                 positions,
                 ..
             } => {
                 let (lo, hi) = shape.bounds().unwrap();
-                let width = stroke.as_ref().map_or(0.0, |s| f64::from(s.width));
+                let width = f64::from(stroke.width);
                 let reach = (
-                    f64::from(hi.x - lo.x) / 2.0 + width,
-                    f64::from(hi.y - lo.y) / 2.0 + width,
+                    f64::from(hi.x - lo.x) / 2.0 * grow + width,
+                    f64::from(hi.y - lo.y) / 2.0 * grow + width,
                 );
                 Some(
                     positions

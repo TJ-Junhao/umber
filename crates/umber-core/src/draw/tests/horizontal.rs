@@ -483,7 +483,8 @@ fn dot_plot_points_at_band_centres() {
     let plot = layout.plot;
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    let [Item::Markers { positions, .. }] = mark_group(&scene).1 else {
+    let layers = super::merged_layers(mark_group(&scene).1);
+    let [Item::Markers { positions, .. }] = layers.as_slice() else {
         panic!("one batch of markers")
     };
     let band = |i: f64| plot.y + (i + 0.5) / 3.0 * plot.height;
@@ -656,7 +657,8 @@ fn vertical_reference_lines_run_the_full_height_of_a_horizontal_chart() {
     assert!(!resolved.x.holds_zero());
     assert_eq!(layout.baseline.at, layout.plot.x);
     let scene = f.to_scene(FontLibrary::global()).unwrap();
-    let items = flattened(mark_group(&scene).1);
+    let layers = super::merged_layers(mark_group(&scene).1);
+    let items = flattened(&layers);
     let [span, Item::Markers { .. }, line] = items.as_slice() else {
         panic!("a span, the dots and a line, got {items:?}")
     };

@@ -3,8 +3,8 @@
 use super::super::MarkContext;
 use super::super::mapping::{AxisMap, AxisMaps};
 use super::super::marker::{extent, marker_shape};
-use super::super::scatter::scatter_item;
-use super::{Pixels, mark_group, near, nums, plot_of, scatter_figure};
+use super::super::scatter::scatter_layers;
+use super::{Pixels, mark_group, merged_layers, near, nums, plot_of, scatter_figure};
 use crate::layout::Area;
 use crate::model::{Figure, ScatterOptions};
 use crate::resolve::{Baseline, NormalizedPos, ValueAxis};
@@ -17,7 +17,8 @@ fn scatter_drops_points_far_outside() {
     let theme = Theme::graphite();
     let probe = scatter_figure(theme.clone(), &[0.5], &[0.5], Marker::Circle);
     let plot = plot_of(&probe);
-    let r = f64::from(theme.marker_size()) / 2.0;
+    // The fill has the theme's marker size less the 0.8 pt outline.
+    let r = f64::from(theme.drawn_fill_size(SizeSpec::Auto)) / 2.0;
     // In data units: just inside and just outside the radius + 0.8 pt outline + 1 pt slack
     // on the right.
     let inside = 1.0 + (r + 1.7) / plot.width;
@@ -30,7 +31,7 @@ fn scatter_drops_points_far_outside() {
     );
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    let (_, items) = mark_group(&scene);
+    let items = merged_layers(mark_group(&scene).1);
     let [
         Item::Markers {
             positions,
@@ -38,7 +39,7 @@ fn scatter_drops_points_far_outside() {
             stroke: Some(stroke),
             ..
         },
-    ] = items
+    ] = items.as_slice()
     else {
         panic!("expected one marker batch, got {items:?}")
     };
@@ -75,11 +76,12 @@ fn scatter_alpha_multiplies_the_color_alpha() {
         )
         .unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let layers = merged_layers(mark_group(&scene).1);
     let [
         Item::Markers {
             fill: Some(fill), ..
         },
-    ] = mark_group(&scene).1
+    ] = layers.as_slice()
     else {
         panic!("expected one marker batch")
     };
@@ -88,14 +90,14 @@ fn scatter_alpha_multiplies_the_color_alpha() {
 }
 
 #[test]
-fn scatter_outline_uses_background() {
+fn scatter_outlines_lie_under_every_fill() {
     for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
         let theme = theme
             .with_marker_size(40.0)
             .unwrap()
             .with_marker_alpha(1.0)
             .unwrap();
-        // Two overlapping markers: the second's outline crosses the first's fill.
+        // Two overlapping markers: the second's outline stays under the first's fill.
         let probe = scatter_figure(theme.clone(), &[0.5], &[0.5], Marker::Circle);
         let plot = plot_of(&probe);
         let dx = 16.0 / plot.width;
@@ -107,12 +109,12 @@ fn scatter_outline_uses_background() {
             plot.y_at(NormalizedPos::new(0.5)),
         );
         let color = theme.palette()[0];
-        // The second marker's left edge, 20 pt left of its center, inside the first marker.
-        let edge = pixels.at_point((cx - 20.0, cy), dpi);
-        assert!(near(edge, theme.background(), 24), "{edge:?}");
-        // Fill on either side of the outline.
-        assert!(near(pixels.at_point((cx - 23.0, cy), dpi), color, 2));
-        assert!(near(pixels.at_point((cx - 17.0, cy), dpi), color, 2));
+        // The second marker's fill is 39.2 pt across, so its left edge lies 19.6 pt left of its
+        // center, inside the first marker: the whole edge is the series color.
+        for offset in [23.0, 20.0, 19.8, 19.6, 19.4, 17.0] {
+            let pixel = pixels.at_point((cx - offset, cy), dpi);
+            assert!(near(pixel, color, 2), "{offset}: {pixel:?}");
+        }
     }
 }
 
@@ -167,7 +169,7 @@ fn markers_are_culled_by_their_true_extent() {
             y + f64::from(min.y) < plot.bottom(),
             "{shape:?} reaches the plot"
         );
-        let item = scatter_item(
+        let layers = scatter_layers(
             &identity_context(&theme, plot),
             &[210.0],
             &[y],
@@ -175,7 +177,7 @@ fn markers_are_culled_by_their_true_extent() {
             shape,
             d as f32,
         );
-        assert!(item.is_some(), "{shape:?} was dropped");
+        assert!(!layers.is_empty(), "{shape:?} was dropped");
     }
 
     // Per shape and axis: kept just inside the reach, dropped just outside it.
@@ -200,7 +202,7 @@ fn markers_are_culled_by_their_true_extent() {
             (200.0, plot.bottom() + h + reach + 0.01, false),
         ];
         for (x, y, kept) in cases {
-            let item = scatter_item(
+            let layers = scatter_layers(
                 &identity_context(&theme, plot),
                 &[x],
                 &[y],
@@ -208,17 +210,20 @@ fn markers_are_culled_by_their_true_extent() {
                 shape,
                 10.0,
             );
-            assert_eq!(item.is_some(), kept, "{shape:?} at ({x}, {y})");
+            assert_eq!(!layers.is_empty(), kept, "{shape:?} at ({x}, {y})");
         }
     }
 }
 
 #[test]
 fn per_series_size_sets_the_marker_shape() {
-    // Graphite markers are 5.6 pt across by default.
+    // Graphite markers are 5.6 pt across by default, outline included: the fill is 0.8 pt less
+    // than the theme's size, alone or times a factor, and a fixed size is the fill's.
+    let auto = 5.6_f32 - 0.8;
     for (spec, d) in [
-        (SizeSpec::Auto, 5.6_f32),
-        (SizeSpec::times(2.0).unwrap(), 2.0 * 5.6),
+        (SizeSpec::Auto, auto),
+        (SizeSpec::times(1.0).unwrap(), auto),
+        (SizeSpec::times(2.0).unwrap(), 2.0 * auto),
         (SizeSpec::pt(12.0).unwrap(), 12.0),
     ] {
         for m in [Marker::Circle, Marker::Cross] {
@@ -236,10 +241,134 @@ fn per_series_size_sets_the_marker_shape() {
                 )
                 .unwrap();
             let scene = f.to_scene(FontLibrary::global()).unwrap();
-            let [Item::Markers { shape, .. }] = mark_group(&scene).1 else {
+            let layers = merged_layers(mark_group(&scene).1);
+            let [Item::Markers { shape, .. }] = layers.as_slice() else {
                 panic!("expected one marker batch")
             };
             assert_eq!(shape, &marker_shape(m, d), "{spec:?} {m:?}");
         }
     }
+}
+
+#[test]
+fn a_dense_scatter_shows_the_series_color_across_the_cloud() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let theme = theme.with_marker_alpha(1.0).unwrap();
+        // 10,000 points about 0.4 pt apart, much closer than a marker is wide.
+        let steps: Vec<f64> = (0..100).map(|i| 0.45 + f64::from(i) * 0.001).collect();
+        let xs: Vec<f64> = steps.iter().flat_map(|_| steps.iter().copied()).collect();
+        let ys: Vec<f64> = steps
+            .iter()
+            .flat_map(|&y| steps.iter().map(move |_| y))
+            .collect();
+        let f = scatter_figure(theme.clone(), &xs, &ys, Marker::Circle);
+        let plot = plot_of(&f);
+        let dpi = 300.0;
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
+        let color = theme.palette()[0];
+        for (u, v) in [
+            (0.5, 0.5),
+            (0.47, 0.47),
+            (0.53, 0.47),
+            (0.47, 0.53),
+            (0.53, 0.53),
+        ] {
+            let at = (
+                plot.x_at(NormalizedPos::new(u)),
+                plot.y_at(NormalizedPos::new(v)),
+            );
+            let pixel = pixels.at_point(at, dpi);
+            assert!(near(pixel, color, 2), "({u}, {v}): {pixel:?} vs {color:?}");
+        }
+    }
+}
+
+#[test]
+fn a_small_point_shows_its_fill_at_the_centre() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let theme = theme.with_marker_alpha(1.0).unwrap();
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .scatter(
+                nums(&[0.5]),
+                &[0.5],
+                ScatterOptions {
+                    size: SizeSpec::pt(1.5).unwrap(),
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap()
+            .xlim(0.0, 1.0)
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap();
+        let plot = plot_of(&f);
+        let dpi = 720.0;
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
+        let at = (
+            plot.x_at(NormalizedPos::new(0.5)),
+            plot.y_at(NormalizedPos::new(0.5)),
+        );
+        let pixel = pixels.at_point(at, dpi);
+        assert!(near(pixel, theme.palette()[0], 2), "{pixel:?}");
+    }
+}
+
+#[test]
+fn an_isolated_default_point_keeps_its_visible_diameter() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let theme = theme.with_marker_alpha(1.0).unwrap();
+        let f = scatter_figure(theme.clone(), &[0.5], &[0.5], Marker::Circle);
+        let plot = plot_of(&f);
+        let dpi = 720.0;
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
+        let (cx, cy) = (
+            plot.x_at(NormalizedPos::new(0.5)),
+            plot.y_at(NormalizedPos::new(0.5)),
+        );
+        // The pixels along a row through the centre that differ from the background, in
+        // points: the marker's size less its 0.8 pt outline, which is background-colored.
+        let scale = dpi / 72.0;
+        let row = (cy * scale) as usize;
+        let start = ((cx - 6.0) * scale) as usize;
+        let end = ((cx + 6.0) * scale) as usize;
+        let drawn = (start..end)
+            .filter(|&x| !near(pixels.at(x, row), theme.background(), 8))
+            .count();
+        let diameter = f64::from(theme.marker_size()) - 0.8;
+        let measured = drawn as f64 / scale;
+        assert!(
+            (measured - diameter).abs() < 0.25,
+            "{measured} vs {diameter}"
+        );
+    }
+}
+
+#[test]
+fn bubbles_keep_each_fill_with_its_outline_in_order() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .bubbles(
+            &[1.0, 1.5, 2.0],
+            &[1.0, 1.0, 1.0],
+            &[1.0, 1.0, 1.0],
+            crate::BubbleOptions::default(),
+        )
+        .unwrap();
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let kinds: Vec<&str> = mark_group(&scene)
+        .1
+        .iter()
+        .map(|item| match item {
+            Item::Fill { .. } => "fill",
+            Item::Stroke { .. } => "outline",
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        ["fill", "outline", "fill", "outline", "fill", "outline"]
+    );
 }

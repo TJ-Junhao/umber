@@ -102,7 +102,9 @@ pub struct ScatterOptions {
     pub color: PointColor,
     /// The marker shape.
     pub marker: Marker,
-    /// The marker diameter; [`SizeSpec::Auto`] for the theme's marker size.
+    /// The diameter of the marker's fill. [`SizeSpec::Auto`] is the theme's marker size less the
+    /// 0.8 pt outline, so a default marker looks as large as the theme's marker size says; a
+    /// fixed size is the fill's diameter, and the outline lies around it.
     pub size: SizeSpec,
     /// The values written next to the points; none by default.
     pub labels: PointLabels,

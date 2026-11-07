@@ -75,12 +75,24 @@ def test_lists_arrays_and_series_match() -> None:
 
 
 def _marker_styles(svg: str) -> list[dict[str, str]]:
+    """One style per marker: each batch draws all its outlines, then all its fills."""
     ns = "{http://www.w3.org/2000/svg}"
-    return [
+    groups = [
         group.attrib
         for group in ElementTree.fromstring(svg).iter(f"{ns}g")
         if group.find(f"{ns}use") is not None
     ]
+    markers: list[dict[str, str]] = []
+    i = 0
+    while i < len(groups):
+        count = 0
+        while i + count < len(groups) and groups[i + count].get("fill") == "none":
+            count += 1
+        outlines, fills = groups[i : i + count], groups[i + count : i + 2 * count]
+        assert len(fills) == count
+        markers.extend({**outline, **fill} for outline, fill in zip(outlines, fills, strict=True))
+        i += 2 * count
+    return markers
 
 
 @pytest.mark.parametrize(

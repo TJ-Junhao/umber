@@ -261,9 +261,9 @@ fn marks_follow_insertion_order_and_resolved_colors() {
         )
         .unwrap();
     let scene = f.to_scene(FontLibrary::global()).unwrap();
-    let (_, items) = mark_group(&scene);
+    let items = super::merged_layers(mark_group(&scene).1);
     let palette = theme.palette();
-    match items {
+    match items.as_slice() {
         [
             Item::Stroke { style: a, .. },
             Item::Markers { fill: Some(b), .. },

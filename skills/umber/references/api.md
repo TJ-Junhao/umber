@@ -1461,7 +1461,10 @@ A point with a NaN coordinate is left out. On a category y axis the scatter is a
 plot: each point sits at the centre of its category's band. ``ColorBy`` fills stay
 opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
 colors, fading to the background color as the Oklab distance grows. Single-color
-markers keep the theme's marker alpha and a 0.8 pt background-colored outline.
+markers keep the theme's marker alpha and a 0.8 pt background-colored outline. All the
+outlines of a scatter are drawn under all its fills, so overlapping markers never cut
+into each other. ``size`` is the diameter of the fill: ``Size.pt(6)`` draws a fill 6 pt
+across, and ``Size.AUTO`` is the theme's marker size less the outline's 0.8 pt.
 
 With ``annotate=True`` each drawn point shows its value next to it: x on a category y
 axis and y otherwise, the time on a time axis. Points left out, and points outside
@@ -1821,7 +1824,8 @@ SplitMix64 seed for each input category and strip on these axes. Repeated
 renders are byte-identical; unrelated marks do not change the jitter.
 A category x axis gives vertical groups; a category y axis gives horizontal
 groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
-linear or log. Markers use the scatter opacity and outline. Marks draw in call
+linear or log. Markers use the scatter opacity and outline, drawn under all the fills
+of the series. Marks draw in call
 order, so call this after box() or violin() to put points above them.
 Input data is copied and a failed call changes nothing.
 
@@ -1897,7 +1901,8 @@ line. When circles do not fit in a category band at the final plot size,
 rendering raises StyleError naming the category; use strip() or violin().
 A category x axis gives vertical groups; a category y axis gives horizontal
 groups. NaN is ignored and empty groups draw nothing. The numeric axis may be
-linear or log. Markers use the scatter opacity and outline. Marks draw in call
+linear or log. Markers use the scatter opacity and outline, drawn under all the fills
+of the series. Marks draw in call
 order, so call this after box() or violin() to put points above them.
 Input data is copied and a failed call changes nothing.
 
@@ -5307,7 +5312,8 @@ An immutable size for a line width, marker or text.
 
 ``Size.AUTO`` is the size of the theme. ``Size.times()`` is a multiple of it, so an
 emphasized series stays emphasized under any theme. ``Size.pt()`` is a fixed size in
-points that ignores the theme. Sizes compare equal when they are the same kind with the
+points that ignores the theme; for a marker it is the diameter of the fill, with its
+outline around it. Sizes compare equal when they are the same kind with the
 same value. Text sizes resolve against the role's size after font scaling; fixed
 points ignore font scaling.
 

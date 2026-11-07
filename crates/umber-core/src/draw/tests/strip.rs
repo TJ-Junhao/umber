@@ -1,6 +1,6 @@
 //! Category points: jitter bounds, non-overlap and call order.
 
-use super::mark_items;
+use super::{mark_items, merged_layers};
 use crate::model::{BoxOptions, StripOptions, SwarmOptions};
 use crate::scene::Item;
 use crate::{Figure, FontLibrary, ScaleKind, SizeSpec, Theme};
@@ -33,7 +33,8 @@ fn strip_jitter_within_band() {
                 .unwrap();
             let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
             let scene = f.to_scene(FontLibrary::global()).unwrap();
-            let [Item::Markers { positions, .. }] = mark_items(&scene) else {
+            let layers = merged_layers(mark_items(&scene));
+            let [Item::Markers { positions, .. }] = layers.as_slice() else {
                 panic!("markers expected")
             };
             assert_eq!(positions.len(), 100);
@@ -73,7 +74,8 @@ fn swarm_scene_points_never_overlap() {
                 )
                 .unwrap();
             let scene = f.to_scene(FontLibrary::global()).unwrap();
-            let [Item::Markers { positions, .. }] = mark_items(&scene) else {
+            let layers = merged_layers(mark_items(&scene));
+            let [Item::Markers { positions, .. }] = layers.as_slice() else {
                 panic!("markers expected")
             };
             assert_eq!(positions.len(), count);
@@ -140,7 +142,8 @@ fn unrelated_marks_do_not_change_strip_jitter() {
             }
             let (_, layout) = crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
             let scene = f.to_scene(FontLibrary::global()).unwrap();
-            let [Item::Markers { positions, .. }] = mark_items(&scene) else {
+            let layers = merged_layers(mark_items(&scene));
+            let [Item::Markers { positions, .. }] = layers.as_slice() else {
                 panic!("markers expected")
             };
             let (start, extent) = if horizontal {
@@ -179,10 +182,11 @@ fn strips_on_the_same_category_have_independent_jitter() {
                 .unwrap();
         }
         let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let layers = merged_layers(mark_items(&scene));
         let [
             Item::Markers { positions: a, .. },
             Item::Markers { positions: b, .. },
-        ] = mark_items(&scene)
+        ] = layers.as_slice()
         else {
             panic!("two marker batches expected")
         };

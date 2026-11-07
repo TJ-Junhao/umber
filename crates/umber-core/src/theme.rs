@@ -1001,6 +1001,22 @@ impl Theme {
         drawn_size(size.resolve(self.marker_size), MAX_MARKER_SIZE)
     }
 
+    /// The diameter of the fill of a marker that asks for `size`, which is drawn over its own
+    /// outline of `MARKER_OUTLINE` points, centered on the fill's edge:
+    /// a fixed size is the fill's diameter, and the theme's marker size, alone or times a
+    /// factor, loses the outline's width, so the default markers look as they did when the
+    /// outline covered the fill's edge. Finite and within `0..=MAX_MARKER_SIZE`.
+    pub(crate) fn drawn_fill_size(&self, size: SizeSpec) -> f32 {
+        let outline = crate::draw::MARKER_OUTLINE;
+        let size = match size {
+            SizeSpec::Points(_) => size.resolve(self.marker_size),
+            SizeSpec::Auto | SizeSpec::Times(_) => {
+                size.resolve((self.marker_size - outline).max(0.0))
+            }
+        };
+        drawn_size(size, MAX_MARKER_SIZE)
+    }
+
     /// The marker opacity, from 0.0 to 1.0.
     ///
     /// # Examples
