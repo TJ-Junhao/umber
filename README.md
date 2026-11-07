@@ -241,6 +241,20 @@ left.twin_y().line(months, [4, 5, 9, 13, 18, 22], label="Temperature").ylabel("Â
 left.figure.save_png("weather.png")
 ```
 
+## Physical space
+
+`ax.equal_aspect()` makes one data unit equally long on both axes, so a circle stays a circle at any figure size. The limits stay as they are: the plot shrinks along one side and is centred in its room, and its ticks, labels and colorbar follow it. Both axes must be linear and not shared with another panel.
+
+```python
+import numpy as np
+import umber as ub
+
+angle = np.linspace(0, 2 * np.pi, 200)
+ax = ub.Figure(8, 4).add_axes().equal_aspect()
+ax.line(np.cos(angle), np.sin(angle)).xlabel("x (m)").ylabel("y (m)")
+ax.figure.save_png("domain.png")
+```
+
 ## Text and annotations
 
 `ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. `at=ub.InPlot(x, y)` places text at fractions of the plot area instead, so a note stays in its corner when the data changes, and `annotate(..., text_at=ub.InPlot(x, y))` writes the text there with the arrow still pointing at the data position. Text and annotations never change the axis limits. `"\n"` breaks them into lines: the first line sits where a single line would, and the others follow below it.

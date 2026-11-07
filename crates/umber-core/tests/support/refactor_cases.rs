@@ -55,6 +55,8 @@
 //!   pie, in each title alignment, and the errors of a caption (in `corpus/caption.rs`).
 //! - Text at positions in the plot, in each corner and pinned to an annotation's arrow (in
 //!   `corpus/in_plot.rs`).
+//! - Equal aspect: a circle on a wide figure, a circle of points with a colorbar on a tall
+//!   figure, and a grid of which one panel has the setting (in `corpus/equal_aspect.rs`).
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
@@ -117,6 +119,7 @@ mod corpus {
     pub mod contour;
     pub mod ecdf;
     pub mod emphasis;
+    pub mod equal_aspect;
     pub mod error_bars;
     pub mod events;
     pub mod font_file;
@@ -241,6 +244,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::point_labels::cases(&lib, &mut sink);
     corpus::value_column::cases(&lib, &mut sink);
     corpus::emphasis::cases(&lib, &mut sink);
+    corpus::equal_aspect::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

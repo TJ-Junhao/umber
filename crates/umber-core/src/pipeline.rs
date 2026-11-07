@@ -187,6 +187,26 @@ fn check_value_columns(figure: &Figure, context: &'static str) -> Result<()> {
     Ok(())
 }
 
+/// Whether the axes of `panel` have equal aspect; a pie has no axes.
+fn has_equal_aspect(panel: &Panel<'_>) -> bool {
+    panel.axes.cartesian().is_some_and(Axes::has_equal_aspect)
+}
+
+/// Checks that no axes with equal aspect share an axis with another panel, which may have been
+/// added after [`AxesMut::equal_aspect`](crate::AxesMut::equal_aspect): `Error::Usage` under
+/// `context` for the first such axes, named by its cell. The call refuses every other kind of
+/// axes, so layout finds two linear axes on any panel with equal aspect.
+fn check_equal_aspect(figure: &Figure, context: &'static str) -> Result<()> {
+    for layer in figure.layers() {
+        if let Some(axes) = layer.cartesian().filter(|axes| axes.has_equal_aspect()) {
+            figure
+                .check_equal_aspect_share(axes, context)
+                .map_err(|error| in_cell(figure, layer, error))?;
+        }
+    }
+    Ok(())
+}
+
 /// Checks that the color-mapped contours of each color group, which share one colorbar, all
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
 /// naming the panels of the first two whose levels differ. It reads the levels the model
@@ -325,10 +345,24 @@ fn figure_header(
 struct FigurePlan {
     header: FigureHeader,
     panels: Vec<(Resolved, Layout)>,
-    colorbars: Vec<(usize, layout::PlacedColorbar)>,
+    /// The final solve of the grid: where the panels went, and the shared colorbars.
+    solution: layout::GridSolution,
     /// Whether every bubble fit settled, so that the plots hold every drawn bubble (see
     /// [`BubbleFits::settled`]).
     bubbles_settled: bool,
+}
+
+/// Where a plan takes the rooms of the plots from.
+#[derive(Debug, Clone, Copy)]
+enum Rooms<'a> {
+    /// Each solve of the grid gives them, and plots with equal aspect shrink inside them.
+    Solved,
+    /// Each solve of the grid gives them, and every plot fills its room: the figure as it is
+    /// without equal aspect, as [`Rooms::Given`] needs it.
+    Plain,
+    /// The grid keeps this solve, and plots with equal aspect shrink inside its rooms, so that
+    /// no change of their limits or tick labels reaches the other panels.
+    Given(&'a layout::GridSolution),
 }
 
 /// Why a layout was not made: an error, or bubbles that no automatic limits hold, which
@@ -638,7 +672,17 @@ fn resolve_groups(
 /// fail the layout ([`BubbleFits::failure`]; [`plan_cells`] names a figure size that holds
 /// them), and so does a grid that cannot hold the fitted limits. Only a fit still unsettled
 /// after the rounds leaves its axis with the limits of the data positions, and the plot clips
-/// its bubbles.
+/// its bubbles; on axes with equal aspect that is an error.
+///
+/// Every solve ends by shrinking the plots of the panels with equal aspect for the limits it
+/// was made with ([`layout::fit_equal_aspect`]), so ticks, bubble fits and everything placed
+/// around a plot read the smaller plot, and the scales are equal on the final layout. The
+/// function explains why the passes end. A plot that shrinks gets other ticks, whose labels
+/// could move the bands of the grid and so the plots of other panels. A figure of several panels
+/// is therefore planned twice: first without equal aspect ([`Rooms::Plain`]), and then on the
+/// solve of that plan ([`Rooms::Given`]), so that each panel without the setting lays out
+/// exactly as it does without it, and each panel with it shrinks in the room it had. Its tick
+/// labels sit by its plot, in the band of that solve.
 ///
 /// The panels are then placed for the final solve ([`layout::place_panel`]), and on a grid the
 /// texts of every panel are checked to stay in its cells ([`layout::check_panel_contents`]).
@@ -657,6 +701,24 @@ fn plan(
     lib: &SceneFonts<'_>,
     context: &'static str,
     labels: &layout::LabelCache<'_>,
+) -> std::result::Result<FigurePlan, Unplanned> {
+    if panels.len() > 1 && panels.iter().any(has_equal_aspect) {
+        let plain = plan_rooms(figure, panels, groups, lib, context, labels, Rooms::Plain)?;
+        let rooms = Rooms::Given(&plain.solution);
+        return plan_rooms(figure, panels, groups, lib, context, labels, rooms);
+    }
+    plan_rooms(figure, panels, groups, lib, context, labels, Rooms::Solved)
+}
+
+/// [`plan`] with the rooms of the plots taken from `rooms`.
+fn plan_rooms(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    groups: &ShareGroups,
+    lib: &SceneFonts<'_>,
+    context: &'static str,
+    labels: &layout::LabelCache<'_>,
+    rooms: Rooms<'_>,
 ) -> std::result::Result<FigurePlan, Unplanned> {
     let theme = figure.theme();
     let header = figure_header(figure, panels, lib)?;
@@ -724,35 +786,59 @@ fn plan(
             }
         })
         .collect();
+    let equal_aspect: Vec<_> = panels
+        .iter()
+        .map(|panel| has_equal_aspect(panel) && !matches!(rooms, Rooms::Plain))
+        .collect();
+    let solve_rooms =
+        |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
+            let colorbars: Vec<_> = color_cells
+                .iter()
+                .enumerate()
+                .filter_map(|(i, cells)| {
+                    let cells = (*cells)?;
+                    let position = layout::ColorbarSide::shared(figure)?;
+                    let color = resolved[i].color.as_ref()?;
+                    let measured = layout::MeasuredColorbar::with_options(
+                        figure.colorbar_options(),
+                        color,
+                        position,
+                        theme,
+                        lib,
+                    );
+                    Some(measured.map(|measured| layout::SharedColorbar {
+                        source: i,
+                        cells,
+                        measured,
+                    }))
+                })
+                .collect::<Result<_>>()?;
+            layout::solve_grid(
+                &GridInput {
+                    colorbars: &colorbars,
+                    ..grid
+                },
+                bands,
+            )
+        };
     let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
-        let colorbars: Vec<_> = color_cells
-            .iter()
-            .enumerate()
-            .filter_map(|(i, cells)| {
-                let cells = (*cells)?;
-                let position = layout::ColorbarSide::shared(figure)?;
-                let color = resolved[i].color.as_ref()?;
-                let measured = layout::MeasuredColorbar::with_options(
-                    figure.colorbar_options(),
-                    color,
-                    position,
-                    theme,
-                    lib,
-                );
-                Some(measured.map(|measured| layout::SharedColorbar {
-                    source: i,
-                    cells,
-                    measured,
-                }))
-            })
-            .collect::<Result<_>>()?;
-        layout::solve_grid(
-            &GridInput {
-                colorbars: &colorbars,
-                ..grid
-            },
-            bands,
-        )
+        let mut solution = match rooms {
+            Rooms::Solved | Rooms::Plain => solve_rooms(resolved, bands)?,
+            Rooms::Given(solution) => solution.clone(),
+        };
+        // Every solve ends here, so whatever reads a plot below reads the final rectangle.
+        for (i, slot) in solution.panels.iter_mut().enumerate() {
+            // Equal aspect is refused on any other axes (`check_equal_aspect`).
+            if let (true, Some(x), Some(y)) = (
+                equal_aspect[i],
+                resolved[i].x.continuous(),
+                resolved[i].y.continuous(),
+            ) {
+                layout::fit_equal_aspect(slot, x, y, context)
+                    .map_err(|error| in_cell(figure, panels[i].axes, error))?;
+            }
+        }
+        Ok(solution)
     };
     let color_plots = |solution: &layout::GridSolution| {
         let mut plots: Vec<_> = solution
@@ -1180,6 +1266,20 @@ fn plan(
     if fits.clip_unsettled(&resolved, &plots) {
         (resolved, bands, solution) = refit(&fits, &choices)?;
     }
+    // The limits of the data positions would keep the scales equal, but a plot that clips its
+    // bubbles has not settled.
+    if let Some(i) = (0..panels.len()).find(|&i| equal_aspect[i] && fits.clipped(i)) {
+        return Err(in_cell(
+            figure,
+            panels[i].axes,
+            Error::style(
+                context,
+                "the bubbles and the equal aspect of these axes do not settle at this plot size.",
+            )
+            .with_hint("make the figure larger, or set explicit limits, which clip the bubbles."),
+        )
+        .into());
+    }
 
     // A single label can release room that the previous crowded set needed. A crowded set
     // can also survive a failed solve: the preferred wider step may need wider labels, while
@@ -1390,7 +1490,7 @@ fn plan(
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
-        colorbars: solution.colorbars,
+        solution,
         bubbles_settled: fits.settled(),
     })
 }
@@ -1406,6 +1506,12 @@ fn plan(
 /// axes are, so that all of their hexagons are regular on the same limits. A metric in which a
 /// hexbin's own range spans more than [`MAX_LATTICE_LENGTH`](crate::bin2d::MAX_LATTICE_LENGTH)
 /// cells cannot count it exactly, and is an error.
+///
+/// On axes with equal aspect the plot takes its shape from the limits, so the lattice cannot
+/// adapt to the plot: it is counted once, on the first plan, in the metric of the axes, whose
+/// data units are equally long, so its hexagons are regular on any plot with those scales. An
+/// independent lattice would round its rows, and leave them stretched. Automatic limits then
+/// grow to hold whole cells, and the next pass finds nothing left to do.
 ///
 /// A lone automatic hexbin is fitted tightly: its whole cells plus the least room, on one
 /// axis, that gives the plot's shape. That room moves the automatic ticks, and their labels
@@ -1503,8 +1609,17 @@ fn bubbles_error(
             })
         }
     };
+    // The limits set the shape of a plot with equal aspect, so a side may need the other to
+    // grow: a side of the figure only lengthens the plot when it is the side that limits it.
+    let both = |panel: usize| {
+        figure
+            .layers()
+            .nth(panel)
+            .and_then(|layer| layer.cartesian())
+            .is_some_and(Axes::has_equal_aspect)
+    };
     let plot = [failure.plot.width, failure.plot.height];
-    let mut grows = [false; 2];
+    let mut grows = [both(failure.panel); 2];
     grows[failure.side()] = true;
     let mut size = own;
     for side in 0..2 {
@@ -1530,7 +1645,7 @@ fn bubbles_error(
         };
         let mut sides = grows;
         if let Some(failed) = failed {
-            sides = [false; 2];
+            sides = [both(failed.panel); 2];
             sides[failed.side()] = true;
             last = failed;
         }
@@ -1645,13 +1760,15 @@ fn lay_out(
                     matches!(m, ResolvedMark::Hexbin { mark, .. } if !mark.extents[0].is_empty())
                 })
                 .count();
-            let independent = !shared && limits == [None, None] && hexbins <= 1;
+            let equal = has_equal_aspect(panel);
+            let independent = !shared && !equal && limits == [None, None] && hexbins <= 1;
             let only_hexbin = panel
                 .marks
                 .iter()
                 .all(|m| matches!(m, ResolvedMark::Hexbin { .. }));
             let aspect_change = aspects[i] / counting_aspects[i] - 1.0;
-            let recount = limits[1].is_some()
+            let recount = !equal
+                && limits[1].is_some()
                 && if limits[0].is_some() {
                     aspect_change.abs() >= 1e-12
                 } else {
@@ -1676,7 +1793,8 @@ fn lay_out(
                                 mark.gridsize,
                                 counting_scales[i],
                                 aspects[i],
-                                limits,
+                                // The room for end caps would make the metric unequal.
+                                if equal { [None, None] } else { limits },
                             )
                         };
                         *bins = counted.map_err(|_| {
@@ -1692,7 +1810,9 @@ fn lay_out(
                             )
                         })?;
                     }
-                    if independent && only_hexbin && tight {
+                    if equal {
+                        bins.fit_equal_aspect(scales[i], limits);
+                    } else if independent && only_hexbin && tight {
                         bins.fit(aspects[i]);
                     } else {
                         bins.fit_on_axes(aspects[i], scales[i], limits, context)
@@ -1983,6 +2103,7 @@ fn scene_with_labels(
     let groups = ShareGroups::new(figure);
     check_contour_levels(figure, &groups, context)?;
     check_value_columns(figure, context)?;
+    check_equal_aspect(figure, context)?;
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
         if let Some(held) = held {
@@ -2146,7 +2267,7 @@ fn draw_scene(
         .map_err(|err| in_cell(figure, panel.axes, err))?;
         annotations.extend(notes);
     }
-    for (source, bar) in &planned.colorbars {
+    for (source, bar) in &planned.solution.colorbars {
         if let Some(color) = &planned.panels[*source].0.color {
             scene.push(draw::colorbar::draw(theme, color, bar));
         }
@@ -2395,6 +2516,10 @@ fn in_cell<'a>(figure: &Figure, panel: impl Into<Layer<'a>>, err: Error) -> Erro
     let cells = panel.into().cells();
     err.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
 }
+
+#[cfg(test)]
+#[path = "equal_aspect_tests.rs"]
+mod equal_aspect_tests;
 
 #[cfg(test)]
 #[path = "label_cache_tests.rs"]
@@ -2767,8 +2892,8 @@ mod tests {
                 assert_eq!(resolved.color.as_ref().unwrap().norm, expected);
                 assert!(layout.colorbar.is_none());
             }
-            assert_eq!(planned.colorbars.len(), 1);
-            let source = planned.colorbars[0].0;
+            assert_eq!(planned.solution.colorbars.len(), 1);
+            let source = planned.solution.colorbars[0].0;
             assert_eq!(
                 planned.panels[source].0.color.as_ref().unwrap().norm,
                 expected
@@ -2821,7 +2946,7 @@ mod tests {
                 panic!("the figure lays out")
             };
             assert_eq!(
-                planned.colorbars.len(),
+                planned.solution.colorbars.len(),
                 if share == Share::All { 1 } else { 2 }
             );
             let plots: Vec<_> = planned

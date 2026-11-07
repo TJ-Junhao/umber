@@ -759,6 +759,14 @@ impl Figure {
             .map_err(core_error)
     }
 
+    /// Makes one data unit equally long on both axes.
+    fn equal_aspect(&mut self, row: AxesRow, col: i64) -> PyResult<()> {
+        self.axes(row, col)?
+            .equal_aspect()
+            .map(drop)
+            .map_err(core_error)
+    }
+
     /// Sets the legend style (a `LegendStyle` value).
     fn legend(&mut self, row: AxesRow, col: i64, style: i64, size: SizeArg) -> PyResult<()> {
         let style = enum_value::<LegendStyle>(style)?;

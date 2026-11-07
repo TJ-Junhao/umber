@@ -281,6 +281,27 @@ impl LegendRow {
         if align == Align::Left {
             return self;
         }
+        self.shift_rows(|start, end| align.position(end - start, left, right) - start);
+        self
+    }
+
+    /// Moves each wrapped row `by` along x, to the right when positive, as far as it stays
+    /// within `left..right`. A row that already reaches past that end stays where it is.
+    pub(super) fn moved_within(mut self, by: f64, left: f64, right: f64) -> LegendRow {
+        if by != 0.0 {
+            self.shift_rows(|start, end| {
+                if by > 0.0 {
+                    by.min(right - end).max(0.0)
+                } else {
+                    by.max(left - start).min(0.0)
+                }
+            });
+        }
+        self
+    }
+
+    /// Moves each wrapped row along x by `shift` of where the row starts and ends.
+    fn shift_rows(&mut self, shift: impl Fn(f64, f64) -> f64) {
         for row in self
             .entries
             .chunk_by_mut(|a, b| a.swatch.center_y == b.swatch.center_y)
@@ -291,7 +312,7 @@ impl LegendRow {
             let end = last
                 .chip
                 .map_or(last.label.x + last.label.width(), |chip| chip.right());
-            let shift = align.position(end - start, left, right) - start;
+            let shift = shift(start, end);
             for entry in row {
                 entry.swatch.x += shift;
                 entry.label.x += shift;
@@ -300,7 +321,6 @@ impl LegendRow {
                 }
             }
         }
-        self
     }
 
     /// Rejects a figure legend entry wider than its whole row, including the swatch and chip

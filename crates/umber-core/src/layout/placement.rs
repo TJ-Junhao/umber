@@ -148,7 +148,9 @@ pub(super) fn check(input: &LayoutInput<'_>, layout: &Layout, single: bool) -> R
     let plot = layout.plot;
     let width = match position {
         LegendPosition::Bottom if single => layout.frame.width - 2.0 * super::PADDING,
-        LegendPosition::TopLeft | LegendPosition::TopRight | LegendPosition::Bottom => plot.width,
+        LegendPosition::TopLeft | LegendPosition::TopRight | LegendPosition::Bottom => {
+            layout.room.width
+        }
         LegendPosition::Right => layout.frame.right() - (plot.right() + RIGHT_GAP),
         LegendPosition::Best => plot.width - 4.0 * BEST_PADDING,
     };

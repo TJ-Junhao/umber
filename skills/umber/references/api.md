@@ -739,6 +739,51 @@ Example:
 >>> grouped = ub.Figure().add_axes().ecdf([1, 2, 3, 4], by=["B", "A", "B", "A"])
 ```
 
+### `umber.Axes.equal_aspect`
+
+```text
+Axes.equal_aspect(self: 'Axes[float, float]') -> 'Axes[float, float]'
+```
+
+Make one data unit equally long on both axes.
+
+Use it for physical space, where a circle must stay a circle. Calling it twice is the
+same as calling it once.
+
+The limits and the figure size stay as they are. The plot shrinks along one side until
+both axes have the same points per data unit, and it is centred along that side in the
+room the layout gave it. On a grid each panel is centred in its own cell, and other
+panels keep their plots.
+
+Ticks, labels, the colorbar, the value column and direct labels follow the smaller
+plot, and ``InPlot`` positions are fractions of it. The panel's title, subtitle and
+legend keep their alignment to the plot, and stay in the panel's room where they are
+wider than the plot. The figure's own header and caption and a shared colorbar stay
+where they are.
+
+Bubbles and value labels that widen automatic limits change the shape of the plot as
+the layout settles; the scales are equal for the final limits.
+
+Returns:
+    These axes.
+
+Raises:
+    UsageError: If x or y is a log, time or category axis, if the axes are a twin or
+        have one, or if x or y is shared with another panel; a panel added later
+        raises this when the figure is rendered.
+    StyleError: When rendering, if the limits leave the plot less than 1 pt on a side,
+        or the bubbles do not settle.
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> angle = np.linspace(0, 2 * np.pi, 200)
+>>> ax = ub.Figure(8, 4).add_axes().equal_aspect()
+>>> ax = ax.line(np.cos(angle), np.sin(angle))
+```
+
 ### `umber.Axes.events`
 
 ```text
@@ -2038,7 +2083,7 @@ Returns:
 Raises:
     TypeError: If ``scale`` is not a ``Scale``.
     UsageError: If either y scale is not numeric, these axes already have a twin,
-        these axes are a twin, or the grid shares x.
+        these axes are a twin, the grid shares x, or the axes have equal aspect.
 
 Example:
 

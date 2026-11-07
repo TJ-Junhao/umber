@@ -68,6 +68,25 @@ use crate::{ContinuousScale, Error, Instant, Theme, Transform};
 /// The most times a fit is made again after its first, before its axis keeps the limits of
 /// the data positions.
 const MAX_REFITS: usize = 8;
+#[cfg(test)]
+thread_local! {
+    /// How many times a fit is made again, as tests may ask.
+    pub(crate) static REFIT_LIMIT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(MAX_REFITS) };
+}
+
+/// How many times a fit is made again, as tests may ask.
+#[cfg(test)]
+fn refit_limit() -> usize {
+    REFIT_LIMIT.with(std::cell::Cell::get)
+}
+
+/// How many times a fit is made again: [`MAX_REFITS`].
+#[cfg(not(test))]
+fn refit_limit() -> usize {
+    MAX_REFITS
+}
+
 /// A drawing-space allowance, in points, added to every bubble's reach so that the final `f32`
 /// path coordinates stay inside the plot.
 const PATH_ALLOWANCE: f64 = 1e-4;
@@ -558,7 +577,7 @@ impl BubbleFit {
             State::Fitted { .. } if self.contains(scale, lengths) => return false,
             State::Unfitted if self.on_demand && self.contains(scale, lengths) => return false,
             State::Unfitted => Some((0.0, lengths.to_vec(), 0)),
-            State::Fitted { refits, .. } if *refits == MAX_REFITS => None,
+            State::Fitted { refits, .. } if *refits == refit_limit() => None,
             State::Fitted {
                 span,
                 lengths: fitted,
@@ -958,6 +977,15 @@ impl BubbleFits {
             .flatten()
             .flatten()
             .all(|fit| fit.on_demand || fit.state != State::Clipped)
+    }
+
+    /// Whether a fit of the panel `panel` holding a bubble fell back to the limits of the data
+    /// positions, so that the plot clips its bubbles.
+    pub fn clipped(&self, panel: usize) -> bool {
+        self.fits[panel]
+            .iter()
+            .flatten()
+            .any(|fit| !fit.on_demand && fit.state == State::Clipped)
     }
 
     /// Clips every fit whose bubbles still reach past the plot edges of the axes `resolved` on

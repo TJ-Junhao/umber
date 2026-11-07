@@ -32,11 +32,11 @@ use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band, check_format_axis,
-    check_highlight_axis, check_limits, check_no_time_x, check_numeric_y, check_reference_value,
-    check_series_y, check_span, check_step_order, check_tick_axis, check_time_error_bars,
-    check_time_limits, check_time_span, check_time_tick_axis, check_vline_x, check_x_error_bars,
-    check_y_error_bars,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
+    check_equal_aspect_axis, check_format_axis, check_highlight_axis, check_limits,
+    check_no_time_x, check_numeric_y, check_reference_value, check_series_y, check_span,
+    check_step_order, check_tick_axis, check_time_error_bars, check_time_limits, check_time_span,
+    check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
 use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
@@ -167,7 +167,8 @@ impl<'a> AxesMut<'a> {
     /// Adds numeric y axes on the right, sharing this axes' x scale and panel.
     /// A twin cannot itself be twinned, and x cannot be shared with another grid panel.
     /// A second call on the original axes is also an error; use `Figure::twin_axes_at_mut`
-    /// to retrieve the existing twin. Failed calls change nothing.
+    /// to retrieve the existing twin. Axes with [`equal aspect`](AxesMut::equal_aspect) refuse
+    /// a twin, whose y axis has its own scale. Failed calls change nothing.
     ///
     /// # Examples
     ///
@@ -562,6 +563,76 @@ impl<'a> AxesMut<'a> {
             settings,
             CONTEXT,
         )?;
+        Ok(self)
+    }
+
+    /// Makes one data unit equally long on both axes, for data in physical space, where a
+    /// circle must stay a circle. A second call changes nothing.
+    ///
+    /// The limits and the figure size stay as they are. The plot shrinks along one side until
+    /// both axes have the same points per data unit, and it is centred along that side in the
+    /// room the layout gave it; the other side keeps the size it had. A panel on a grid is
+    /// centred in its own cell and leaves the plots of other panels as they are.
+    ///
+    /// Ticks, tick labels, axis labels, the colorbar, the value column, direct labels and text
+    /// at positions in the plot follow the smaller plot. So do the panel's title, subtitle and
+    /// legend: they keep their alignment to the plot, and stay in the room of the panel where
+    /// they are wider than the plot. The figure's header, caption and a colorbar shared by
+    /// several panels belong to the grid, and stay where they are.
+    ///
+    /// Marks that reach by a number of points, such as bubbles and value labels, change
+    /// automatic limits, and so the shape of the plot, as the layout settles. The scales are
+    /// equal for the limits of the final layout.
+    ///
+    /// # Errors
+    ///
+    /// `Error::Usage`, naming the axis, for a log, time or category axis; for an axis shared
+    /// with another panel, since it is sized by its whole row or column, here when the other
+    /// panel is already on the figure and otherwise when rendering; and for these axes being a
+    /// twin or having one, since a twin y axis has its own scale. [`AxesMut::twin_y`] refuses
+    /// axes with this setting. A failed call changes nothing.
+    ///
+    /// Rendering returns `Error::Style` when the limits leave the plot less than 1 pt on a
+    /// side, and when bubbles do not settle.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{AxisData, LineOptions};
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(8.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.equal_aspect()?.line(
+    ///     AxisData::Numbers(vec![-1.0, 0.0, 1.0, 0.0, -1.0]),
+    ///     &[0.0, 1.0, 0.0, -1.0, 0.0],
+    ///     LineOptions::default(),
+    /// )?;
+    /// assert!(axes.has_equal_aspect());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn equal_aspect(&mut self) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.equal_aspect()";
+        check_equal_aspect_axis(CONTEXT, SharedAxis::X, self.x)?;
+        check_equal_aspect_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let problem = match self.twin {
+            super::axes::TwinLink::None => None,
+            super::axes::TwinLink::Primary(_) => Some("these axes have a twin"),
+            super::axes::TwinLink::Twin(_) => Some("these axes are a twin"),
+        };
+        if let Some(problem) = problem {
+            return Err(Error::usage(
+                CONTEXT,
+                format!(
+                    "{problem}; a twin y axis has its own scale, so equal aspect has no single \
+                     meaning."
+                ),
+            )
+            .with_hint("draw the second y scale on a panel of its own."));
+        }
+        self.figure
+            .check_equal_aspect_share(self.figure.panel(self.index), CONTEXT)?;
+        self.axes_mut().equal_aspect = true;
         Ok(self)
     }
 

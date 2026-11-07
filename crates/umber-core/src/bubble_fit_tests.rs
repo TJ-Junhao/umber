@@ -187,6 +187,27 @@ fn automatic_limits_fit_every_marker_shape_with_its_outline() {
 }
 
 #[test]
+fn automatic_limits_fit_every_bubble_on_axes_with_equal_aspect() {
+    // A smaller plot gives each bubble a larger share of it, and a wider extent changes the
+    // shape of the plot, on wide and tall figures and clouds alike.
+    for (width, height, x_span, y_span) in [
+        (6.0, 4.0, 10.0, 2.0),
+        (6.0, 4.0, 2.0, 10.0),
+        (3.0, 7.0, 10.0, 10.0),
+        (7.0, 3.0, 10.0, 10.0),
+    ] {
+        let x: Vec<f64> = (0..20).map(|i| f64::from(i % 5) * x_span / 4.0).collect();
+        let y: Vec<f64> = (0..20).map(|i| f64::from(i / 5) * y_span / 3.0).collect();
+        let sizes: Vec<f64> = (0..20).map(|i| 1.0 + f64::from(i % 7)).collect();
+        let mut f = Figure::new(width, height, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        bubbles(&mut f, &x, &y, &sizes, Marker::Circle);
+        f.single_axes_mut().equal_aspect().unwrap();
+        assert_bubbles_inside(&f, "equal aspect");
+    }
+}
+
+#[test]
 fn automatic_limits_fit_a_single_bubble_with_and_without_explicit_ticks() {
     for marker in MARKERS {
         for explicit_ticks in [false, true] {
