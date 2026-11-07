@@ -4334,7 +4334,10 @@ fn resolve_panel_marks_from<'a>(
                     geometry: None,
                     color,
                     mapped,
-                    frame: crate::field::arrow::ArrowFrame::of(mark.options().length),
+                    frame: crate::field::arrow::ArrowFrame::of(
+                        mark.options().length,
+                        mark.options().direction,
+                    ),
                 }
             }
             Mark::Barbs(mark) => {

@@ -101,11 +101,6 @@ impl Reach {
             up: self.up + margin,
         }
     }
-
-    /// The furthest of the four.
-    pub(crate) fn furthest(self) -> f64 {
-        self.left.max(self.right).max(self.down).max(self.up)
-    }
 }
 
 #[cfg(test)]
@@ -154,7 +149,7 @@ mod tests {
                 up: 0.0
             }
         );
-        assert_eq!(reach.widened(1.0).furthest(), 6.0);
-        assert_eq!(Reach::around(2.0).furthest(), 2.0);
+        assert_eq!(reach.widened(1.0).down, 6.0);
+        assert_eq!(Reach::around(2.0).right, 2.0);
     }
 }

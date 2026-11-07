@@ -78,7 +78,7 @@ svg = ax.figure.to_svg()
 
 ## Vector fields
 
-For arrows from a vector field use `ax.quiver(x, y, u, v)`. `x` and `y` are always one-dimensional, and the shape of `u` says which form is meant: two-dimensional `u` and `v` are a grid shaped `(len(y), len(x))`, as `contour()` takes it, and one-dimensional ones are points. Pass the coordinates, not the arrays of `np.meshgrid()`. NaN in any of the four leaves the arrow out.
+For arrows from a vector field use `ax.quiver(x, y, u, v)`. `x` and `y` are always one-dimensional, and the shape of `u` says which form is meant: two-dimensional `u` and `v` are a grid shaped `(len(y), len(x))`, as `contour()` takes it, and one-dimensional ones are points. Pass the coordinates, not the arrays of `np.meshgrid()`. NaN in `u` or `v` leaves the arrow out; so does a NaN coordinate of points, while the coordinates of a grid are finite and strictly increasing.
 
 ```python
 x, y = np.linspace(-3, 3, 25), np.linspace(-2, 2, 17)
@@ -89,10 +89,10 @@ svg = ax.figure.to_svg()
 ```
 
 - **The key.** `key=(10, "10 m/s")` adds a legend entry: an arrow at the true length of a magnitude of 10, then the text you write. Do not draw a reference arrow by hand: the key is exact because it uses the mark's own scale, and it follows the legend in every position and style. There is no `label=`.
-- **Length.** Lengths are exactly proportional to the magnitudes. By default the longest arrow is as long as the typical spacing of the samples on the final plot, so arrows rarely cross. `pt_per_unit=3` draws a magnitude of 10 as 30 pt: pass the same number to compare several axes. The arrows of one axes share one automatic scale.
+- **Length.** Lengths are exactly proportional to the magnitudes. By default the longest arrow is as long as the typical spacing of the samples on the final plot, and at most three quarters of its shorter side, so arrows rarely cross. `pt_per_unit=3` draws a magnitude of 10 as 30 pt: pass the same number to compare several axes. The arrows of one axes share one automatic scale.
 - **Thinning.** umber never thins arrows: `ax.quiver(x[::4], y[::4], u[::4, ::4], v[::4, ::4])` is the way to draw fewer.
 - **Direction.** By default `(u, v)` is measured on the screen: `u == v` is always 45°. `direction=ub.Direction.DATA` points each arrow from `(x, y)` towards `(x + u, y + v)` on the plot, so it follows a streamline on any plot shape; both axes must be linear. On `equal_aspect()` axes both draw the same arrows, so spatial data usually wants `equal_aspect()`.
-- **Color.** `color=ub.ColorBy(np.hypot(u, v))` colors arrows by a value with the shape of `u`, on the color scale of the axes.
+- **Color.** `color=ub.ColorBy(np.hypot(u, v))` colors arrows by a value with the shape of `u`, on the color scale of the axes. Overlapping mapped arrows are not drawn in data order.
 
 For wind, use `ax.barbs(x, y, u, v)` with the same inputs. `(u, v)` is where the wind blows to, and the staff runs against it from the sample. The speed is rounded to the nearest 5: a flag is 50, a full line 10, a half line 5, and a calm a small circle. umber converts no units, so pass knots if that is what the barbs should read. `flip=True` puts lines and flags on the left, for the southern hemisphere, and `size=` sets the staff length. Barbs take an ordinary `label=`. A time-height section is `ax.barbs(times, heights, u, v)` on `x=ub.Scale.time()`.
 

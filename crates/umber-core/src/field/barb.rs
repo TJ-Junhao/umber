@@ -19,7 +19,8 @@
 //!   the sample.
 //!
 //! Above 200, flags alone would pass the sample, so the staff grows inward by what they need
-//! and one step more; the outer end moves out by the same length.
+//! and one step more; the outer end moves out by the same length. A barb has at most
+//! [`MAX_FLAGS`] flags, and a mark refuses a speed that would take more.
 
 use super::{Reach, magnitude};
 use crate::{SizeSpec, Theme};
@@ -47,7 +48,9 @@ const FULL_SPEED: u64 = 10;
 /// The step of the speeds a barb can show.
 const SPEED_STEP: f64 = 5.0;
 /// The most flags a barb draws: far beyond any wind, and it bounds the shape.
-const MAX_FLAGS: u64 = 64;
+pub(crate) const MAX_FLAGS: u64 = 64;
+/// The highest speed a barb can show, as rounded: every flag, four full lines and a half line.
+pub(crate) const MAX_SPEED: u64 = MAX_FLAGS * FLAG_SPEED + 45;
 
 /// The length, in points, of a staff that asks for `size` under `theme`: [`STAFF`] times the
 /// font scale is the size that `size` resolves against.
@@ -72,14 +75,19 @@ impl Feathers {
     /// upward: 2.5 shows a half line, 7.5 a full line, 47.5 a flag. Dividing by 5 keeps these
     /// halves exact.
     pub(crate) fn of(speed: f64) -> Feathers {
-        // A speed beyond every flag saturates, and `MAX_FLAGS` bounds it.
+        // A speed beyond every integer saturates; such a mark is refused before it is drawn.
         let steps = (speed / SPEED_STEP + 0.5).floor() as u64;
         let rounded = steps.saturating_mul(SPEED_STEP as u64);
         Feathers {
-            flags: (rounded / FLAG_SPEED).min(MAX_FLAGS),
+            flags: rounded / FLAG_SPEED,
             full: rounded % FLAG_SPEED / FULL_SPEED,
             half: !rounded.is_multiple_of(FULL_SPEED),
         }
+    }
+
+    /// Whether a barb can show this: at most [`MAX_FLAGS`] flags.
+    pub(crate) fn fits(self) -> bool {
+        self.flags <= MAX_FLAGS
     }
 
     /// Whether the barb shows no wind.
@@ -90,6 +98,16 @@ impl Feathers {
             half: false,
         }
     }
+}
+
+/// How far any barb on a staff `staff` pt long reaches from its sample in any direction, strokes
+/// apart: its longest staff, past every flag, and a line leaning out of its end. A barb with more
+/// flags has a longer staff than one with more speed in lines, so this does not follow from the
+/// largest speed of a mark.
+pub(crate) fn furthest_reach(staff: f64) -> f64 {
+    let flags = MAX_FLAGS as f64 * FLAG_BASE;
+    // Five lines after the flags, the step from the last flag and the step past the last line.
+    staff * (flags + 6.0 * STEP + LINE_LEAN + LINE_RISE)
 }
 
 /// A segment of a barb, from one end to the other.
@@ -304,9 +322,25 @@ mod tests {
     }
 
     #[test]
-    fn an_enormous_speed_stays_bounded() {
-        let (_, flags) = wind(1e300);
-        assert_eq!(flags.len(), MAX_FLAGS as usize);
+    fn the_furthest_reach_covers_every_barb_a_mark_can_hold() {
+        let staff = 24.0;
+        let furthest = furthest_reach(staff);
+        for step in 0..=MAX_SPEED / 5 {
+            let speed = step as f64 * 5.0;
+            for (u, v) in [(0.0, speed), (speed, 0.0), (speed * 0.6, -speed * 0.8)] {
+                let reach = Barb::new(u, v, staff, false).reach(0.0);
+                let most = reach.left.max(reach.right).max(reach.down).max(reach.up);
+                assert!(most <= furthest, "{speed}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_barb_fits_up_to_the_highest_speed() {
+        assert!(Feathers::of(MAX_SPEED as f64).fits());
+        assert!(Feathers::of(MAX_SPEED as f64 + 2.4).fits());
+        assert!(!Feathers::of(MAX_SPEED as f64 + 2.5).fits());
+        assert!(!Feathers::of(1e300).fits());
     }
 
     #[test]

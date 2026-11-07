@@ -91,6 +91,37 @@ def test_the_shape_of_u_decides_and_wrong_shapes_are_refused() -> None:
     assert parameter_of(raised.value) == "x"
 
 
+def test_a_grid_refuses_a_nan_coordinate_as_a_contour_does() -> None:
+    for method in (axes().quiver, axes().barbs):
+        with pytest.raises(ub.DataError, match="coordinates must be finite") as raised:
+            method([0.0, np.nan, 2.0], Y, U, V)
+        assert parameter_of(raised.value) == "x"
+    with pytest.raises(ub.DataError, match="coordinates must be finite") as contour:
+        axes().contour([0.0, np.nan, 2.0], Y, U)
+    assert hint_of(contour.value) == "pass finite coordinates within the supported numeric range."
+
+
+def test_a_speed_beyond_every_flag_is_refused() -> None:
+    axes().barbs([0.0], [0.0], [0.0], [-3247.4])
+    with pytest.raises(ub.DataError, match="barbs show speeds up to 3245") as raised:
+        axes().barbs([0.0], [0.0], [0.0], [-3250.0])
+    assert parameter_of(raised.value) == "u"
+    assert "3250" in str(raised.value)
+
+
+def test_data_arrows_follow_the_final_axes() -> None:
+    ax = axes().quiver([0, 1], [0, 1], [1, 1], [-1, 1], direction=ub.Direction.DATA)
+    ax.figure.to_svg()
+    wide = ub.Figure(10, 2).add_axes()
+    wide.quiver([0, 1], [0, 100], [1, 1], [1, 1], direction=ub.Direction.DATA, pt_per_unit=200)
+    wide.figure.to_svg()
+
+
+def test_tiny_vectors_keep_their_length() -> None:
+    tiny = axes().quiver([0, 1], [0, 1], [1e-307, 1e-307], [0, 0]).figure.to_svg()
+    assert tiny == axes().quiver([0, 1], [0, 1], [1.0, 1.0], [0, 0]).figure.to_svg()
+
+
 def test_points_may_come_in_any_order_but_a_grid_may_not() -> None:
     axes().quiver([2.0, 0.0, 1.0], [0.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 0.0, 0.0])
 
@@ -164,7 +195,7 @@ def test_a_color_mapping_takes_the_shape_of_u() -> None:
     speed = np.hypot(U, V)
     ax = axes().quiver(X, Y, U, V, color=ub.ColorBy(speed)).colorbar("Speed")
     assert "linearGradient" in ax.figure.to_svg()
-    axes().barbs(X, Y, U, V, color=ub.ColorBy(cast(list[float], speed.tolist())))
+    axes().barbs(X, Y, U, V, color=ub.ColorBy([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
     axes().quiver(X, X, X, X, color=ub.ColorBy(X))
     with pytest.raises(ub.DataError, match=r"color has shape \(6,\)") as raised:
         axes().quiver(X, Y, U, V, color=ub.ColorBy(speed.ravel()))
@@ -179,7 +210,7 @@ def test_a_color_mapping_takes_the_shape_of_u() -> None:
 
 def test_a_ragged_color_mapping_is_refused() -> None:
     with pytest.raises(ub.DataError):
-        ub.ColorBy(cast(list[float], [[1.0, 2.0], [3.0]]))
+        ub.ColorBy([[1.0, 2.0], [3.0]])
 
 
 def test_directions_and_pivots_change_the_drawing() -> None:

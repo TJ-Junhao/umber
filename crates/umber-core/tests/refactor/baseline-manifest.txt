@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: fbb2aba4696ecbc6e1c2fddaf833e6883bb0500f
+# revision: 5932adaa382cd6555fb44f5627db0d22fb6c3815
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt
@@ -2956,9 +2956,9 @@ f42181bdb912931ca192197a21ebb555d35662a12bf35807bcf4273fa3c11937  scene/value-co
 ab8ce169658b108c4f9a7f5911093242720c39fcff3642710ce7d96b87300973  scene/value-column-twin-row-graphite.txt
 8a1743631b333f86b5f473b980144139caedc2bc26d685188888cec466d478b1  scene/value-column-twin-row-midnight.txt
 0406a5cfec2daaeb69846eb5f534c888c35979b46c2cefd79e5bc63a659fd435  scene/value-column-twin-row-pigment.txt
-abb26395b4846aad3590cb84f0ce350b4ac2b7111cea6530295cac77ca58d592  scene/vector-fields-data-direction-graphite.txt
+cf0d6cd447e4cc5b7eb57dad4031302f530fbe42b546594460b26669179f4a3f  scene/vector-fields-data-direction-graphite.txt
 b7ddf10ed5c162090d6060ff949ba526f8de8075c1ef74edec9cb1d6edb629f0  scene/vector-fields-data-direction-midnight.txt
-57ffaf52f77cabfdc77a76ec6d9fad8103c294943e33ed41ecce10307913bf59  scene/vector-fields-data-direction-pigment.txt
+2565c4c096b2ee10b81d8dbf14142eefef87a985ddfb4077595efdd5f44e4da1  scene/vector-fields-data-direction-pigment.txt
 e03f4b8b73ab5fd0903d2ad685777f8903b08a460ebb0add3eca1ce3c6b27ed6  scene/vector-fields-equal-graphite.txt
 b6482e03fb576d85381706bfb7f6b8d59ffc386942c62fb1b1726dbb12d289a5  scene/vector-fields-equal-midnight.txt
 7277cf15a15546a831fd509009cb0f565be97733200497c0c58511f63315c69a  scene/vector-fields-equal-pigment.txt

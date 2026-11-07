@@ -259,7 +259,7 @@ fn wrong_shapes_are_data_errors_naming_the_parameter() {
             FieldVectors::grid(vec![1.0; 2], vec![1.0; 2]),
             &[1.0, 0.0],
             &[0.0],
-            "Axes.quiver(): x[1] is 0; coordinates of a grid must be strictly increasing.",
+            "Axes.quiver(): x[1] is 0, not above x[0] = 1; coordinates must be strictly increasing.",
             "x",
         ),
     ];
@@ -316,17 +316,66 @@ fn nan_leaves_an_arrow_out_of_the_drawing_the_limits_and_the_scale() {
 }
 
 #[test]
-fn a_nan_grid_coordinate_leaves_its_column_out() {
+fn a_grid_refuses_a_nan_coordinate_as_a_contour_does() {
     let mut f = linear();
-    grid_quiver(
-        &mut f,
-        &[0.0, f64::NAN, 2.0],
-        &[0.0, 1.0],
-        &[1.0; 6],
-        &[0.0; 6],
-        scaled(10.0),
+    let error = axes(&mut f)
+        .quiver(
+            numbers(&[0.0, f64::NAN, 2.0]),
+            numbers(&[0.0, 1.0]),
+            FieldVectors::grid(vec![1.0; 6], vec![0.0; 6]),
+            QuiverOptions::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(error, Error::Data { .. }), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "Axes.quiver(): x[1] is NaN; coordinates must be finite."
     );
-    assert_eq!(arrows(&f).len(), 4);
+    assert_eq!(error.parameter(), Some("x"));
+    assert_eq!(
+        error.hint(),
+        Some("pass finite coordinates within the supported numeric range.")
+    );
+    let error = axes(&mut f)
+        .barbs(
+            AxisData::Numbers(vec![0.0]),
+            numbers(&[0.0, f64::NAN]),
+            FieldVectors::grid(vec![1.0; 2], vec![0.0; 2]),
+            BarbOptions::default(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Axes.barbs(): y[1] is NaN; coordinates must be finite."
+    );
+    // A missing time is refused the same way, and in the points form it leaves the sample out.
+    let mut timed = figure_of(
+        6.0,
+        4.0,
+        Theme::pigment(),
+        [ScaleKind::Time, ScaleKind::Linear],
+    );
+    let times = vec![Some(Instant::from_micros(0).unwrap()), None];
+    let error = axes(&mut timed)
+        .quiver(
+            AxisData::Times(times.clone()),
+            numbers(&[0.0]),
+            FieldVectors::grid(vec![1.0; 2], vec![0.0; 2]),
+            QuiverOptions::default(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Axes.quiver(): x[1] is missing; coordinates must be finite."
+    );
+    axes(&mut timed)
+        .quiver(
+            AxisData::Times(times),
+            numbers(&[0.0, 1.0]),
+            FieldVectors::points(vec![1.0; 2], vec![0.0; 2]),
+            QuiverOptions::default(),
+        )
+        .unwrap();
 }
 
 #[test]
@@ -382,7 +431,7 @@ fn the_longest_arrow_is_the_smaller_median_spacing_of_a_grid() {
     let (resolved, layout, frames) = planned(&f);
     let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
     let spacing = x_points.min(2.0 * y_points);
-    assert!((frames[0].pt_per_unit * 3.0 - spacing).abs() < 1e-3 * spacing);
+    assert!((frames[0].length_of(3.0) - spacing).abs() < 1e-3 * spacing);
     let longest = arrows(&f).iter().map(|a| length(a)).fold(0.0, f64::max);
     assert!((longest - spacing).abs() < 1e-3, "{longest} {spacing}");
 }
@@ -400,7 +449,7 @@ fn the_median_ignores_one_wide_gap() {
     );
     let (resolved, layout, frames) = planned(&f);
     let [x_points, _] = points_per_unit(&resolved, layout.plot);
-    assert!((frames[0].pt_per_unit - x_points).abs() < 1e-3 * x_points);
+    assert!((frames[0].length_of(1.0) - x_points).abs() < 1e-3 * x_points);
 }
 
 #[test]
@@ -419,7 +468,26 @@ fn points_take_the_median_distance_to_the_nearest_neighbour() {
     );
     let (resolved, layout, frames) = planned(&f);
     let [x_points, _] = points_per_unit(&resolved, layout.plot);
-    assert!((frames[0].pt_per_unit - 3.0 * x_points).abs() < 1e-3 * x_points);
+    assert!((frames[0].length_of(1.0) - 3.0 * x_points).abs() < 1e-3 * x_points);
+}
+
+#[test]
+fn vectors_too_small_for_a_scale_keep_their_length() {
+    for size in [1e-300, 1e-307, 1e-320] {
+        let mut f = linear();
+        quiver(
+            &mut f,
+            &[0.0, 1.0],
+            &[0.0, 1.0],
+            &[size, size / 2.0],
+            &[0.0, 0.0],
+            keyed(size, "tiny", QuiverOptions::default()),
+        );
+        let drawn = arrows(&f);
+        let (long, short) = (length(&drawn[0]), length(&drawn[1]));
+        assert!(long > 10.0, "{size}: {long}");
+        assert!((short / long - 0.5).abs() < 1e-3, "{size}: {short} {long}");
+    }
 }
 
 #[test]
@@ -471,8 +539,8 @@ fn quivers_of_one_axes_share_the_automatic_scale() {
     );
     quiver(&mut f, &x, &x, &[100.0; 3], &[0.0; 3], scaled(0.1));
     let (_, _, frames) = planned(&f);
-    assert_eq!(frames[0].pt_per_unit, frames[1].pt_per_unit);
-    assert_eq!(frames[2].pt_per_unit, 0.1);
+    assert_eq!(frames[0].length_of(1.0), frames[1].length_of(1.0));
+    assert_eq!(frames[2].length_of(1.0), 0.1);
 }
 
 #[test]
@@ -489,7 +557,7 @@ fn the_scale_settles_with_the_reach_of_its_own_arrows() {
     let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
     let longest = 2.0_f64.hypot(1.0);
     let spacing = x_points.min(y_points);
-    assert!((frames[0].pt_per_unit * longest - spacing).abs() < 1e-3);
+    assert!((frames[0].length_of(longest) - spacing).abs() < 1e-3);
     let again = scene(&f);
     assert_eq!(again, scene(&f), "the same figure draws the same scene");
 }
@@ -558,6 +626,166 @@ fn both_directions_draw_the_same_arrows_on_equal_aspect() {
         scene(&f)
     };
     assert_eq!(draw(Direction::Screen), draw(Direction::Data));
+}
+
+/// Asserts that every arrow of `figure`, of the vectors `(u, v)` in order, points on the page as
+/// `(u, v)` does on its final axes, to a thousandth of a radian or what `f32` corners show.
+fn assert_along_the_final_axes(figure: &Figure, u: &[f64], v: &[f64]) {
+    let (resolved, layout, _) = planned(figure);
+    let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
+    let drawn = arrows(figure);
+    assert_eq!(drawn.len(), u.len());
+    for ((corners, &u), &v) in drawn.iter().zip(u).zip(v) {
+        let [dx, dy] = vector(corners);
+        let (ex, ey) = (u * x_points, v * y_points);
+        let across = (dx * ey - dy * ex) / (dx.hypot(dy) * ex.hypot(ey));
+        let along = dx * ex + dy * ey;
+        assert!(
+            across.abs() < 1e-3 && along > 0.0,
+            "drawn ({dx}, {dy}), final axes ({ex}, {ey})"
+        );
+    }
+}
+
+#[test]
+fn a_data_arrow_points_by_the_final_axes_when_arrows_reshape_the_plot() {
+    let (x, y, u, v) = ([0.0, 1.0], [0.0, 1.0], [1.0, 1.0], [-1.0, 1.0]);
+    let mut f = linear();
+    quiver(
+        &mut f,
+        &x,
+        &y,
+        &u,
+        &v,
+        QuiverOptions {
+            direction: Direction::Data,
+            ..QuiverOptions::default()
+        },
+    );
+    assert_along_the_final_axes(&f, &u, &v);
+    let (resolved, layout, _) = planned(&f);
+    let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
+    let [dx, dy] = vector(&arrows(&f)[1]);
+    assert!((dy / dx - y_points / x_points).abs() < 1e-3, "{dx} {dy}");
+    assert!(dy / dx > 0.3, "well away from a flat arrow: {dx} {dy}");
+}
+
+/// The `x`, `y`, `u` and `v` of a field.
+type Field<'a> = (&'a [f64], &'a [f64], &'a [f64], &'a [f64]);
+
+#[test]
+fn every_data_arrow_points_by_the_final_axes() {
+    let log_free = [(6.0, 4.0), (8.0, 3.0), (4.0, 6.0), (10.0, 2.0), (3.0, 3.0)];
+    let fields: [Field<'_>; 5] = [
+        (&[0.0, 1.0], &[0.0, 1.0], &[1.0, 1.0], &[-1.0, 1.0]),
+        (
+            &[0.0, 1.0, 2.0],
+            &[0.0, 2.0, 1.0],
+            &[1.0, -1.0, 2.0],
+            &[3.0, 1.0, -2.0],
+        ),
+        (&[0.0, 10.0], &[0.0, 0.5], &[5.0, -5.0], &[0.1, 0.1]),
+        (
+            &[0.0, 1.0, 2.0, 3.0],
+            &[0.0, 1e6, 2e6, 3e6],
+            &[1.0; 4],
+            &[1e6; 4],
+        ),
+        (
+            &[1.0, 2.0, 4.0, 8.0],
+            &[1.0, 3.0, 2.0, 5.0],
+            &[3.0, 0.0, -2.0, 1.0],
+            &[0.5, 2.0, 1.0, -1.0],
+        ),
+    ];
+    for (width, height) in log_free {
+        for (x, y, u, v) in fields {
+            for length in [ArrowLength::Auto, ArrowLength::PtPerUnit(9.0)] {
+                for pivot in [Pivot::Tail, Pivot::Tip] {
+                    let mut f = figure_of(width, height, Theme::pigment(), LINEAR);
+                    let scale = 1.0 / u.iter().chain(v).fold(0.0_f64, |a, b| a.max(b.abs()));
+                    let (u, v): (Vec<f64>, Vec<f64>) = match length {
+                        ArrowLength::Auto => (u.to_vec(), v.to_vec()),
+                        ArrowLength::PtPerUnit(_) => (
+                            u.iter().map(|u| u * scale * 4.0).collect(),
+                            v.iter().map(|v| v * scale * 4.0).collect(),
+                        ),
+                    };
+                    quiver(
+                        &mut f,
+                        x,
+                        y,
+                        &u,
+                        &v,
+                        QuiverOptions {
+                            direction: Direction::Data,
+                            length,
+                            pivot,
+                            ..QuiverOptions::default()
+                        },
+                    );
+                    assert_along_the_final_axes(&f, &u, &v);
+                    let drawn = scene(&f);
+                    let (clip, items) = marks(&drawn);
+                    let slack = Rect {
+                        x: clip.x - 1.0,
+                        y: clip.y - 1.0,
+                        width: clip.width + 2.0,
+                        height: clip.height + 2.0,
+                    };
+                    assert_inside(&every_point(&fills(items)), slack);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn an_explicit_scale_along_the_data_is_judged_on_its_own_axes() {
+    // On the screen these arrows would be 45°, and too tall for this plot; along the data they
+    // lie nearly flat.
+    let mut f = figure_of(10.0, 2.0, Theme::pigment(), LINEAR);
+    let (u, v) = ([1.0, 1.0], [1.0, 1.0]);
+    quiver(
+        &mut f,
+        &[0.0, 1.0],
+        &[0.0, 100.0],
+        &u,
+        &v,
+        QuiverOptions {
+            direction: Direction::Data,
+            ..scaled(200.0)
+        },
+    );
+    assert_along_the_final_axes(&f, &u, &v);
+    let drawn = arrows(&f);
+    assert!((length(&drawn[0]) - 200.0 * 2.0_f64.sqrt()).abs() < 1e-2);
+    let [dx, dy] = vector(&drawn[0]);
+    assert!(dy.abs() < 0.1 * dx, "{dx} {dy}");
+}
+
+#[test]
+fn data_arrows_that_no_limits_hold_are_refused() {
+    let mut f = linear();
+    quiver(
+        &mut f,
+        &[0.0, 1.0],
+        &[0.0, 1.0],
+        &[1.0, -1.0],
+        &[1.0, -1.0],
+        QuiverOptions {
+            direction: Direction::Data,
+            ..scaled(1000.0)
+        },
+    );
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(matches!(error, Error::Style { .. }), "{error:?}");
+    assert!(
+        error
+            .to_string()
+            .contains("the arrows need a figure at least"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -725,7 +953,7 @@ fn limits_hold_whole_arrows_on_equal_aspect() {
     let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
     assert!((x_points / y_points - 1.0).abs() < 1e-9);
     let longest = 10.0_f64.sqrt();
-    assert!((frames[0].pt_per_unit * longest - x_points).abs() < 1e-3);
+    assert!((frames[0].length_of(longest) - x_points).abs() < 1e-3);
     let scene = scene(&f);
     let (clip, items) = marks(&scene);
     assert_inside(&every_point(&fills(items)), clip);
@@ -820,7 +1048,7 @@ fn a_key_is_drawn_at_the_true_length_of_its_value_with_its_text() {
         let (length, slot, text) = &keys[0];
         assert_eq!(text, "10 m/s");
         assert!((f64::from(*length) - frames[0].key_length).abs() < 1e-3);
-        assert!((slot - frames[0].pt_per_unit * 10.0).abs() < 1e-3);
+        assert!((slot - frames[0].length_of(10.0)).abs() < 1e-3);
         // Its arrow is the longest arrow of the plot, to the point.
         let scene = scene(&f);
         let drawn = arrows_in_legend(&scene);
@@ -882,7 +1110,7 @@ fn a_key_works_in_every_position_and_style() {
                 let keys = key_arrows(&layout);
                 assert_eq!(keys.len(), 1, "{style:?} {position:?}");
                 assert!(
-                    (f64::from(keys[0].0) - 10.0 * frames[0].pt_per_unit).abs() < 1e-3,
+                    (f64::from(keys[0].0) - frames[0].length_of(10.0)).abs() < 1e-3,
                     "{style:?} {position:?}"
                 );
                 let scene = scene(&f);
@@ -931,7 +1159,7 @@ fn a_legend_beside_the_plot_settles_with_the_key_it_makes_room_for() {
         .unwrap();
     let (resolved, layout, frames) = planned(&f);
     let [x_points, _] = points_per_unit(&resolved, layout.plot);
-    assert!((frames[0].pt_per_unit - x_points).abs() < 1e-2);
+    assert!((frames[0].length_of(1.0) - x_points).abs() < 1e-2);
     let keys = key_arrows(&layout);
     assert!((keys[0].1 - frames[0].key_length).abs() < 1e-4);
 }
@@ -958,7 +1186,7 @@ fn a_key_beside_a_plot_of_equal_aspect_stays_on_the_canvas() {
         let (resolved, layout, frames) = planned(&f);
         let [x_points, y_points] = points_per_unit(&resolved, layout.plot);
         assert!((x_points / y_points - 1.0).abs() < 1e-9);
-        assert!((frames[0].pt_per_unit * 1.25_f64.sqrt() - x_points).abs() < 1e-3);
+        assert!((frames[0].length_of(1.25_f64.sqrt()) - x_points).abs() < 1e-3);
         let entry = &layout.legend.entries()[0];
         assert!(
             entry.label.x + entry.label.width() <= 7.0 * 72.0,
@@ -982,7 +1210,7 @@ fn a_few_arrows_settle_on_the_limits_they_widen() {
     );
     let (resolved, layout, frames) = planned(&f);
     let [x_points, _] = points_per_unit(&resolved, layout.plot);
-    assert!((frames[0].pt_per_unit - x_points).abs() < 1e-3 * x_points);
+    assert!((frames[0].length_of(1.0) - x_points).abs() < 1e-3 * x_points);
 }
 
 #[test]
@@ -999,7 +1227,7 @@ fn arrows_across_a_row_stop_short_of_the_height_of_the_plot() {
         QuiverOptions::default(),
     );
     let (_, layout, frames) = planned(&f);
-    assert!(frames[0].pt_per_unit <= 0.75 * layout.plot.height + 1e-6);
+    assert!(frames[0].length_of(1.0) <= 0.75 * layout.plot.height + 1e-6);
     let drawn = scene(&f);
     let (clip, items) = marks(&drawn);
     assert_inside(&every_point(&fills(items)), clip);
@@ -1019,7 +1247,7 @@ fn arrows_pointing_both_ways_across_a_row_share_the_height_of_the_plot() {
         QuiverOptions::default(),
     );
     let (_, layout, frames) = planned(&f);
-    assert!(frames[0].pt_per_unit < 0.5 * layout.plot.height);
+    assert!(frames[0].length_of(1.0) < 0.5 * layout.plot.height);
     let drawn = scene(&f);
     let (clip, items) = marks(&drawn);
     assert_inside(&every_point(&fills(items)), clip);
@@ -1368,7 +1596,7 @@ fn arrows_hold_their_limits_on_log_and_time_axes() {
     let (ylo, yhi) = resolved.y.continuous().unwrap().domain();
     let two_decades = 2.0 * layout.plot.height / (yhi / ylo).log10();
     let spacing = decade.min(two_decades);
-    assert!((frames[0].pt_per_unit * 2.0_f64.sqrt() - spacing).abs() < 1e-2);
+    assert!((frames[0].length_of(2.0_f64.sqrt()) - spacing).abs() < 1e-2);
     let drawn = scene(&f);
     let (clip, items) = marks(&drawn);
     assert_inside(&every_point(&fills(items)), clip);
@@ -1625,6 +1853,57 @@ fn a_time_height_section_holds_whole_barbs() {
     let entries = layout.legend.entries();
     assert_eq!(entries.len(), 1);
     assert!(matches!(entries[0].swatch.kind, Swatch::Line { .. }));
+}
+
+#[test]
+fn a_barb_is_not_culled_by_a_faster_barb_with_a_shorter_staff() {
+    // A speed of 195 has more lines after its flags, and a longer staff, than a speed of 200.
+    let y = -33.0 / 243.212;
+    let draw = |x: &[f64], speeds: &[f64]| {
+        let mut f = linear();
+        axes(&mut f).xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
+        axes(&mut f)
+            .barbs(
+                numbers(x),
+                numbers(&vec![y; x.len()]),
+                FieldVectors::points(
+                    vec![0.0; x.len()],
+                    speeds.iter().map(|s| -s).collect::<Vec<_>>(),
+                ),
+                BarbOptions::default(),
+            )
+            .unwrap();
+        scene(&f)
+    };
+    let alone = draw(&[0.5], &[195.0]);
+    let (_, items) = marks(&alone);
+    assert!(!items.is_empty(), "its tip reaches the plot");
+    assert_eq!(alone, draw(&[0.5, 1e10], &[195.0, 200.0]));
+}
+
+#[test]
+fn a_speed_beyond_every_flag_is_refused_at_the_call() {
+    let barbs = |speed: f64| {
+        let mut f = linear();
+        axes(&mut f)
+            .barbs(
+                numbers(&[0.0, 1.0]),
+                numbers(&[0.0]),
+                FieldVectors::grid(vec![0.0, 0.0], vec![0.0, -speed]),
+                BarbOptions::default(),
+            )
+            .map(drop)
+    };
+    assert!(barbs(3245.0).is_ok());
+    assert!(barbs(3247.4).is_ok());
+    let error = barbs(3247.5).unwrap_err();
+    assert!(matches!(error, Error::Data { .. }), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "Axes.barbs(): the speed at u[0][1], v[0][1] is 3247.5; barbs show speeds up to 3245."
+    );
+    assert_eq!(error.parameter(), Some("u"));
+    assert!(barbs(1e300).is_err());
 }
 
 #[test]

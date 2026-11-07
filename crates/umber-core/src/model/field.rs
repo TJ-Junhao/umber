@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use super::axis_data::{AxisData, SharedValues};
 use super::color_by::{PointColor, check_mapped_values};
+use super::contour::check_ordered;
 use super::share::SharedAxis;
 use super::validation::{check_axis_data, shared_of};
 use crate::error::number;
+use crate::field::barb::{Feathers, MAX_SPEED};
 use crate::field::magnitude;
 use crate::scale::MAX_MAGNITUDE;
 use crate::{Error, Instant, Result, ScaleKind, SizeSpec, Transform};
@@ -86,10 +88,11 @@ impl FieldVectors {
     }
 }
 
-/// A validated field. A sample is present when its coordinates, `u` and `v` are all there: NaN
-/// or a missing time in any of them leaves the sample out, of the drawing, of the limits and of
-/// the automatic scale. Everything is validated together and never changes; clones share the
-/// data.
+/// A validated field. The coordinates of a grid are finite and strictly increasing, as those of
+/// a contour are; those of points may be NaN or missing. A sample is present when its
+/// coordinates, `u` and `v` are all there: NaN or a missing time in any of them leaves the sample
+/// out, of the drawing, of the limits and of the automatic scale. Everything is validated
+/// together and never changes; clones share the data.
 ///
 /// # Examples
 ///
@@ -146,8 +149,8 @@ impl VectorField {
     /// 1. neither axis is a category axis (`Error::Usage`, naming `x` or `y`);
     /// 2. the lengths match the form: `x`, `y`, `u` and `v` the same length for points; `u` and
     ///    `v` `y.len() * x.len()` values for a grid (`Error::Data`);
-    /// 3. `x`, then `y`, suit their axes, as the coordinates of a scatter do, and on a grid the
-    ///    coordinates that are there strictly increase (`Error::Data`);
+    /// 3. `x`, then `y`, suit their axes, as the coordinates of a scatter do, and on a grid they
+    ///    are finite and strictly increase (`Error::Data`);
     /// 4. every value of `u`, then of `v`, is NaN or finite and at most 1e300 in magnitude
     ///    (`Error::Data`, naming the value, by row and column on a grid).
     fn new(
@@ -163,8 +166,8 @@ impl VectorField {
         check_axis_data(context, SharedAxis::Y, kinds.1, &y, GAP_HINT)?;
         let (x, y) = (shared_of(x), shared_of(y));
         if form == FieldForm::Grid {
-            check_increasing(context, "x", &x)?;
-            check_increasing(context, "y", &y)?;
+            check_grid_axis(context, "x", &x, kinds.0)?;
+            check_grid_axis(context, "y", &y, kinds.1)?;
         }
         let columns = x.len();
         let name = |component: &str, i: usize| match form {
@@ -392,46 +395,50 @@ fn check_lengths(
     }
 }
 
-/// Checks that the coordinates of a grid that are there strictly increase: `Error::Data`
-/// under `context`, naming the first that does not.
-fn check_increasing(
+/// Checks the coordinates `values` of a grid along an axis of scale kind `kind`, as `contour()`
+/// does: finite, or present for times, and strictly increasing (`Error::Data` under `context`,
+/// naming the first that is not).
+fn check_grid_axis(
     context: &'static str,
     name: &'static str,
     values: &SharedValues,
+    kind: ScaleKind,
 ) -> Result<()> {
-    let fault = |i: usize, shown: &dyn std::fmt::Display| {
-        Error::data(
-            context,
-            format!("{name}[{i}] is {shown}; coordinates of a grid must be strictly increasing."),
-        )
-        .with_parameter(name)
-        .with_hint("sort the coordinates, and the rows or columns of u and v with them.")
-    };
-    match values {
-        SharedValues::Numbers(values) => {
-            let mut last = f64::NEG_INFINITY;
-            for (i, &value) in values.iter().enumerate() {
-                if value <= last {
-                    return Err(fault(i, &number(value)));
-                }
-                if !value.is_nan() {
-                    last = value;
-                }
-            }
+    const SORT_HINT: &str = "sort the coordinates, and the rows or columns of u and v with them.";
+    match (values, kind.transform()) {
+        (SharedValues::Numbers(values), Some(transform)) => {
+            check_ordered(context, name, values, transform, SORT_HINT)
         }
-        SharedValues::Times(times) => {
+        (SharedValues::Numbers(_), None) => Ok(()),
+        (SharedValues::Times(times), _) => {
             let mut last: Option<Instant> = None;
             for (i, time) in times.iter().enumerate() {
-                if let Some(time) = time {
-                    if last.is_some_and(|last| *time <= last) {
-                        return Err(fault(i, &"not after the time before it"));
-                    }
-                    last = Some(*time);
+                let fault = |message: String, hint: &'static str| {
+                    Error::data(context, message)
+                        .with_parameter(name)
+                        .with_hint(hint)
+                };
+                let Some(time) = *time else {
+                    return Err(fault(
+                        format!("{name}[{i}] is missing; coordinates must be finite."),
+                        "pass finite coordinates within the supported numeric range.",
+                    ));
+                };
+                if last.is_some_and(|last| time <= last) {
+                    return Err(fault(
+                        format!(
+                            "{name}[{i}] is not after {name}[{}]; coordinates must be strictly \
+                             increasing.",
+                            i - 1
+                        ),
+                        SORT_HINT,
+                    ));
                 }
+                last = Some(time);
             }
+            Ok(())
         }
     }
-    Ok(())
 }
 
 /// Checks that a `color` mapping has one value per value of `u`: `Error::Data` under `context`
@@ -506,11 +513,13 @@ pub enum Direction {
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ArrowLength {
-    /// The longest arrow is as long as the typical spacing of the samples on the final plot,
-    /// and every arrow of the axes with this setting shares that scale.
+    /// The longest arrow is as long as the typical spacing of the samples on the final plot, at
+    /// most three quarters of the shorter side of the plot, and every arrow of the axes with
+    /// this setting shares that scale.
     #[default]
     Auto,
-    /// This many points per unit of magnitude, for this mark alone.
+    /// This many points per unit of magnitude, for this mark alone. It may draw no arrow longer
+    /// than 14,400 pt, the side of the largest figure.
     PtPerUnit(f64),
 }
 
@@ -585,7 +594,8 @@ pub struct QuiverOptions {
 ///
 /// Automatic limits hold whole arrows; explicit limits are kept and clip them. On axes with
 /// equal aspect both [`Direction`]s draw the same arrows. Colors that a mapping brings close to
-/// the background move away from it, as the lines of a contour do.
+/// the background move away from it, as the lines of a contour do. The arrows of one color are
+/// drawn together, so overlapping arrows of a mapping are not drawn in data order.
 ///
 /// # Examples
 ///
@@ -727,6 +737,30 @@ fn check_data_direction((x, y): (ScaleKind, ScaleKind)) -> Result<()> {
     Ok(())
 }
 
+/// Checks that a barb can show every speed of `field`: `Error::Data` about `u`, naming the first
+/// sample that it cannot, since more flags than a barb has would read as a lower speed.
+fn check_speeds(field: &VectorField) -> Result<()> {
+    for sample in field.samples() {
+        let speed = magnitude(sample.u, sample.v);
+        if !Feathers::of(speed).fits() {
+            let at = match field.form {
+                FieldForm::Points => format!("[{}]", sample.index),
+                FieldForm::Grid => format!("[{}][{}]", sample.row, sample.column),
+            };
+            return Err(Error::data(
+                BARBS_CONTEXT,
+                format!(
+                    "the speed at u{at}, v{at} is {}; barbs show speeds up to {MAX_SPEED}.",
+                    number(speed)
+                ),
+            )
+            .with_parameter("u")
+            .with_hint("pass the wind in a unit that gives smaller values."));
+        }
+    }
+    Ok(())
+}
+
 /// Options of wind barbs.
 ///
 /// # Examples
@@ -760,7 +794,9 @@ pub struct BarbOptions {
 /// `(u, v)` is where the wind blows to: the staff starts at the sample and runs against it,
 /// always in the screen direction, since barbs are read as compass bearings. Lines and flags
 /// lie to the right when looking from the sample along the staff, towards low pressure in the
-/// northern hemisphere. Automatic limits hold whole barbs; explicit limits clip them.
+/// northern hemisphere. Automatic limits hold whole barbs; explicit limits clip them. The barbs
+/// of one color are drawn together, so overlapping barbs of a mapping are not drawn in data
+/// order. A speed that rounds above 3245, 64 flags and all the lines, is refused.
 ///
 /// # Examples
 ///
@@ -784,7 +820,8 @@ pub struct BarbsMark {
 
 impl BarbsMark {
     /// Validates barbs on axes of the scale kinds `kinds`: the field ([`VectorField::new`]),
-    /// then that a color mapping has one value per value of `u` (`Error::Data`).
+    /// then that every speed can be drawn, rounding to at most 3245, and that a color mapping
+    /// has one value per value of `u` (`Error::Data`).
     pub(super) fn new(
         kinds: (ScaleKind, ScaleKind),
         coordinates: (AxisData, AxisData),
@@ -792,6 +829,7 @@ impl BarbsMark {
         options: BarbOptions,
     ) -> Result<BarbsMark> {
         let field = VectorField::new(BARBS_CONTEXT, kinds, coordinates, vectors)?;
+        check_speeds(&field)?;
         check_color_shape(BARBS_CONTEXT, &options.color, field.len())?;
         Ok(BarbsMark { field, options })
     }

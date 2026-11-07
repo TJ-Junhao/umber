@@ -4021,11 +4021,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         ``x`` and ``y`` are always one-dimensional, and the shape of ``u`` says which form is
         meant. One-dimensional ``u`` and ``v`` are points: all four have the same length.
         Two-dimensional ``u`` and ``v`` are a grid shaped ``(len(y), len(x))``, as ``contour()``
-        takes it, whose ``x`` and ``y`` are strictly increasing; the arrays of ``np.meshgrid()``
-        are not taken, so pass the coordinates they were made from. To draw fewer arrows, thin the
-        arrays: ``ax.quiver(x[::4], y[::4], u[::4, ::4], v[::4, ::4])``. A NaN (or a missing
-        time) in ``x``, ``y``, ``u`` or ``v`` leaves that arrow out, of the plot, of the limits
-        and of the automatic scale.
+        takes it, whose ``x`` and ``y`` are finite and strictly increasing; the arrays of
+        ``np.meshgrid()`` are not taken, so pass the coordinates they were made from. To draw
+        fewer arrows, thin the arrays: ``ax.quiver(x[::4], y[::4], u[::4, ::4], v[::4, ::4])``. A
+        NaN in ``u`` or ``v``, and for points a NaN (or a missing time) in ``x`` or ``y``, leaves
+        that arrow out, of the plot, of the limits and of the automatic scale.
 
         A length is exactly proportional to the magnitude ``sqrt(u**2 + v**2)``: an arrow twice
         as long means twice the magnitude, and a short arrow is never lengthened. With
@@ -4071,7 +4071,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             color: The arrow color. ``Color.AUTO`` takes the next palette color. ``ColorBy``
                 maps one value per arrow, with the shape of ``u``, on the color scale of the
                 axes; a color close to the background is darkened or lightened as a contour line
-                is, and the key takes the theme's text color.
+                is, and the key takes the theme's text color. The arrows of one color are drawn
+                together, so overlapping mapped arrows are not drawn in data order.
             pivot: The part of the arrow that sits on the sample: ``Pivot.TAIL``,
                 ``Pivot.MIDDLE`` or ``Pivot.TIP``.
             direction: What ``(u, v)`` is measured against. ``Direction.SCREEN`` points along
@@ -4080,8 +4081,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 ``(x + u, y + v)`` on the plot, so that an arrow is tangent to a streamline of
                 the same field on any plot shape; both axes must be linear. On axes with
                 ``equal_aspect()`` the two draw the same arrows.
-            pt_per_unit: Points per unit of magnitude, for this mark alone; ``AUTO`` for the
-                automatic scale.
+            pt_per_unit: Points per unit of magnitude, for this mark alone, drawing no arrow
+                longer than 14,400 pt, the side of the largest figure; ``AUTO`` for the automatic
+                scale.
             key: A tuple of a magnitude and the text of its legend entry, such as
                 ``(10, "10 m/s")``; ``AUTO`` for no entry.
 
@@ -4092,9 +4094,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If an argument has the wrong type.
             DataError: If ``x`` or ``y`` is two-dimensional, ``u`` and ``v`` are neither both
                 one-dimensional nor both two-dimensional, lengths or shapes differ, the
-                coordinates of a grid do not strictly increase, a coordinate is invalid for its
-                axis, a component is infinite or beyond 1e300 in magnitude, or a ``ColorBy``
-                does not have the shape of ``u``.
+                coordinates of a grid are not finite and strictly increasing, a coordinate is
+                invalid for its axis, a component is infinite or beyond 1e300 in magnitude, or a
+                ``ColorBy`` does not have the shape of ``u``.
             StyleError: If ``pt_per_unit`` is not finite and greater than 0 or draws an arrow
                 longer than 14,400 pt, the value of ``key`` is not greater than 0 and at most
                 1e300, its text is empty or not one line, or a ``ColorBy`` does not suit the
@@ -4167,14 +4169,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         The input forms are those of ``quiver()``: one-dimensional ``u`` and ``v`` for points, and
         two-dimensional ones shaped ``(len(y), len(x))`` for a grid, such as a time-height
-        section. A NaN (or a missing time) in ``x``, ``y``, ``u`` or ``v`` leaves that barb out.
+        section. A NaN in ``u`` or ``v``, and for points a NaN (or a missing time) in ``x`` or
+        ``y``, leaves that barb out.
 
         The speed ``sqrt(u**2 + v**2)`` is rounded to the nearest 5, halves upward, and written
         from the outer end of the staff inwards: a flag for each 50, a full line for each 10, a
         half line for a remaining 5, set in from the end of the staff when it stands alone. These
         are the meteorological steps, normally in knots; the values are taken as they are, and
         no unit is converted. A speed that rounds to 0 draws a small open circle. Above 200 the
-        staff grows to hold its flags.
+        staff grows to hold its flags, of which a barb has at most 64: a speed that rounds above
+        3245 raises ``DataError``.
 
         ``(u, v)`` is where the wind blows to, as in ``quiver()``. The staff starts at the sample
         and runs against it, towards where the wind comes from, always in the screen direction,
@@ -4198,7 +4202,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The legend label; empty skips this mark's legend entry.
             color: The barb color. ``Color.AUTO`` takes the next palette color. ``ColorBy`` maps
                 one value per barb, as for ``quiver()``, and the legend entry takes the theme's
-                text color.
+                text color. Overlapping mapped barbs are not drawn in data order.
             size: The length of the staff. ``Size.AUTO`` is 24 pt times the theme's font scale,
                 ``Size.times()`` a multiple of that, and ``Size.pt()`` a fixed length. Lines and
                 flags scale with it.
@@ -4209,7 +4213,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Raises:
             TypeError: If an argument has the wrong type.
-            DataError: As for ``quiver()``.
+            DataError: As for ``quiver()``, and for a speed that rounds above 3245.
             StyleError: If ``label`` is too long or holds a line break or another control
                 character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
             UsageError: If an axis is a category axis (type checkers refuse such axes), or a

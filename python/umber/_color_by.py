@@ -1,6 +1,6 @@
 """``ColorBy``: one value per point, mapped through a colormap to the point's color."""
 
-from collections.abc import Sized
+from collections.abc import Sequence, Sized
 from operator import attrgetter
 from typing import Final, Never, Self, cast, final
 
@@ -81,7 +81,7 @@ class ColorBy:
 
     def __init__(
         self,
-        values: Values[float],
+        values: Values[float] | Sequence[Values[float]],
         cmap: Cmap | Auto = AUTO,
         *,
         scale: Scale[float] = Scale.linear(),

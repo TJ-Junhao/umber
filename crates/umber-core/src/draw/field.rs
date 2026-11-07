@@ -3,8 +3,8 @@
 //! A mark is drawn as one item per color rather than one per arrow, so a page of arrows stays a
 //! handful of paths in every format: the arrows of a color are subpaths of one filled path, the
 //! staffs and lines of the barbs of a color one stroked path, and their flags one filled path.
-//! Items follow the order in which colors first appear, so arrows of different colors do not
-//! keep the order of the data where they cross. All arrows wind the same way, so their nonzero
+//! Items follow the order in which colors first appear, so overlapping arrows of a color mapping
+//! are not drawn in data order. All arrows wind the same way, so their nonzero
 //! fill stays solid where they overlap.
 //!
 //! A sample that its shape cannot carry to the plot is dropped in axis space, before anything is
@@ -202,7 +202,7 @@ pub(super) fn quiver_items(
     let pivot = mark.options().pivot;
     let xs = axis_shared(&resolved.x, field.x_values());
     let ys = axis_shared(&resolved.y, field.y_values());
-    let bounds = culling_bounds(context, frame.pt_per_unit * field.longest() + HEAD_WIDTH);
+    let bounds = culling_bounds(context, frame.length_of(field.longest()) + HEAD_WIDTH);
     let mut batches = Batches::new(context.theme, fill);
     for sample in field.samples() {
         let Some(color) = fill.at(sample.index) else {
@@ -247,8 +247,7 @@ pub(super) fn barb_items(
     let width = staff * barb::STROKE;
     let xs = axis_shared(&resolved.x, field.x_values());
     let ys = axis_shared(&resolved.y, field.y_values());
-    let longest = Barb::new(0.0, field.longest(), staff, flip);
-    let bounds = culling_bounds(context, longest.reach(width).furthest());
+    let bounds = culling_bounds(context, barb::furthest_reach(staff) + width);
     let mut batches = Batches::new(context.theme, fill);
     for sample in field.samples() {
         let Some(color) = fill.at(sample.index) else {
@@ -318,21 +317,30 @@ fn typical_spacing(maps: &AxisMaps, resolved: &Resolved, field: &VectorField) ->
     }
 }
 
-/// The length, in points, of the key arrow of `mark` at `pt_per_unit`; 0 without a key. Any key
-/// past [`MAX_ARROW_LENGTH`] is refused: the bound keeps its layout finite until then.
-pub(crate) fn key_length(mark: &QuiverMark, pt_per_unit: f64) -> f64 {
+/// The length, in points, of the key arrow of `mark` in `frame`; 0 without a key. Any key past
+/// [`MAX_ARROW_LENGTH`] is refused: the bound keeps its layout finite until then.
+pub(crate) fn key_length(mark: &QuiverMark, frame: &ArrowFrame) -> f64 {
     let key = mark.options().key.as_ref();
-    let length = key.map_or(0.0, |key| key.value * pt_per_unit);
+    let length = key.map_or(0.0, |key| frame.length_of(key.value));
     length.min(2.0 * MAX_ARROW_LENGTH)
+}
+
+/// The points of one data unit along x and along y on the axes `resolved` and the `plot`, the
+/// larger being 1: what the direction of an arrow along the data reads.
+pub(crate) fn data_scales(resolved: &Resolved, plot: Area) -> [f64; 2] {
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
+    let (x_points, y_points) = (maps.x.points(1.0), maps.y.points(1.0));
+    let largest = x_points.max(y_points);
+    [x_points / largest, y_points / largest]
 }
 
 /// The frame of each quiver among `marks`, in order, measured on the axes `resolved` and the
 /// `plot` of one layout: what the next layout should hold and draw. All automatic quivers
 /// share one scale, which makes the longest of their arrows as long as the smallest of their
 /// spacings, or as long as an automatic barb staff when they have no spacing, and without any
-/// length to scale that scale is 0. The longest arrow is at most [`MOST_OF_THE_PLOT`] of the
-/// shorter side of the plot: a row of a few samples can have a spacing longer than the plot is
-/// high, which no limits hold.
+/// length to scale that scale has no length. The longest arrow is at most [`MOST_OF_THE_PLOT`] of
+/// the shorter side of the plot: a row of a few samples can have a spacing longer than the plot
+/// is high, which no limits hold.
 ///
 /// On axes with `equal_aspect` a data unit is equally long along both axes, so
 /// [`Direction::Data`] takes the screen scales exactly and both directions draw the same bits.
@@ -355,32 +363,34 @@ pub(crate) fn measured_frames(
         .clone()
         .map(|mark| mark.field().longest())
         .fold(0.0, f64::max);
-    let scale = if longest > 0.0 {
+    let length = if longest > 0.0 {
         let length = automatic
             .filter_map(|mark| typical_spacing(&maps, resolved, mark.field()))
             .reduce(f64::min)
             .unwrap_or_else(|| barb::STAFF * f64::from(theme.font_scale()));
-        length.min(MOST_OF_THE_PLOT * plot.width.min(plot.height)) / longest
+        length.min(MOST_OF_THE_PLOT * plot.width.min(plot.height))
     } else {
         0.0
     };
-    let (x_points, y_points) = (maps.x.points(1.0), maps.y.points(1.0));
-    let largest = x_points.max(y_points);
     quivers
         .map(|mark| {
             let options = mark.options();
-            let pt_per_unit = match options.length {
-                ArrowLength::Auto => scale,
-                ArrowLength::PtPerUnit(scale) => scale,
+            let (length, magnitude) = match options.length {
+                ArrowLength::Auto if longest > 0.0 => (length, longest),
+                ArrowLength::Auto => (0.0, 1.0),
+                ArrowLength::PtPerUnit(scale) => (scale, 1.0),
             };
-            ArrowFrame {
-                pt_per_unit,
+            let mut frame = ArrowFrame {
+                length,
+                magnitude,
                 scales: match options.direction {
-                    Direction::Data if !equal_aspect => [x_points / largest, y_points / largest],
+                    Direction::Data if !equal_aspect => data_scales(resolved, plot),
                     Direction::Data | Direction::Screen => SCREEN_SCALES,
                 },
-                key_length: key_length(mark, pt_per_unit),
-            }
+                key_length: 0.0,
+            };
+            frame.key_length = key_length(mark, &frame);
+            frame
         })
         .collect()
 }
