@@ -386,8 +386,9 @@ Sizes are shares of the staff length ``s``: a full line rises ``0.4 s`` and lean
 ``0.25 s`` and a height of ``0.4 s``, lines stand ``0.125 s`` apart, and they are
 ``0.04 s`` wide. The circle of a calm has a radius of ``0.125 s``.
 
-Automatic limits hold whole barbs, as they hold whole bubbles; explicit limits are kept,
-and the plot clips the barbs. All barbs of a mark have one size, so a label needs no
+Automatic limits hold whole barbs, as they hold whole bubbles, and barbs that no automatic
+limits hold raise ``StyleError`` when rendering; explicit limits are kept, and the plot
+clips the barbs. All barbs of a mark have one size, so a label needs no
 reference: the legend entry is a line swatch, in the row under every legend style.
 
 Args:
@@ -1609,8 +1610,9 @@ draws a dot as wide as the shaft: the sample exists, and nothing moves there.
 
 Automatic limits hold whole arrows, as they hold whole bubbles, in log space on a log
 axis and in seconds on a time axis. Explicit limits are kept, and the plot clips the
-arrows. With ``pt_per_unit``, an arrow too long for any automatic limits raises
-``StyleError`` when rendering, naming the smallest figure that holds it, for example
+arrows. Automatic limits never cut an arrow: ``AUTO`` shortens the arrows until they
+fit, and with ``pt_per_unit`` arrows that no automatic limits hold raise ``StyleError``
+when rendering, naming the smallest figure that holds them when there is one, for example
 ``the arrows need a figure at least 540 × 300 pt; the figure is 432 × 288 pt.``.
 
 ``key`` adds a legend entry: an arrow drawn at the true length of a magnitude, then the

@@ -33,7 +33,8 @@
 //! are fitted as bubbles are ([`field_reaches`]): an arrow reaches along each axis as far as its
 //! outline does in the frame of the current layout. The frame of automatic arrows comes from the
 //! previous layout ([`crate::pipeline`]), so within one layout their reach is a fixed number of
-//! points, like any other here.
+//! points, like any other here. The fallback below does not stand for them: a layout whose
+//! arrows or barbs reach past an automatic limit is refused ([`crate::pipeline`]).
 //!
 //! Only the bubbles that are drawn are fitted: a bubble whose value maps to no color has no
 //! fill and is not drawn ([`has_fill`]). A marker's reach is first estimated with the widest

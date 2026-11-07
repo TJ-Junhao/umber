@@ -76,7 +76,7 @@ These errors cannot be found when the mark is added, because they depend on the 
 | `ub.StyleError` | The arrow of a `key` is longer than the shorter side of the plot. The message names the key, its length and that side. | Pass a smaller value to `key`, or make the figure larger. |
 | `ub.StyleError` | A `key` on arrows without any length, all zero or left out, with the automatic scale: nothing gives it a scale. | Pass `pt_per_unit`, or remove the key. |
 | `ub.StyleError` | Arrows with `ub.Direction.DATA` do not settle: each layout of the plot gives them other directions, which give it other limits. | Set explicit limits, or pass a smaller `pt_per_unit`. |
-| `ub.StyleError` | No automatic limits hold the arrows or barbs: `the arrows need a figure at least 540 × 300 pt; the figure is 432 × 288 pt.` | Pass a smaller `pt_per_unit` or `size=`, make the figure larger, or set explicit limits, which clip them. |
+| `ub.StyleError` | No automatic limits hold the arrows or barbs: `the arrows need a figure at least 540 × 300 pt; the figure is 432 × 288 pt.`, or `no automatic limits hold the arrows on this plot.` | Pass a smaller `pt_per_unit` or `size=`, make the figure larger, or set explicit limits, which clip them. |
 | `ub.StyleError` | Contours that share a colorbar have different levels, on one axes or on panels that share the colorbar. | Give them identical `levels`. |
 | `ub.StyleError` | `swarm()` points do not fit their category band. | Use `strip()` or `violin()` for many points. |
 | `ub.StyleError` | Pie labels cannot be placed outside the circle without overlap. | Merge small slices into "Other", enlarge the figure, or use `legend(ub.LegendStyle.HEADER)` or `ub.LegendStyle.CHIPS`. |

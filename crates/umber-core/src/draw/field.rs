@@ -24,7 +24,7 @@ use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_shared, point};
 use crate::color_scale::{MappedColors, ResolvedColorScale};
 use crate::field::arrow::{ArrowFrame, HEAD_WIDTH, Outline, SHAFT_WIDTH};
 use crate::field::barb::{self, Barb};
-use crate::field::{SCREEN_SCALES, spacing};
+use crate::field::{Reach, SCREEN_SCALES, spacing};
 use crate::geometry::Path;
 use crate::layout::Area;
 use crate::model::{BarbsMark, MAX_ARROW_LENGTH, QuiverMark, VectorField};
@@ -325,13 +325,86 @@ pub(crate) fn key_length(mark: &QuiverMark, frame: &ArrowFrame) -> f64 {
     length.min(2.0 * MAX_ARROW_LENGTH)
 }
 
-/// The points of one data unit along x and along y on the axes `resolved` and the `plot`, the
-/// larger being 1: what the direction of an arrow along the data reads.
+/// The points of one data unit along x and along y on the axes `resolved` and the `plot`, what
+/// the direction of an arrow along the data reads. They are kept apart: their ratio can leave
+/// the range of `f64`.
 pub(crate) fn data_scales(resolved: &Resolved, plot: Area) -> [f64; 2] {
     let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
-    let (x_points, y_points) = (maps.x.points(1.0), maps.y.points(1.0));
-    let largest = x_points.max(y_points);
-    [x_points / largest, y_points / largest]
+    [maps.x.points(1.0), maps.y.points(1.0)]
+}
+
+/// The marks whose reach a plot does not hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Spill {
+    /// Arrows.
+    Arrows,
+    /// Wind barbs.
+    Barbs,
+}
+
+/// How far a shape may lie past the plot and still count as held, in points: well below anything
+/// visible, and above the rounding of the frames.
+const HELD_SLACK: f64 = 1e-3;
+
+/// What reaches past the edges of `plot` along the axes that `automatic` names, x then y, on the
+/// axes `resolved`: an arrow or barb of `marks` as it is drawn, the arrows in the `frames` of the
+/// quivers, in order. Automatic limits hold whole shapes, so a layout where this finds one is not
+/// a layout to draw; explicit limits clip them, so those edges do not count.
+pub(crate) fn spill(
+    marks: &[ResolvedMark<'_>],
+    frames: &[ArrowFrame],
+    resolved: &Resolved,
+    plot: Area,
+    automatic: [bool; 2],
+) -> Option<Spill> {
+    let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
+    let spills = |field: &VectorField, fill: FieldFill<'_>, reach: &dyn Fn(f64, f64) -> Reach| {
+        let xs = axis_shared(&resolved.x, field.x_values());
+        let ys = axis_shared(&resolved.y, field.y_values());
+        field.samples().any(|sample| {
+            if fill.at(sample.index).is_none() {
+                return false;
+            }
+            let at = maps.to_plot(AxisPoint::new(xs[sample.column], ys[sample.row]));
+            let reach = reach(sample.u, sample.v);
+            let along_x = at.x - reach.left < plot.x - HELD_SLACK
+                || at.x + reach.right > plot.right() + HELD_SLACK;
+            let along_y = at.y - reach.up < plot.y - HELD_SLACK
+                || at.y + reach.down > plot.bottom() + HELD_SLACK;
+            (automatic[0] && along_x) || (automatic[1] && along_y)
+        })
+    };
+    let scale = resolved.color.as_ref();
+    let mut frames = frames.iter();
+    marks.iter().find_map(|mark| match mark {
+        ResolvedMark::Quiver {
+            mark,
+            color,
+            mapped,
+            ..
+        } => {
+            let frame = frames.next()?;
+            let pivot = mark.options().pivot;
+            let filled = self::fill(scale, *color, mapped.as_ref())?;
+            spills(mark.field(), filled, &|u, v| frame.reach(u, v, pivot)).then_some(Spill::Arrows)
+        }
+        ResolvedMark::Barbs {
+            mark,
+            color,
+            mapped,
+            staff,
+            ..
+        } => {
+            let flip = mark.options().flip;
+            let width = staff * barb::STROKE;
+            let filled = self::fill(scale, *color, mapped.as_ref())?;
+            spills(mark.field(), filled, &|u, v| {
+                Barb::new(u, v, *staff, flip).reach(width)
+            })
+            .then_some(Spill::Barbs)
+        }
+        _ => None,
+    })
 }
 
 /// The frame of each quiver among `marks`, in order, measured on the axes `resolved` and the

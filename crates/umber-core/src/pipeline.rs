@@ -9,7 +9,7 @@ use crate::bubble_fit::BubbleFits;
 use crate::color_scale::ResolvedColorScale;
 use crate::draw::bar_labels::{self, BarLabels};
 use crate::draw::point_labels::{self, ScatterLabels};
-use crate::field::arrow::{ArrowFrame, ScaleSearch, ratio_scales};
+use crate::field::arrow::{ArrowFrame, ScaleSearch};
 use crate::layout::{
     self, FigureHeader, GridInput, Layout, LayoutInput, MeasuredLegend, PanelBands, PlotSize,
     TickSpacing,
@@ -1877,8 +1877,8 @@ const MAX_DIRECTION_LAYOUTS: usize = 12;
 /// settled: well below what a coordinate of the scene, an `f32`, can show.
 const ARROW_TOLERANCE: f64 = 1e-6;
 
-/// How far the shape of a plot may jump between a layout and the next, as a share, and the arrows
-/// still count as held by that layout: what a change of tick labels takes from a plot.
+/// How far the shape of a plot may jump between a layout and the next, as a share, and the layout
+/// still count, what a change of tick labels takes from a plot, as long as it holds its arrows.
 const DIRECTION_JUMP: f64 = 0.02;
 
 /// Whether `a` and `b` lie within `tolerance` of each other, as a share of the larger.
@@ -1946,12 +1946,17 @@ fn automatic_length(panel: &Panel<'_>, frames: &[ArrowFrame]) -> Option<f64> {
         .find_map(|((mark, _), frame)| is_automatic(mark).then_some(frame.length))
 }
 
-/// The points of one data unit along x over those along y in `frames`, which has a quiver along
-/// the data of `panel`.
-fn held_ratio(panel: &Panel<'_>, frames: &[ArrowFrame]) -> Option<f64> {
+/// The scales of the quivers along the data of `panel` in `frames`; `None` without one.
+fn held_scales(panel: &Panel<'_>, frames: &[ArrowFrame]) -> Option<[f64; 2]> {
     quivers(panel)
         .zip(frames)
-        .find_map(|((mark, _), frame)| is_data(mark).then_some(frame.scales[0] / frame.scales[1]))
+        .find_map(|((mark, _), frame)| is_data(mark).then_some(frame.scales))
+}
+
+/// The ratio of `scales` as a share of the ratio of `base`, each axis compared with itself: the
+/// ratio of the two scales of a plot may lie beyond the range of `f64`, and this one does not.
+fn relative_ratio(scales: [f64; 2], [x, y]: [f64; 2]) -> f64 {
+    (scales[0] / x) / (scales[1] / y)
 }
 
 /// Gives the quivers along the data of `panel` the `scales` in its `frames`.
@@ -1977,6 +1982,8 @@ enum Unsettled {
     Layout(Unplanned),
     /// The directions of this panel, by its index, match no layout of its plot.
     Directions(usize),
+    /// Arrows or barbs of this panel, by its index, reach past an automatic limit of the layout.
+    Spilled(usize, draw::field::Spill),
 }
 
 impl From<Error> for Unsettled {
@@ -2054,10 +2061,14 @@ impl<'a> ArrowPlanner<'_, 'a> {
     /// it. A layout that cannot hold the arrows along an axis says which way to go: they lie too
     /// much along that axis. A layout counts when the ratio it was made with is the ratio of its
     /// axes, to [`ARROW_TOLERANCE`], or, after [`MAX_DIRECTION_LAYOUTS`] layouts, to
-    /// [`DIRECTION_JUMP`]: tick labels move a plot in steps, which the ratio can jump over.
+    /// [`DIRECTION_JUMP`]: tick labels move a plot in steps, which the ratio can jump over. Either
+    /// way it counts only if the arrows and barbs, on the scales of its axes, stay inside every
+    /// automatic limit ([`spill`](Self::spill)), which also refuses a fit of the limits that fell
+    /// back to the data ([`crate::bubble_fit`]).
     ///
     /// # Errors
     ///
+    /// [`Unsettled::Spilled`] for a settled layout that does not hold its arrows or barbs,
     /// [`Unsettled::Directions`] when no layout counts, and [`Unsettled::Layout`] for a layout
     /// that fails for another reason, or when none was made.
     fn settle_directions(
@@ -2066,6 +2077,12 @@ impl<'a> ArrowPlanner<'_, 'a> {
         mut frames: PanelFrames,
     ) -> std::result::Result<(FigurePlan, PanelFrames), Unsettled> {
         let mut searches = vec![ScaleSearch::for_ratio(); panels.len()];
+        // Ratios are searched as shares of these, which keeps them in the range of `f64`.
+        let bases: Vec<_> = panels
+            .iter()
+            .zip(&frames)
+            .map(|(panel, frames)| held_scales(panel, frames))
+            .collect();
         // The closest layout so far, with its frames and how far its ratio is off.
         let mut nearest: Option<(FigurePlan, PanelFrames, f64)> = None;
         let mut failure = None;
@@ -2083,25 +2100,34 @@ impl<'a> ArrowPlanner<'_, 'a> {
                         let (resolved, layout) = &planned.panels[i];
                         let scales = draw::field::data_scales(resolved, layout.plot);
                         set_scales(panel, &mut next[i], scales);
-                        let (Some(held), true) = (
-                            held_ratio(panel, &frames[i]),
+                        let (Some(held), Some(base), true) = (
+                            held_scales(panel, &frames[i]),
+                            bases[i],
                             reaches_along_data(panel, &frames[i]),
                         ) else {
                             continue;
                         };
-                        let ratio = scales[0] / scales[1];
+                        let (held, ratio) =
+                            (relative_ratio(held, base), relative_ratio(scales, base));
                         if !close(held, ratio, ARROW_TOLERANCE) {
                             off = off.max((held - ratio).abs() / held.abs().max(ratio.abs()));
                             moved = i;
                             let tried = searches[i].measured(held, ratio);
                             frames[i].clone_from(&next[i]);
-                            set_scales(panel, &mut frames[i], ratio_scales(tried));
+                            set_scales(panel, &mut frames[i], [base[0] * tried, base[1]]);
                         }
                     }
                     if off == 0.0 {
-                        return Ok((planned, next));
+                        return match self.spill(panels, &planned, &next) {
+                            Some((panel, spill)) => Err(Unsettled::Spilled(panel, spill)),
+                            None => Ok((planned, next)),
+                        };
                     }
-                    if nearest.as_ref().is_none_or(|(_, _, best)| off < *best) {
+                    let nearer = nearest.as_ref().is_none_or(|(_, _, best)| off < *best);
+                    if nearer
+                        && off <= DIRECTION_JUMP
+                        && self.spill(panels, &planned, &next).is_none()
+                    {
                         nearest = Some((planned, next, off));
                     }
                 }
@@ -2110,9 +2136,12 @@ impl<'a> ArrowPlanner<'_, 'a> {
                         && reaches_along_data(&panels[lost.panel], &frames[lost.panel]) =>
                 {
                     let i = lost.panel;
-                    if let Some(held) = held_ratio(&panels[i], &frames[i]) {
+                    if let (Some(held), Some(base)) =
+                        (held_scales(&panels[i], &frames[i]), bases[i])
+                    {
+                        let held = relative_ratio(held, base);
                         let tried = searches[i].failed_ratio(held, lost.side() == 0);
-                        set_scales(&panels[i], &mut frames[i], ratio_scales(tried));
+                        set_scales(&panels[i], &mut frames[i], [base[0] * tried, base[1]]);
                     }
                     failure = Some(Unplanned::Bubbles(lost));
                 }
@@ -2120,10 +2149,35 @@ impl<'a> ArrowPlanner<'_, 'a> {
             }
         }
         match (nearest, failure) {
-            (Some((planned, frames, off)), _) if off <= DIRECTION_JUMP => Ok((planned, frames)),
+            (Some((planned, frames, _)), _) => Ok((planned, frames)),
             (None, Some(failure)) => Err(Unsettled::Layout(failure)),
-            _ => Err(Unsettled::Directions(moved)),
+            (None, None) => Err(Unsettled::Directions(moved)),
         }
+    }
+
+    /// The first panel of the layout `planned` with arrows or barbs past an automatic limit, the
+    /// arrows in `frames`, and what spills ([`draw::field::spill`]). A layout made for its rooms
+    /// alone holds nothing to the end: the final figure is what has to hold them.
+    fn spill(
+        &self,
+        panels: &[Panel<'_>],
+        planned: &FigurePlan,
+        frames: &PanelFrames,
+    ) -> Option<(usize, draw::field::Spill)> {
+        if matches!(self.rooms, Rooms::Reference { .. }) {
+            return None;
+        }
+        panels.iter().enumerate().find_map(|(i, panel)| {
+            let limits = Limits::of(panel.axes);
+            let automatic = [ValueAxis::X, ValueAxis::Y].map(|axis| match limits.axis(axis) {
+                resolve::AxisLimits::Continuous(axis) => axis.explicit.is_none(),
+                resolve::AxisLimits::Time(axis) => axis.explicit.is_none(),
+                resolve::AxisLimits::Category => false,
+            });
+            let (resolved, layout) = &planned.panels[i];
+            draw::field::spill(&panel.marks, &frames[i], resolved, layout.plot, automatic)
+                .map(|spill| (i, spill))
+        })
     }
 
     /// The frames to try after the layout `planned` of `panels` with the frames `held`, measured
@@ -2229,14 +2283,37 @@ impl<'a> ArrowPlanner<'_, 'a> {
     fn unsettled_error(
         &self,
         panels: &[Panel<'_>],
-        planned: &FigurePlan,
+        planned: Option<&FigurePlan>,
         failure: Unsettled,
     ) -> Unplanned {
         match failure {
-            Unsettled::Layout(failure) => match self.key_error(panels, planned, |_| true) {
-                Some(error) => Unplanned::Failed(error),
-                None => failure,
-            },
+            Unsettled::Layout(failure) => {
+                let key = planned.and_then(|planned| self.key_error(panels, planned, |_| true));
+                key.map_or(failure, Unplanned::Failed)
+            }
+            Unsettled::Spilled(panel, spill) => {
+                let (noun, hint) = match spill {
+                    draw::field::Spill::Arrows => (
+                        "arrows",
+                        "pass a smaller pt_per_unit, make the figure larger, or set explicit \
+                         limits, which clip the arrows.",
+                    ),
+                    draw::field::Spill::Barbs => (
+                        "barbs",
+                        "pass a smaller size, make the figure larger, or set explicit limits, \
+                         which clip the barbs.",
+                    ),
+                };
+                Unplanned::Failed(in_cell(
+                    self.figure,
+                    panels[panel].axes,
+                    Error::style(
+                        self.context,
+                        format!("no automatic limits hold the {noun} on this plot."),
+                    )
+                    .with_hint(hint),
+                ))
+            }
             Unsettled::Directions(panel) => Unplanned::Failed(self.directions_error(panels, panel)),
         }
     }
@@ -2274,7 +2351,7 @@ fn lowered_frames(
                     .any(|(mark, _)| is_automatic(mark) && mark.options().key.is_some())
             })
             .collect(),
-        Unsettled::Directions(panel) => vec![*panel],
+        Unsettled::Directions(panel) | Unsettled::Spilled(panel, _) => vec![*panel],
     };
     let mut lowered = frames.clone();
     let mut changed = false;
@@ -2310,13 +2387,14 @@ fn lowered_frames(
 /// spacing end as long as limits can hold them. A fixed scale has nothing to search: its first
 /// try stands or fails.
 ///
-/// Both loops are bounded, and everything is a pure function of the figure and the previous
-/// layouts, so the outcome is deterministic. Every frame that is kept comes from a layout whose
-/// axes it matches: limits, arrows and key read that frame, so the limits hold the arrows as
-/// drawn, the key is as long as its arrow, and an arrow along the data points by the final axes.
-/// A frame that does not match is never kept. When [`MAX_ARROW_LAYOUTS`] tries end the search,
-/// the last frame kept stands, and only the longest arrow can differ from the spacing, by the
-/// step a change of tick labels makes. Without any frame to keep, the layout fails.
+/// Both loops are bounded, at [`MAX_ARROW_LAYOUTS`] times [`MAX_DIRECTION_LAYOUTS`] layouts, and
+/// everything is a pure function of the figure and the previous layouts, so the outcome is
+/// deterministic. Every frame that is kept comes from a layout whose axes it matches and whose
+/// automatic limits hold every arrow and barb, recomputed on those axes: an arrow is never
+/// cut at an automatic limit, the key is as long as its arrow, and an arrow along the data points
+/// by the final axes. Any other layout is not kept: automatic arrows get shorter, and a given
+/// `pt_per_unit` or barb size fails. When the tries end, the last frame kept stands, and only the
+/// longest arrow can differ from the spacing. Without any frame to keep, the layout fails.
 fn lay_out<'a>(
     figure: &'a Figure,
     panels: &mut [Panel<'a>],
@@ -2326,7 +2404,13 @@ fn lay_out<'a>(
     labels: &layout::LabelCache<'_>,
     rooms: Rooms<'_>,
 ) -> std::result::Result<FigurePlan, Unplanned> {
-    if panels.iter().all(|panel| quivers(panel).next().is_none()) {
+    let is_field = |mark: &ResolvedMark<'_>| {
+        matches!(
+            mark,
+            ResolvedMark::Quiver { .. } | ResolvedMark::Barbs { .. }
+        )
+    };
+    if !panels.iter().any(|panel| panel.marks.iter().any(is_field)) {
         return lay_out_cells(figure, panels, groups, lib, context, labels, rooms);
     }
     let planner = ArrowPlanner {
@@ -2338,13 +2422,9 @@ fn lay_out<'a>(
         rooms,
     };
     let frames = held_frames(panels);
-    let (mut planned, mut held) = match planner.settle_directions(panels, frames) {
-        Ok(settled) => settled,
-        Err(Unsettled::Layout(failure)) => return Err(failure),
-        Err(Unsettled::Directions(panel)) => {
-            return Err(Unplanned::Failed(planner.directions_error(panels, panel)));
-        }
-    };
+    let (mut planned, mut held) = planner
+        .settle_directions(panels, frames)
+        .map_err(|failure| planner.unsettled_error(panels, None, failure))?;
     let mut searches = vec![ScaleSearch::default(); panels.len()];
     let mut next = planner.next_frames(panels, &planned, &held, &mut searches);
     let mut lost = None;
@@ -2363,7 +2443,7 @@ fn lay_out<'a>(
                     next = Some(lowered);
                     lost = Some(failure);
                 }
-                None => return Err(planner.unsettled_error(panels, &planned, failure)),
+                None => return Err(planner.unsettled_error(panels, Some(&planned), failure)),
             },
         }
     }
@@ -2372,7 +2452,7 @@ fn lay_out<'a>(
         quivers(panel).any(|(mark, frame)| mark.field().longest() > 0.0 && frame.length == 0.0)
     };
     if let (Some(failure), true) = (lost, panels.iter().any(lengthless)) {
-        return Err(planner.unsettled_error(panels, &planned, failure));
+        return Err(planner.unsettled_error(panels, Some(&planned), failure));
     }
     let judged = |i| !judged_later(rooms, i);
     match planner.key_error(panels, &planned, judged) {

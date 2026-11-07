@@ -42,18 +42,54 @@ pub(crate) fn magnitude(u: f64, v: f64) -> f64 {
 /// `[1.0, 1.0]` draws a vector as it is, with `u` right and `v` up.
 pub(crate) const SCREEN_SCALES: [f64; 2] = [1.0, 1.0];
 
-/// The unit vector on the plot of a nonzero `(u, v)`, with one data unit along x and along y
-/// `scales` points long, of which only the ratio counts. `(u, v)` is first divided by its
-/// larger component, so that no product overflows.
-pub(crate) fn direction(u: f64, v: f64, [x_scale, y_scale]: [f64; 2]) -> [f64; 2] {
-    let largest = u.abs().max(v.abs());
-    let (p, q) = (u / largest * x_scale, v / largest * y_scale);
-    let length = magnitude(p, q);
-    if length == 0.0 {
-        // The scales differ so much that the product vanished: the vector as it is.
-        let length = magnitude(u / largest, v / largest);
-        return [u / largest / length, v / largest / length];
+/// `x`, finite and not 0, as a mantissa from 1 to 2 in magnitude, with its sign, and the power of
+/// two that it is multiplied by. Both are exact.
+fn split(x: f64) -> (f64, i32) {
+    const EXPONENT: u64 = 0x7ff << 52;
+    // A subnormal number first moves up to where its bits have the normal form.
+    let (x, shift) = if x.abs() < f64::MIN_POSITIVE {
+        (x * GROW, -600)
+    } else {
+        (x, 0)
+    };
+    let bits = x.to_bits();
+    let exponent = ((bits & EXPONENT) >> 52) as i32 - 1023;
+    let mantissa = f64::from_bits((bits & !EXPONENT) | (1023 << 52));
+    (mantissa, exponent + shift)
+}
+
+/// `2^exponent` for an exponent of 0 or less; 0 below what a normal number holds.
+fn power_of_two(exponent: i32) -> f64 {
+    if exponent < -1022 {
+        0.0
+    } else {
+        f64::from_bits(((exponent + 1023) as u64) << 52)
     }
+}
+
+/// The unit vector on the plot of a nonzero `(u, v)`, with one data unit along x and along y
+/// `scales` points long, of which only the ratio counts.
+///
+/// Each component is multiplied by its scale as a mantissa and a power of two, and the two
+/// products are brought together by exact powers of two, so that nothing overflows or underflows
+/// on the way: `u` of 1e200 on a scale of 1e-198 and `v` of 1e-200 on a scale of 1e202 make a
+/// vector of ordinary size, whatever the sizes of the parts. A product that underflows at the
+/// end is below 2^-1022 of the other, past anything a direction can show.
+pub(crate) fn direction(u: f64, v: f64, [x_scale, y_scale]: [f64; 2]) -> [f64; 2] {
+    let product = |component: f64, scale: f64| {
+        if component == 0.0 || scale == 0.0 {
+            return (0.0, i32::MIN);
+        }
+        let ((a, a_power), (b, b_power)) = (split(component), split(scale));
+        (a * b, a_power + b_power)
+    };
+    let ((p, p_power), (q, q_power)) = (product(u, x_scale), product(v, y_scale));
+    let top = p_power.max(q_power);
+    let (p, q) = (
+        p * power_of_two(p_power.saturating_sub(top)),
+        q * power_of_two(q_power.saturating_sub(top)),
+    );
+    let length = (p * p + q * q).sqrt();
     [p / length, q / length]
 }
 
@@ -135,6 +171,27 @@ mod tests {
         let [x, y] = direction(1.0, 1.0, [4.0, 1.0]);
         assert!((x / y - 4.0).abs() < 1e-12);
         assert_eq!(direction(0.0, 1e-300, [1.0, 1e-320]), [0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_direction_keeps_components_that_compensate_across_any_range() {
+        // Limits 0 to 1e200 and 0 to 1e-200 on a plot of 400 by 240 pt.
+        let [x, y] = direction(1e200, 1e-200, [400.0 / 1e200, 240.0 / 1e-200]);
+        assert!((y / x - 0.6).abs() < 1e-12, "{x} {y}");
+        let [x, y] = direction(3e-320, 4e-320, [1e300, 1e300]);
+        assert!((x - 0.6).abs() < 1e-3 && (y - 0.8).abs() < 1e-3, "{x} {y}");
+        assert_eq!(direction(1e300, 1e-300, [1e300, 1e-300]), [1.0, 0.0]);
+    }
+
+    #[test]
+    fn a_split_is_exact() {
+        for x in [1.0, -1.5, 3e-320, 1e300, -5e-324, f64::MIN_POSITIVE] {
+            let (mantissa, power) = split(x);
+            assert!((1.0..2.0).contains(&mantissa.abs()), "{x}");
+            let halves = power.min(0).abs();
+            let back = mantissa * 2.0_f64.powi(power + halves) / 2.0_f64.powi(halves / 2);
+            assert_eq!(back / 2.0_f64.powi(halves - halves / 2), x);
+        }
     }
 
     #[test]

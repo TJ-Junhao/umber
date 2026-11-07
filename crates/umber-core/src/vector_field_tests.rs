@@ -789,6 +789,190 @@ fn data_arrows_that_no_limits_hold_are_refused() {
 }
 
 #[test]
+fn a_jump_of_the_plot_does_not_let_arrows_past_an_automatic_limit() {
+    let (x, y, u, v) = ([0.0, 2.0], [0.0, 2.0], [1.0, 4.0], [4.0, -1.0]);
+    for (width, height) in [(6.0, 6.0), (50.0, 100.0)] {
+        let mut f = figure_of(width, height, Theme::pigment(), LINEAR);
+        quiver(
+            &mut f,
+            &x,
+            &y,
+            &u,
+            &v,
+            QuiverOptions {
+                direction: Direction::Data,
+                ..QuiverOptions::default()
+            },
+        );
+        assert_along_the_final_axes(&f, &u, &v);
+        let drawn = scene(&f);
+        let (clip, items) = marks(&drawn);
+        assert_inside_by(&every_point(&fills(items)), clip, 2e-3);
+    }
+}
+
+#[test]
+fn a_fit_that_fell_back_to_the_data_is_not_kept() {
+    let mut f = figure_of(6.0, 1.5, Theme::pigment(), LINEAR);
+    let (u, v) = ([-0.74, -0.1], [-0.94, 0.35]);
+    quiver(
+        &mut f,
+        &[0.0, 60.0],
+        &[0.0, 0.17],
+        &u,
+        &v,
+        QuiverOptions {
+            direction: Direction::Data,
+            ..QuiverOptions::default()
+        },
+    );
+    assert_along_the_final_axes(&f, &u, &v);
+    let drawn = scene(&f);
+    let (clip, items) = marks(&drawn);
+    assert_inside_by(&every_point(&fills(items)), clip, 2e-3);
+}
+
+#[test]
+fn a_direction_is_true_across_extreme_ranges() {
+    let mut f = linear();
+    axes(&mut f)
+        .xlim(0.0, 1e200)
+        .unwrap()
+        .ylim(0.0, 1e-200)
+        .unwrap();
+    let (u, v) = ([1e200], [1e-200]);
+    quiver(
+        &mut f,
+        &[0.0],
+        &[0.0],
+        &u,
+        &v,
+        QuiverOptions {
+            direction: Direction::Data,
+            ..QuiverOptions::default()
+        },
+    );
+    assert_along_the_final_axes(&f, &u, &v);
+    let (_, layout, _) = planned(&f);
+    let [dx, dy] = vector(&arrows(&f)[0]);
+    let expected = layout.plot.height / layout.plot.width;
+    assert!((dy / dx - expected).abs() < 1e-3, "{dx} {dy} {expected}");
+}
+
+/// A value in `0..1` from `state`, which moves on, so that a sweep needs no random numbers.
+fn next_unit(state: &mut u64) -> f64 {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    (*state >> 11) as f64 / (1_u64 << 53) as f64
+}
+
+#[test]
+fn every_drawn_arrow_lies_inside_automatic_limits() {
+    let shapes = [
+        (6.0, 4.0),
+        (6.0, 6.0),
+        (6.0, 1.5),
+        (2.0, 8.0),
+        (10.0, 2.0),
+        (3.0, 3.0),
+    ];
+    let ranges = [
+        (1.0, 1.0),
+        (60.0, 0.17),
+        (0.01, 500.0),
+        (2.0, 2.0),
+        (1e6, 1e-3),
+    ];
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut refused = 0;
+    for (width, height) in shapes {
+        for (x_range, y_range) in ranges {
+            for count in [2_usize, 3, 7, 25] {
+                for (direction, pivot) in [
+                    (Direction::Screen, Pivot::Tail),
+                    (Direction::Data, Pivot::Tail),
+                    (Direction::Data, Pivot::Middle),
+                    (Direction::Data, Pivot::Tip),
+                ] {
+                    let mut draw = |length| {
+                        let values = |state: &mut u64, range: f64| -> Vec<f64> {
+                            (0..count).map(|_| next_unit(state) * range).collect()
+                        };
+                        let (x, y) = (values(&mut state, x_range), values(&mut state, y_range));
+                        let u: Vec<f64> = values(&mut state, 2.0 * x_range)
+                            .iter()
+                            .map(|u| u - x_range)
+                            .collect();
+                        let v: Vec<f64> = values(&mut state, 2.0 * y_range)
+                            .iter()
+                            .map(|v| v - y_range)
+                            .collect();
+                        let mut f = figure_of(width, height, Theme::pigment(), LINEAR);
+                        quiver(
+                            &mut f,
+                            &x,
+                            &y,
+                            &u,
+                            &v,
+                            QuiverOptions {
+                                direction,
+                                pivot,
+                                length,
+                                ..QuiverOptions::default()
+                            },
+                        );
+                        f.to_scene(FontLibrary::global())
+                    };
+                    match draw(ArrowLength::Auto) {
+                        Ok(drawn) => {
+                            let (clip, items) = marks(&drawn);
+                            assert_inside_by(&every_point(&fills(items)), clip, 1e-2);
+                        }
+                        Err(error) => panic!("automatic arrows are shortened: {error}"),
+                    }
+                    // A given scale is held, or refused; it is never cut.
+                    let scale = 30.0 / x_range.max(y_range);
+                    match draw(ArrowLength::PtPerUnit(scale)) {
+                        Ok(drawn) => {
+                            let (clip, items) = marks(&drawn);
+                            assert_inside_by(&every_point(&fills(items)), clip, 1e-2);
+                        }
+                        Err(error) => {
+                            assert!(matches!(error, Error::Style { .. }), "{error:?}");
+                            refused += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(refused < 480, "{refused}");
+}
+
+#[test]
+fn barbs_past_an_automatic_limit_are_refused_or_held() {
+    for (width, height) in [(6.0, 4.0), (6.0, 1.5), (3.0, 3.0), (2.0, 2.0)] {
+        let mut f = figure_of(width, height, Theme::pigment(), LINEAR);
+        axes(&mut f)
+            .barbs(
+                numbers(&[0.0, 1.0, 2.0]),
+                numbers(&[0.0, 0.1, 0.0]),
+                FieldVectors::points(vec![60.0, -60.0, 0.0], vec![0.0, 60.0, -60.0]),
+                BarbOptions::default(),
+            )
+            .unwrap();
+        match f.to_scene(FontLibrary::global()) {
+            Ok(drawn) => {
+                let (clip, items) = marks(&drawn);
+                assert_inside_by(&every_point(&strokes(items)), clip, 1e-2);
+            }
+            Err(error) => assert!(matches!(error, Error::Style { .. }), "{error:?}"),
+        }
+    }
+}
+
+#[test]
 fn data_direction_needs_two_linear_axes() {
     let log = ScaleKind::Log { base: LogBase::TEN };
     for kinds in [
@@ -879,12 +1063,17 @@ fn every_point(paths: &[&Path]) -> Vec<Point> {
 }
 
 fn assert_inside(points: &[Point], clip: Rect) {
+    assert_inside_by(points, clip, 1e-3);
+}
+
+/// Asserts that `points` lie inside `clip`, to `slack` pt.
+fn assert_inside_by(points: &[Point], clip: Rect, slack: f32) {
     for p in points {
         assert!(
-            p.x >= clip.x - 1e-3
-                && p.x <= clip.x + clip.width + 1e-3
-                && p.y >= clip.y - 1e-3
-                && p.y <= clip.y + clip.height + 1e-3,
+            p.x >= clip.x - slack
+                && p.x <= clip.x + clip.width + slack
+                && p.y >= clip.y - slack
+                && p.y <= clip.y + clip.height + slack,
             "{p:?} leaves {clip:?}"
         );
     }

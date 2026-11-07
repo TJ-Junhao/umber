@@ -30,8 +30,8 @@ pub(crate) struct ArrowFrame {
     /// The magnitude an arrow of [`length`](Self::length) has: the longest of an automatic scale,
     /// and 1 for a given number of points per unit. Greater than 0.
     pub magnitude: f64,
-    /// The points of one data unit along x and along y, of which only the ratio counts:
-    /// [`SCREEN_SCALES`] but for [`Direction::Data`].
+    /// The points of one data unit along x and along y, as they are, however far apart, of which
+    /// only the ratio counts: [`SCREEN_SCALES`] but for [`Direction::Data`].
     pub scales: [f64; 2],
     /// The length of the key arrow, in points; 0 until a plot has been measured, so that the
     /// first layout has the most room to compare a key with.
@@ -80,15 +80,6 @@ impl ArrowFrame {
     pub(crate) fn reach(&self, u: f64, v: f64, pivot: Pivot) -> Reach {
         self.outline(u, v, pivot)
             .map_or(Reach::around(SHAFT_WIDTH / 2.0), |outline| outline.reach())
-    }
-}
-
-/// The scales of a plot on which one data unit along x is `ratio` times as long as along y.
-pub(crate) fn ratio_scales(ratio: f64) -> [f64; 2] {
-    if ratio > 1.0 {
-        [1.0, 1.0 / ratio]
-    } else {
-        [ratio, 1.0]
     }
 }
 
@@ -363,12 +354,6 @@ mod tests {
         };
         assert!((solve_ratio(1000.0, measure).0 - 2.0).abs() < 1e-4);
         assert!((solve_ratio(0.001, measure).0 - 2.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn ratio_scales_keep_the_larger_at_one() {
-        assert_eq!(ratio_scales(4.0), [1.0, 0.25]);
-        assert_eq!(ratio_scales(0.25), [0.25, 1.0]);
     }
 
     #[test]

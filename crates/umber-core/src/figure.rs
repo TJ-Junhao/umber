@@ -163,7 +163,10 @@ impl Figure {
     ///
     /// Arrows and wind barbs are held as bubbles are, and fail the same way, as `the arrows "…"
     /// need …` and `the barbs "…" need …`, the label being the text of the key or the label of
-    /// the barbs; an automatic scale shortens the arrows instead, to what limits can hold.
+    /// the barbs; an automatic scale shortens the arrows instead, to what limits can hold. A
+    /// layout is kept only if every arrow and barb lies inside its automatic limits on the final
+    /// axes; a given scale or size that no layout holds fails (`no automatic limits hold the
+    /// arrows on this plot.`, and `the arrows along the data do not settle: …`).
     /// `Error::Style` with the parameter `key` for a key arrow longer than the shorter side of its
     /// plot (`the arrow of the key "…" is … pt long; the shorter side of the plot is … pt.`), and
     /// for a key whose automatic scale has no length to go by, since no arrow has one.
