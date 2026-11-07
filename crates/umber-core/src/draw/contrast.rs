@@ -12,9 +12,12 @@
 //!
 //! Text is judged by the WCAG 2 contrast ratio instead ([`relative_luminance`]): the values
 //! written on cells and bars take black or white by it, and the emphasis color of each preset
-//! theme reaches 4.5:1 against its background.
+//! theme reaches 4.5:1 against its background. Text written in a series color (direct labels,
+//! point labels, the value column) takes [`readable_text`] of it: the color itself when it
+//! reaches [`TEXT_CONTRAST`] against the background, else its Oklab lightness moved away from
+//! the background, a and b unchanged, by the smallest step that does. Marks keep their colors.
 
-use crate::cmap::{Oklab, to_oklab};
+use crate::cmap::{Oklab, from_oklab, to_oklab};
 use crate::{Rgba, Theme};
 
 /// The WCAG 2 relative luminance of `color`'s sRGB channels, from 0 (black) to 1 (white).
@@ -32,10 +35,63 @@ pub(super) fn relative_luminance(color: Rgba) -> f64 {
 
 /// The WCAG 2 contrast ratio of the opaque colors `a` and `b`, from 1 (equal luminance) to 21
 /// (black on white): the lighter luminance plus 0.05 over the darker plus 0.05.
-#[cfg(test)]
 pub(super) fn contrast_ratio(a: Rgba, b: Rgba) -> f64 {
     let (a, b) = (relative_luminance(a), relative_luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// The WCAG 2 contrast ratio against the background that text needs.
+pub(super) const TEXT_CONTRAST: f64 = 4.5;
+/// The number of equal steps of one unit of Oklab lightness in the search of [`readable_text`].
+const TEXT_STEPS: u32 = 1024;
+
+/// The color for text written in the series color `color` on the theme's background: `color`
+/// itself, bit for bit, when its contrast ratio against the background is at least
+/// [`TEXT_CONTRAST`]. Otherwise its Oklab lightness moves away from the background (down when
+/// the background's lightness is at least 0.5, up otherwise), a and b unchanged, by the
+/// smallest multiple of `1 / 1024` that reaches [`TEXT_CONTRAST`], staying in the sRGB gamut by
+/// clamping each channel as [`from_oklab`] does. When even black or white does not reach it,
+/// that extreme is returned. The alpha of `color` is kept.
+pub(super) fn readable_text(color: Rgba, theme: &Theme) -> Rgba {
+    let background = theme.background();
+    match readable_step(color, background) {
+        None => color,
+        Some((step, lightness, chroma, darker)) => Rgba {
+            a: color.a,
+            ..text_step(lightness, chroma, darker, step)
+        },
+    }
+}
+
+/// How far [`readable_text`] moves `color` on `background`: `None` when it needs no move, else
+/// the number of `1 / 1024` steps, the color's Oklab lightness and `[a, b]`, and whether the
+/// move is down.
+fn readable_step(color: Rgba, background: Rgba) -> Option<(u32, f64, [f64; 2], bool)> {
+    if contrast_ratio(color, background) >= TEXT_CONTRAST {
+        return None;
+    }
+    let [lightness, a, b] = to_oklab(color);
+    let darker = to_oklab(background)[0] >= 0.5;
+    let room = if darker { lightness } else { 1.0 - lightness };
+    let last = (room * f64::from(TEXT_STEPS)).ceil() as u32;
+    let step = (1..=last)
+        .find(|&step| {
+            contrast_ratio(text_step(lightness, [a, b], darker, step), background) >= TEXT_CONTRAST
+        })
+        .unwrap_or(last);
+    Some((step, lightness, [a, b], darker))
+}
+
+/// The opaque color at Oklab lightness `lightness` moved by `step / 1024` down (`darker`) or up,
+/// within `0..=1`, with chroma `[a, b]`.
+fn text_step(lightness: f64, [a, b]: [f64; 2], darker: bool, step: u32) -> Rgba {
+    let shift = f64::from(step) / f64::from(TEXT_STEPS);
+    let moved = if darker {
+        lightness - shift
+    } else {
+        lightness + shift
+    };
+    from_oklab([moved.clamp(0.0, 1.0), a, b])
 }
 
 /// The Oklab distance from the background at which a color-mapped mark needs no contrast.
@@ -172,7 +228,7 @@ mod tests {
             let emphasis = theme.emphasis_color();
             let ratio = contrast_ratio(emphasis, theme.background());
             assert!(
-                ratio >= 4.5 && ratio >= least_ratio,
+                ratio >= TEXT_CONTRAST && ratio >= least_ratio,
                 "{emphasis:?}: {ratio}"
             );
             let cmap = theme.cmap();
@@ -186,5 +242,107 @@ mod tests {
                 .fold(f64::INFINITY, f64::min);
             assert!(nearest_series > 0.07, "{emphasis:?}: {nearest_series}");
         }
+    }
+
+    /// The preset themes, with a light, a dark and a mid-tone custom background.
+    fn backgrounds() -> Vec<Theme> {
+        let custom = |r, g, b| {
+            Theme::pigment()
+                .with_background(Rgba::opaque(r, g, b))
+                .unwrap()
+        };
+        vec![
+            Theme::pigment(),
+            Theme::graphite(),
+            Theme::midnight(),
+            custom(0xFF, 0xF4, 0xD6),
+            custom(0x10, 0x20, 0x40),
+        ]
+    }
+
+    #[test]
+    fn series_text_reaches_the_contrast_and_keeps_what_already_does() {
+        for theme in backgrounds() {
+            let background = theme.background();
+            for &color in theme.palette() {
+                let text = readable_text(color, &theme);
+                let ratio = contrast_ratio(text, background);
+                assert!(
+                    ratio >= TEXT_CONTRAST,
+                    "{color:?} on {background:?}: {ratio}"
+                );
+                if contrast_ratio(color, background) >= TEXT_CONTRAST {
+                    assert_eq!(text, color);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn series_text_keeps_the_hue_and_moves_away_from_the_background() {
+        for theme in backgrounds() {
+            let background = theme.background();
+            let darker = to_oklab(background)[0] >= 0.5;
+            for &color in theme.palette() {
+                let (before, after) = (to_oklab(color), to_oklab(readable_text(color, &theme)));
+                let text = readable_text(color, &theme);
+                let clamped = [text.r, text.g, text.b].iter().any(|&c| c == 0 || c == 255);
+                if clamped {
+                    // A channel clamped to the gamut turns the hue a little.
+                    let angle = |[_, a, b]: Oklab| b.atan2(a);
+                    assert!((angle(before) - angle(after)).abs() < 0.25, "{color:?}");
+                } else {
+                    // Rounding to 8-bit channels moves a and b by up to about 0.004.
+                    assert!(
+                        (before[1] - after[1]).abs() < 0.01,
+                        "{color:?}: {before:?} {after:?}"
+                    );
+                    assert!(
+                        (before[2] - after[2]).abs() < 0.01,
+                        "{color:?}: {before:?} {after:?}"
+                    );
+                }
+                if after != before {
+                    assert_eq!(after[0] < before[0], darker, "{color:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn series_text_takes_the_smallest_step() {
+        let mut moved = 0;
+        for theme in backgrounds() {
+            let background = theme.background();
+            for &color in theme.palette() {
+                let Some((step, lightness, [a, b], darker)) = readable_step(color, background)
+                else {
+                    continue;
+                };
+                moved += 1;
+                let at = |step| text_step(lightness, [a, b], darker, step);
+                assert!(contrast_ratio(at(step), background) >= TEXT_CONTRAST);
+                for fewer in 0..step {
+                    assert!(
+                        contrast_ratio(at(fewer), background) < TEXT_CONTRAST,
+                        "{color:?} on {background:?}: step {fewer} of {step} already reaches it"
+                    );
+                }
+            }
+        }
+        assert!(moved > 0, "some palette color needs a move");
+    }
+
+    #[test]
+    fn series_text_keeps_the_alpha_of_the_series_color() {
+        let theme = Theme::pigment();
+        let translucent = Rgba {
+            a: 80,
+            ..theme.palette()[2]
+        };
+        let text = readable_text(translucent, &theme);
+        assert_eq!(text.a, 80);
+        assert!(contrast_ratio(text, theme.background()) >= TEXT_CONTRAST);
+        assert_ne!(text, translucent);
     }
 }

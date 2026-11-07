@@ -6,6 +6,7 @@
 
 use super::bar_shape::rounded_rect;
 use super::chrome::{segment, text};
+use super::contrast::readable_text;
 use super::error_bars::{bar_style, push_bar};
 use super::line::line_style;
 use super::mapping::point;
@@ -21,7 +22,8 @@ const CHIP_TINT: f32 = 0.14;
 
 /// The legend of `layout` as one unclipped group: for each row entry in order, its chip when it
 /// has one, its swatch, and then its label in the theme's text color; then for each direct
-/// label in order, its end dot and its label when it has them, both in the line color. `None`
+/// label in order, its end dot in the line color and its label when it has them, in the line
+/// color moved to reach [`readable_text`]'s contrast with the background. `None`
 /// when the legend has neither, so a figure without a legend gets no group.
 pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
     let (entries, direct) = (layout.legend.entries(), &layout.direct);
@@ -43,7 +45,12 @@ pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
     row(theme, entries, &mut items);
     for label in direct {
         items.extend(label.dot.map(|d| end_dot(d, label.color)));
-        items.extend(label.label.as_ref().map(|l| text(l, label.color)));
+        items.extend(
+            label
+                .label
+                .as_ref()
+                .map(|l| text(l, readable_text(label.color, theme))),
+        );
     }
     Some(Item::Group { clip: None, items })
 }
@@ -934,7 +941,7 @@ mod tests {
     }
 
     #[test]
-    fn each_direct_label_draws_its_dot_then_its_label_in_the_line_color() {
+    fn each_direct_label_draws_its_dot_in_the_line_color_then_its_readable_label() {
         // Graphite labels lines directly; the scatter falls back to the row.
         let (theme, layout) = layout(Theme::graphite());
         let Some(Item::Group { clip: None, items }) = legend(&theme, &layout) else {
@@ -966,7 +973,7 @@ mod tests {
                 panic!("a label after each dot");
             };
             assert_eq!(Some(&text.text), label.label.as_ref().map(|l| &l.text));
-            assert_eq!(text.color, label.color);
+            assert_eq!(text.color, readable_text(label.color, &theme));
             assert_ne!(text.color, theme.text_color());
         }
     }

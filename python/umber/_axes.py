@@ -840,8 +840,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         (0.32 of the series opacity for areas, 0.95 for histograms). Area and stacked-area
         swatches are filled rectangles under an edge in the line's color, dash and width;
         scatter, stem and bubble swatches show the marker fill at the theme's marker alpha.
-        Lines, steps, reference lines and error bars keep the series color, as do direct
-        labels and the outlines of box and violin swatches.
+        Lines, steps, reference lines and error bars keep the series color, as do the end
+        dots of direct labels and the outlines of box and violin swatches. A direct label's
+        text takes the series color moved in lightness only as far as it needs to reach a
+        contrast of 4.5:1 with the background.
 
         Args:
             style: How the legend is laid out.
@@ -1083,7 +1085,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         With ``annotate=True`` each drawn point shows its value next to it: x on a category y
         axis and y otherwise, the time on a time axis. Points left out, and points outside
         explicit limits, get no label. Labels take the series color at full opacity (each
-        group's with ``by``); a ``ColorBy`` scatter's labels take the theme's text color. A
+        group's with ``by``), moved in lightness only as far as it needs to reach a contrast
+        of 4.5:1 with the background; a ``ColorBy`` scatter's labels take the theme's text
+        color. A
         fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, and
         automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
         and left, and takes the first position inside the plot that overlaps no mark of these

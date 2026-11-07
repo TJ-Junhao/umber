@@ -620,8 +620,10 @@ impl<'a> AxesMut<'a> {
     /// of the series opacity for areas, 0.95 for histograms. Area and stacked-area swatches
     /// are filled rectangles under an edge in the line's color, dash and width; scatter, stem
     /// and bubble swatches show the marker fill at the theme's marker alpha. Lines, steps,
-    /// reference lines and error bars keep the series color, as do direct labels and the
-    /// outlines of box and violin swatches. Panel and merged figure legends use the same rule.
+    /// reference lines and error bars keep the series color, as do the end dots of direct
+    /// labels and the outlines of box and violin swatches. A direct label's text takes the
+    /// series color moved in lightness only as far as it needs to reach a contrast of 4.5:1
+    /// with the background. Panel and merged figure legends use the same rule.
     /// `size` resolves against the scaled body size; points ignore font scaling. Only
     /// explicit sizes take part in a merged legend's agreement. [`SizeSpec::Auto`] clears
     /// this panel's setting and inherits the agreed size, or the theme size when none is set.
