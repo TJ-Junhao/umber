@@ -562,6 +562,7 @@ fn merged_legend_follows_figure_title_alignment() {
             &fonts,
             "Figure.to_scene()",
             &layout::LabelCache::new(&fonts),
+            crate::pipeline::Rooms::Solved,
         )
         .unwrap();
         let entries = planned.header.legend.entries();
@@ -603,6 +604,7 @@ fn figure_title_is_one_and_a_half_title_sizes() {
             &fonts,
             "Figure.to_scene()",
             &layout::LabelCache::new(&fonts),
+            crate::pipeline::Rooms::Solved,
         )
         .unwrap();
         let title = planned.header.title.unwrap();
@@ -760,6 +762,7 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
                 &fonts,
                 "Figure.to_scene()",
                 &layout::LabelCache::new(&fonts),
+                crate::pipeline::Rooms::Solved,
             )
             .unwrap();
             let rows: Vec<_> = planned
@@ -862,6 +865,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
         &fonts,
         "Figure.to_scene()",
         &layout::LabelCache::new(&fonts),
+        crate::pipeline::Rooms::Solved,
     )
     .unwrap();
     assert_eq!(planned.header.legend.entries().len(), 1);
@@ -886,6 +890,7 @@ fn direct_lines_stay_on_panels_and_other_kinds_merge() {
         &fonts,
         "Figure.to_scene()",
         &layout::LabelCache::new(&fonts),
+        crate::pipeline::Rooms::Solved,
     )
     .unwrap();
     let labels: Vec<_> = planned
@@ -944,6 +949,7 @@ fn per_panel_legends_do_not_follow_title_alignment() {
                 &fonts,
                 "Figure.to_scene()",
                 &layout::LabelCache::new(&fonts),
+                crate::pipeline::Rooms::Solved,
             )
             .unwrap();
             assert!(planned.header.legend.is_empty());
@@ -1002,6 +1008,7 @@ fn figure_header_joins_single_and_grid_height_needs() {
             &fonts,
             "Figure.to_scene()",
             &layout::LabelCache::new(&fonts),
+            crate::pipeline::Rooms::Solved,
         )
         .unwrap();
         assert_eq!(planned.header.bottom, PADDING + 22.5 * 1.25 + 8.0);

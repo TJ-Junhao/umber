@@ -18,6 +18,7 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.boxplot(groups)` / `ax.violinplot(groups)` | `ax.box(names, groups)` / `ax.violin(names, groups)` on a category axis |
 | `ax.eventplot(positions)` | `ax.events(rows, positions)` on a category y axis, one sequence per row; for one row `ax.events(["events"], [positions])` |
 | `ax.fill_between(x, lo, hi)` | `ax.band(x, lo, hi)` |
+| `ax.set_aspect("equal")` | `ax.equal_aspect()`: linear, unshared axes; refused on a twin |
 | `ax.stackplot(x, ys, labels=...)` | `ax.stacked_area(x, [ub.Series(label, y), ...])` |
 | `ax.errorbar(x, y, yerr=e)` | `ax.y_error_bars(x, y - e, y + e)` plus the line or points |
 | `ax.axhline(y)` / `ax.axvspan(a, b)` | `ax.hline(y)` / `ax.vspan(a, b)` |

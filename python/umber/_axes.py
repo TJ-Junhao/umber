@@ -263,7 +263,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Raises:
             TypeError: If ``scale`` is not a ``Scale``.
             UsageError: If either y scale is not numeric, these axes already have a twin,
-                these axes are a twin, or the grid shares x.
+                these axes are a twin, the grid shares x, or the axes have equal aspect.
 
         Example:
             >>> import umber as ub
@@ -827,6 +827,49 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             self._native.baseline(self._target, self._col, flag)
             return self
 
+    def equal_aspect(self: "Axes[float, float]") -> "Axes[float, float]":
+        """Make one data unit equally long on both axes.
+
+        Use it for physical space, where a circle must stay a circle. Calling it twice is the
+        same as calling it once.
+
+        The limits and the figure size stay as they are, except that automatic hexbin limits
+        grow to hold whole cells. The plot shrinks along one side until both axes have the same
+        points per data unit, and it is centred along that side in the room it has without this
+        setting. On a grid each panel is centred in its own cell, and other panels keep their
+        plots.
+
+        Ticks, labels, the colorbar, the value column and direct labels follow the smaller
+        plot, and ``InPlot`` positions are fractions of it. The panel's title, subtitle and
+        legend keep their alignment to the plot, and stay in the panel's room where they are
+        wider than the plot. The figure's own header and caption and a shared colorbar stay
+        where they are.
+
+        Bubbles and value labels widen automatic limits at the largest scale that holds them
+        in the room, so the shape of the plot follows; the scales are equal for the final
+        limits.
+
+        Returns:
+            These axes.
+
+        Raises:
+            UsageError: If x or y is a log, time or category axis, if the axes are a twin or
+                have one, or if x or y is shared with another panel; a panel added later
+                raises this when the figure is rendered.
+            StyleError: When rendering, if the limits leave the plot less than 1 pt on a side,
+                or the bubbles do not settle.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> angle = np.linspace(0, 2 * np.pi, 200)
+            >>> ax = ub.Figure(8, 4).add_axes().equal_aspect()
+            >>> ax = ax.line(np.cos(angle), np.sin(angle))
+        """
+        with api_call():
+            self._native.equal_aspect(self._target, self._col)
+            return self
+
     def legend(
         self, style: LegendStyle, *, position: LegendPosition | Auto = AUTO, size: Size = Size.AUTO
     ) -> Self:
@@ -840,8 +883,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         (0.32 of the series opacity for areas, 0.95 for histograms). Area and stacked-area
         swatches are filled rectangles under an edge in the line's color, dash and width;
         scatter, stem and bubble swatches show the marker fill at the theme's marker alpha.
-        Lines, steps, reference lines and error bars keep the series color, as do direct
-        labels and the outlines of box and violin swatches.
+        Lines, steps, reference lines and error bars keep the series color, as do the end
+        dots of direct labels and the outlines of box and violin swatches. A direct label's
+        text takes the series color moved in lightness only as far as it needs to reach a
+        contrast of 4.5:1 with the background.
 
         Args:
             style: How the legend is laid out.
@@ -1087,7 +1132,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         With ``annotate=True`` each drawn point shows its value next to it: x on a category y
         axis and y otherwise, the time on a time axis. Points left out, and points outside
         explicit limits, get no label. Labels take the series color at full opacity (each
-        group's with ``by``); a ``ColorBy`` scatter's labels take the theme's text color. A
+        group's with ``by``), moved in lightness only as far as it needs to reach a contrast
+        of 4.5:1 with the background; a ``ColorBy`` scatter's labels take the theme's text
+        color. A
         fixed ``place`` puts every label on that side, 3 pt beyond the marker's edge, and
         automatic limits grow so that the labels fit. ``Place.AUTO`` tries above, right, below
         and left, and takes the first position inside the plot that overlaps no mark of these

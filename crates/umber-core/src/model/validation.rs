@@ -1917,6 +1917,33 @@ pub(super) fn check_highlight_axis(
     .with_hint(axis.category_scale_hint()))
 }
 
+/// Checks that `axis`, of scale kind `kind`, has one length for a data unit, as the setter
+/// `context` needs: `Error::Usage` naming the axis unless it is linear.
+pub(super) fn check_equal_aspect_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    let scale = match kind {
+        ScaleKind::Linear => return Ok(()),
+        ScaleKind::Log { .. } => "log",
+        ScaleKind::Time => "time",
+        ScaleKind::Category => "category",
+    };
+    let name = axis.name();
+    Err(Error::usage(
+        context,
+        format!(
+            "{name} is a {scale} axis; equal aspect needs linear axes, where one data unit has \
+             one length."
+        ),
+    )
+    .with_hint(match axis {
+        SharedAxis::X => "pass x=Scale.linear() to Figure.add_axes().",
+        SharedAxis::Y => "pass y=Scale.linear() to Figure.add_axes().",
+    }))
+}
+
 /// Checks that `axis`, of scale kind `kind`, takes the time tick positions the setter `context`
 /// sets: `Error::Usage` unless it is a time axis.
 pub(super) fn check_time_tick_axis(

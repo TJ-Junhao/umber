@@ -197,6 +197,10 @@ fn solid(color: Rgba) -> Rgba {
     Rgba { a: 255, ..color }
 }
 
+/// The text color of Pigment's first series color, which is a little under 4.5:1 on the
+/// background and so is moved darker for text (`tests/series_text.rs` covers the rule).
+const FIRST_TEXT: Rgba = Rgba::opaque(189, 79, 52);
+
 // ---- A column right of the plot ------------------------------------------------------------
 
 #[test]
@@ -208,8 +212,7 @@ fn a_right_column_writes_each_value_level_with_its_point() {
         let [left, top, _, bottom] = boxed(&scene, value);
         assert!(left >= plot[2] + GAP - TOLERANCE, "{value} at {left}");
         assert_close((top + bottom) / 2.0, y, value);
-        let palette = Theme::pigment().palette()[0];
-        assert_eq!(text(&scene, value).color, solid(palette));
+        assert_eq!(text(&scene, value).color, FIRST_TEXT);
     }
 }
 
@@ -226,7 +229,7 @@ fn each_series_has_its_own_sub_column_in_mark_order() {
     assert_close(first[1], second[1], "one row");
     let theme = Theme::pigment();
     let palette = theme.palette();
-    assert_eq!(text(&scene, "66.5").color, solid(palette[0]));
+    assert_eq!(text(&scene, "66.5").color, FIRST_TEXT);
     assert_eq!(text(&scene, "68.1").color, solid(palette[1]));
 }
 
@@ -251,7 +254,7 @@ fn each_group_has_its_own_sub_column() {
     assert_close(second[0], first[2] + GAP, "group sub-columns");
     let theme = Theme::pigment();
     let palette = theme.palette();
-    assert_eq!(text(&scene, "69.1").color, solid(palette[0]));
+    assert_eq!(text(&scene, "69.1").color, FIRST_TEXT);
     assert_eq!(text(&scene, "70.7").color, solid(palette[1]));
 }
 

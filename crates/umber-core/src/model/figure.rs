@@ -685,6 +685,14 @@ impl Figure {
         if let Some(problem) = problem {
             return Err(Error::usage(CONTEXT, problem).with_hint(HINT));
         }
+        if axes.equal_aspect {
+            return Err(Error::usage(
+                CONTEXT,
+                "these axes have equal aspect; a twin y axis has its own scale, so equal aspect \
+                 has no single meaning.",
+            )
+            .with_hint("draw the second y scale on a panel of its own."));
+        }
         if !matches!(axes.y, ScaleKind::Linear | ScaleKind::Log { .. }) {
             return Err(
                 Error::usage(CONTEXT, "y is not numeric; a twin needs numeric y axes.")
@@ -723,6 +731,53 @@ impl Figure {
         self.axes.push(twin);
         self.axes[index].twin = TwinLink::Primary(right);
         Ok(AxesMut::new(self, right))
+    }
+
+    /// This figure with no axes having equal aspect, as the layout of a figure with the setting
+    /// starts from.
+    pub(crate) fn without_equal_aspect(&self) -> Figure {
+        let mut plain = self.clone();
+        for axes in &mut plain.axes {
+            axes.equal_aspect = false;
+        }
+        plain
+    }
+
+    /// Refuses equal aspect on `axes` while another panel shares one of its axes: a shared axis
+    /// is sized by its whole row or column, so one panel cannot shrink alone. `Error::Usage`
+    /// under `context` naming the axis, x first. [`AxesMut::equal_aspect`] checks the panels on
+    /// the figure at the call, and rendering checks them again, for panels added later.
+    pub(crate) fn check_equal_aspect_share(
+        &self,
+        axes: &Axes,
+        context: &'static str,
+    ) -> Result<()> {
+        let cells = axes.cells();
+        for axis in [SharedAxis::X, SharedAxis::Y] {
+            let group = |cells: CellRange| match axis {
+                SharedAxis::X => self.x_group_of(cells.row(), cells.col()),
+                SharedAxis::Y => self.y_group_of(cells.row(), cells.col()),
+            };
+            let shared = self
+                .primary_cartesian_axes()
+                .map(Axes::cells)
+                .any(|other| other != cells && group(other) == group(cells));
+            if shared {
+                let name = axis.name();
+                return Err(Error::usage(
+                    context,
+                    format!(
+                        "{name} is shared with another panel; a shared axis is sized by its \
+                         whole row or column, so one panel cannot shrink alone."
+                    ),
+                )
+                .with_hint(match axis {
+                    SharedAxis::X => "pass share_x=Share.NONE to Figure().",
+                    SharedAxis::Y => "pass share_y=Share.NONE to Figure().",
+                }));
+            }
+        }
+        Ok(())
     }
 
     /// Finds the right-hand axes of a Cartesian panel.

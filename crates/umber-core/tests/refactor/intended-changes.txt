@@ -40,6 +40,9 @@ colorbar-right-legend-pigment
 colorbar-right-midnight
 colorbar-right-pigment
 contour-limits
+equal-aspect-tall-graphite
+equal-aspect-tall-midnight
+equal-aspect-tall-pigment
 error-bars-category-graphite
 error-bars-category-midnight
 error-bars-category-pigment

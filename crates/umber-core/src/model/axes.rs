@@ -71,6 +71,9 @@ pub struct Axes {
     pub(super) twin: TwinLink,
     /// The title of the value column, when one is set.
     pub(super) value_column: Option<super::ValueColumn>,
+    /// Whether one data unit is equally long on both axes
+    /// ([`AxesMut::equal_aspect`](super::AxesMut::equal_aspect)).
+    pub(super) equal_aspect: bool,
 }
 
 /// Stable storage indices connect the two axes without adding a grid cell.
@@ -180,6 +183,7 @@ impl Axes {
             annotations: Vec::new(),
             twin: TwinLink::None,
             value_column: None,
+            equal_aspect: false,
         }
     }
 
@@ -610,6 +614,25 @@ impl Axes {
     #[must_use]
     pub fn baseline_visibility(&self) -> super::BaselineVisibility {
         self.baseline
+    }
+
+    /// Whether one data unit is equally long on both axes
+    /// ([`AxesMut::equal_aspect`](super::AxesMut::equal_aspect)).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// assert!(!axes.has_equal_aspect());
+    /// axes.equal_aspect()?;
+    /// assert!(axes.has_equal_aspect());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn has_equal_aspect(&self) -> bool {
+        self.equal_aspect
     }
 
     /// The marks, in the order they were added.

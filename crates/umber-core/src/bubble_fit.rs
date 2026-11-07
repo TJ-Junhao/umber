@@ -35,6 +35,12 @@
 //! marker with its own outline, the thinner one of a color-mapped mark, so that only the
 //! markers as drawn decide that the bubbles do not fit.
 //!
+//! On a panel with equal aspect the plot takes its shape from its limits, so both axes are
+//! fitted together, on one scale in points per data unit ([`fit_jointly`]): the largest at which
+//! the data and every reach fit the room of the plot, or a smaller one on an axis whose padding
+//! keeps an end at 0. Nothing in that fit is particular to
+//! bubbles, so whatever reaches by a number of points takes part as a reach.
+//!
 //! When no extent holds the bubbles of an axis, the layout fails ([`BubbleFits::failure`]): a
 //! bubble reaches at least half the plot length (the furthest reaches towards both ends
 //! together take the whole plot), or the fitted extent leaves the supported numeric range.
@@ -59,15 +65,35 @@ use crate::layout::PlotSize;
 use crate::model::ShareGroups;
 use crate::model::SharedValues;
 use crate::resolve::{
-    self, AxisLimits, AxisScale, ContinuousLimits, Limits, Resolved, ResolvedMark, TimeLimits,
-    ValueAxis,
+    self, AxisLimits, AxisScale, ContinuousLimits, ExtentPadding, Limits, Resolved, ResolvedMark,
+    TimeLimits, ValueAxis,
 };
-use crate::scale::{Padding, log_offset, seconds_between};
+use crate::scale::{AUTO_LIMIT_PADDING, Padding, log_offset, seconds_between};
 use crate::{ContinuousScale, Error, Instant, Theme, Transform};
 
 /// The most times a fit is made again after its first, before its axis keeps the limits of
 /// the data positions.
 const MAX_REFITS: usize = 8;
+#[cfg(test)]
+thread_local! {
+    /// How many fits of one axis are made before it keeps the limits of the data positions, as
+    /// tests may ask.
+    pub(crate) static FITS_ALLOWED: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(MAX_REFITS + 1) };
+}
+
+/// How many fits of one axis are made, as tests may ask.
+#[cfg(test)]
+fn fits_allowed() -> usize {
+    FITS_ALLOWED.with(std::cell::Cell::get)
+}
+
+/// How many fits of one axis are made: the first and [`MAX_REFITS`] more.
+#[cfg(not(test))]
+fn fits_allowed() -> usize {
+    MAX_REFITS + 1
+}
+
 /// A drawing-space allowance, in points, added to every bubble's reach so that the final `f32`
 /// path coordinates stay inside the plot.
 const PATH_ALLOWANCE: f64 = 1e-4;
@@ -558,7 +584,7 @@ impl BubbleFit {
             State::Fitted { .. } if self.contains(scale, lengths) => return false,
             State::Unfitted if self.on_demand && self.contains(scale, lengths) => return false,
             State::Unfitted => Some((0.0, lengths.to_vec(), 0)),
-            State::Fitted { refits, .. } if *refits == MAX_REFITS => None,
+            State::Fitted { refits, .. } if *refits + 1 >= fits_allowed() => None,
             State::Fitted {
                 span,
                 lengths: fitted,
@@ -732,6 +758,380 @@ impl BubbleFit {
     }
 }
 
+/// What a panel with equal aspect holds its marks in: the room its plot may take, and how
+/// resolve finishes the extent of each of its axes, x then y.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct JointRoom {
+    /// The room.
+    pub room: PlotSize,
+    /// How the extents are padded.
+    pub padding: [ExtentPadding; 2],
+}
+
+/// The length a part of the limits takes at a scale, as one line of that scale.
+#[derive(Debug, Clone, Copy)]
+struct Piece {
+    /// The length at the scale, in points.
+    length: f64,
+    /// How much the length grows per point per data unit.
+    slope: f64,
+    /// The length at scale 0, in points.
+    intercept: f64,
+    /// The bubble or label with the furthest reach of this part, as an index into its fit's
+    /// bubbles; `None` for the data alone.
+    bubble: Option<usize>,
+}
+
+/// One axis of a panel whose two axes have one scale, `k` points per data unit, measured from
+/// the low end of the data: what its limits take of its room at any `k`.
+///
+/// With the data `0..span`, and `m` and `M` the lowest and highest point that a reach gets to,
+/// the smallest extent `S` long whose padded limits hold all of that, `p` of `S` on each side, is
+/// the longest of `span`, `(M - 0) / (1 + p)`, `(span - m) / (1 + p)` and `(M - m) / (1 + 2p)`:
+/// the padding of a side counts towards a reach on that side. The limits are `charge × S` long.
+/// In points, `k M` and `-k m` are upper envelopes of lines in `k`, so each of the four is convex
+/// and piecewise linear in `k`, and so is the longest. Where the padding is not sure to apply,
+/// `credit` is 0 and the extent itself holds the reaches.
+struct ScaleAxis {
+    /// The length of the room along this axis, in points.
+    room: f64,
+    /// The span of the data, or the limits of an axis that keeps them.
+    span: f64,
+    /// The padding that counts towards a reach, as a share of the extent on each side.
+    credit: f64,
+    /// The span of the limits per unit of the extent, at most.
+    charge: f64,
+    /// The reaches towards the high end: the slope is a position, the intercept a reach in
+    /// points.
+    upper: Vec<Line>,
+    /// The reaches towards the low end, as `upper`, with the slope the negative position.
+    lower: Vec<Line>,
+}
+
+impl ScaleAxis {
+    /// An axis with limits `span` long whatever the scale.
+    fn fixed(span: f64, room: f64) -> ScaleAxis {
+        ScaleAxis {
+            room,
+            span,
+            credit: 0.0,
+            charge: 1.0,
+            upper: Vec::new(),
+            lower: Vec::new(),
+        }
+    }
+
+    /// The axis of `fit`, whose raw extent holds the data positions and the explicit ticks and
+    /// whose extent resolve finishes as `padding` says.
+    fn fitted(fit: &BubbleFit, room: f64, padding: ExtentPadding) -> ScaleAxis {
+        let (low, high) = fit.seed.domain();
+        let (credit, charge) = match padding {
+            ExtentPadding::Exact => (0.0, 1.0),
+            ExtentPadding::BothSides => (AUTO_LIMIT_PADDING, 1.0 + 2.0 * AUTO_LIMIT_PADDING),
+            // An end at 0 may or may not move, so the padding is charged and never counted.
+            ExtentPadding::KeepZero => (0.0, 1.0 + 2.0 * AUTO_LIMIT_PADDING),
+        };
+        let (mut upper, mut lower) = (Vec::new(), Vec::new());
+        for (i, bubble) in fit.bubbles.iter().enumerate() {
+            let (down, up) = fit.reach(bubble);
+            let at = bubble.value - low;
+            if up > 0.0 {
+                upper.push(Line {
+                    slope: at,
+                    intercept: up + PATH_ALLOWANCE,
+                    bubble: Some(i),
+                });
+            }
+            if down > 0.0 {
+                lower.push(Line {
+                    slope: -at,
+                    intercept: down + PATH_ALLOWANCE,
+                    bubble: Some(i),
+                });
+            }
+        }
+        ScaleAxis {
+            room,
+            span: high - low,
+            credit,
+            charge,
+            upper,
+            lower,
+        }
+    }
+
+    /// The line of `lines` furthest out at the scale `k`; `None` without lines.
+    fn furthest(lines: &[Line], k: f64) -> Option<Line> {
+        lines.iter().copied().reduce(|far, line| {
+            if line.slope * k + line.intercept > far.slope * k + far.intercept {
+                line
+            } else {
+                far
+            }
+        })
+    }
+
+    /// The longest of the parts that decide the limits at the scale `k`, in points.
+    fn piece(&self, k: f64) -> Piece {
+        let top = Line {
+            slope: self.span,
+            intercept: 0.0,
+            bubble: None,
+        };
+        let bottom = Line { slope: 0.0, ..top };
+        let (up, down) = (
+            Self::furthest(&self.upper, k),
+            Self::furthest(&self.lower, k),
+        );
+        let one_side = self.charge / (1.0 + self.credit);
+        let both_sides = self.charge / (1.0 + 2.0 * self.credit);
+        [
+            Some((self.charge, top, bottom)),
+            up.map(|up| (one_side, up, bottom)),
+            down.map(|down| (one_side, top, down)),
+            up.zip(down).map(|(up, down)| (both_sides, up, down)),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|(weight, up, down)| {
+            let slope = weight * (up.slope + down.slope);
+            let intercept = weight * (up.intercept + down.intercept);
+            let reach = if up.intercept >= down.intercept {
+                up
+            } else {
+                down
+            };
+            Piece {
+                length: slope * k + intercept,
+                slope,
+                intercept,
+                bubble: reach.bubble,
+            }
+        })
+        .fold(None, |longest: Option<Piece>, piece| match longest {
+            Some(longest) if longest.length >= piece.length => Some(longest),
+            _ => Some(piece),
+        })
+        .unwrap_or(Piece {
+            length: 0.0,
+            slope: 0.0,
+            intercept: 0.0,
+            bubble: None,
+        })
+    }
+
+    /// The largest scale at which the data alone fits the room: an upper bound of every scale
+    /// that holds the axis.
+    fn most(&self) -> f64 {
+        self.room / (self.charge * self.span)
+    }
+
+    /// The smallest extent at the scale `k` whose limits hold every reach, measured as this
+    /// axis is, from the low end of the data.
+    fn extent(&self, k: f64) -> (f64, f64) {
+        let held = self.piece(k).length / (self.charge * k);
+        let pad = self.credit * held;
+        let reach = |line: Line| line.slope + line.intercept / k;
+        let high =
+            Self::furthest(&self.upper, k).map_or(self.span, |up| self.span.max(reach(up) - pad));
+        let low = Self::furthest(&self.lower, k).map_or(0.0, |down| (pad - reach(down)).min(0.0));
+        (low, high)
+    }
+}
+
+/// How close to the room the limits at a scale must come to count as fitting it, as a share of
+/// the room: far below anything visible, and above the rounding of the steps.
+const SCALE_TOLERANCE: f64 = 1e-12;
+
+/// The largest scale, in points per data unit, at which the limits of both `axes`, as each
+/// [`ScaleAxis`] measures them, fit their rooms; otherwise the index of the axis that no scale
+/// holds, with the bubble whose reach decides that. That is the largest scale there is on
+/// [`Exact`](ExtentPadding::Exact) and [`BothSides`](ExtentPadding::BothSides) axes, and a
+/// conservative one on [`KeepZero`](ExtentPadding::KeepZero) axes (see [`fit_jointly`]).
+///
+/// The worst share of the room over both axes is convex and piecewise linear in the scale, so
+/// the scales that fit form one interval, and this is its upper end. Newton's method from the
+/// right of that end finds it: the line of the worst share at a scale that does not fit lies
+/// below the function, so its root is still at or right of the end. Each step therefore moves
+/// left onto another line of the function, and a function of finitely many lines never returns
+/// to one, so the steps end, at the end of the interval. A line that does not fall towards the
+/// left, or a root that is not positive, shows that no scale left of the point fits either.
+fn largest_scale(axes: &[ScaleAxis; 2]) -> std::result::Result<f64, (usize, Option<usize>)> {
+    let mut k = axes[0].most().min(axes[1].most());
+    let steps = axes
+        .iter()
+        .map(|axis| 4 * (axis.upper.len() + 1) * (axis.lower.len() + 1))
+        .sum::<usize>();
+    for _ in 0..=steps {
+        let (x, y) = (axes[0].piece(k), axes[1].piece(k));
+        let index = usize::from(y.length / axes[1].room > x.length / axes[0].room);
+        let (axis, piece) = (&axes[index], if index == 0 { x } else { y });
+        if piece.length / axis.room <= 1.0 + SCALE_TOLERANCE {
+            return Ok(k);
+        }
+        let next = (axis.room - piece.intercept) / piece.slope;
+        if piece.slope <= 0.0 || next <= 0.0 || !next.is_finite() {
+            return Err((index, piece.bubble));
+        }
+        if next >= k {
+            return Ok(k);
+        }
+        k = next;
+    }
+    Ok(k)
+}
+
+/// Fits both axes of the panel `panel` on one scale, the axes resolved as `resolved`, with `room`
+/// the room its plot may take of the solved `plots`. The fits of `pair` that need it are made,
+/// as [`BubbleFit::update`] decides that, together with those made before; an axis without
+/// one keeps its limits. Returns whether the extent of any fit changed.
+///
+/// The plot of such a panel has its shape from its limits, so a fit of one axis against a plot
+/// length, as [`BubbleFit::update`] makes it, is measured against a length that the fit itself
+/// changes. Here the one unknown is the scale: in `k` points per data unit a reach of `r` points
+/// is `r / k` data units on either axis, so each axis's extent is a function of `k`, and
+/// [`largest_scale`] finds the largest `k` at which both limits, padded, fit the room. The
+/// extents are then the smallest whose padded limits hold every reach at `k` ([`ScaleAxis`]),
+/// so the padding counts towards the reaches instead of being added to them. A reach is what
+/// the fits hold, whichever mark it comes from, so everything that reaches by a number of points
+/// takes part. The fit is made again only when a reach leaves a plot that tick labels have since
+/// made smaller.
+///
+/// The scale is the largest that holds the marks on [`ExtentPadding::Exact`] and
+/// [`ExtentPadding::BothSides`] axes, whose padding is known. On a
+/// [`ExtentPadding::KeepZero`] axis it is conservative: an end at 0 stays or moves depending on
+/// the extent, so the padding is charged in full and never counted towards a reach. The scale can
+/// then be smaller than need be, and bubbles that reach most of the room are refused although
+/// some limits would hold them; the error names a figure that holds them, and explicit limits
+/// are the other way out.
+///
+/// No scale fits only when the reaches alone leave no room along one axis, whatever the other
+/// does: that axis fails, measured against the room, so only its side of the figure has to grow.
+fn fit_jointly(
+    pair: &mut [Option<BubbleFit>; 2],
+    resolved: &Resolved,
+    (panel, joint): (usize, JointRoom),
+    plots: &[PlotSize],
+) -> bool {
+    let mut made = 0;
+    let mut due = [false; 2];
+    let mut active = [false; 2];
+    for (i, fit) in pair.iter().enumerate() {
+        let Some(fit) = fit else { continue };
+        let Some(scale) = fit.axis.scale(resolved) else {
+            continue;
+        };
+        let lengths: Vec<f64> = plots.iter().map(|plot| fit.axis.length(*plot)).collect();
+        let holds = fit.contains(scale, &lengths);
+        due[i] = match &fit.state {
+            State::Clipped | State::Unfit { .. } => false,
+            State::Fitted { refits, .. } => {
+                made = made.max(refits + 1);
+                active[i] = true;
+                !holds
+            }
+            State::Unfitted => !(fit.on_demand && holds),
+        };
+        active[i] |= due[i];
+    }
+    if due == [false; 2] {
+        return false;
+    }
+    let extents = |pair: &[Option<BubbleFit>; 2]| {
+        [0, 1].map(|i| pair[i].as_ref().and_then(BubbleFit::extent))
+    };
+    let before = extents(pair);
+    if made >= fits_allowed() {
+        for fit in pair.iter_mut().flatten() {
+            fit.state = State::Clipped;
+        }
+    } else {
+        let mut solved = solve_jointly(pair, active, resolved, joint);
+        if solved.is_err() && pair.iter().flatten().any(|fit| !fit.as_drawn) {
+            for fit in pair.iter_mut().flatten() {
+                fit.as_drawn = true;
+            }
+            solved = solve_jointly(pair, active, resolved, joint);
+        }
+        let mut sizes = plots.to_vec();
+        sizes[panel] = joint.room;
+        match solved {
+            Ok(extents) => {
+                for (fit, extent) in pair.iter_mut().zip(extents) {
+                    if let (Some(fit), Some(extent)) = (fit, extent) {
+                        let lengths = sizes.iter().map(|plot| fit.axis.length(*plot)).collect();
+                        fit.state = State::Fitted {
+                            extent,
+                            span: 0.0,
+                            lengths,
+                            refits: made,
+                        };
+                    }
+                }
+            }
+            Err((axis, reason)) => {
+                let on_demand = pair[axis].as_ref().is_some_and(|fit| fit.on_demand);
+                if let Some(fit) = &mut pair[axis] {
+                    fit.state = if on_demand {
+                        State::Clipped
+                    } else {
+                        State::Unfit {
+                            reason,
+                            plots: sizes,
+                        }
+                    };
+                }
+            }
+        }
+    }
+    extents(pair) != before
+}
+
+/// The extent of each axis's fit at one scale, x then y; `None` for an axis without one.
+type JointExtents = [Option<(f64, f64)>; 2];
+
+/// The extents of the `active` fits of `pair` at the largest scale that holds them in the room of
+/// `joint`, an axis without an active fit keeping the span it has in `resolved`; otherwise the
+/// index of the axis that fails, and why.
+fn solve_jointly(
+    pair: &[Option<BubbleFit>; 2],
+    active: [bool; 2],
+    resolved: &Resolved,
+    joint: JointRoom,
+) -> std::result::Result<JointExtents, (usize, Unfit)> {
+    let axes = Axis::BOTH.map(|axis| {
+        let (length, i) = (axis.length(joint.room), axis.index());
+        match &pair[i] {
+            Some(fit) if active[i] => ScaleAxis::fitted(fit, length, joint.padding[i]),
+            _ => {
+                let (lo, hi) = axis
+                    .scale(resolved)
+                    .map_or((0.0, 1.0), |scale| scale.domain());
+                ScaleAxis::fixed(hi - lo, length)
+            }
+        }
+    });
+    let k = largest_scale(&axes).map_err(|(axis, bubble)| (axis, Unfit::TooLarge(bubble)))?;
+    let mut extents = [None, None];
+    for (i, axis) in axes.iter().enumerate() {
+        let Some(fit) = pair[i].as_ref().filter(|_| active[i]) else {
+            continue;
+        };
+        let (low, high) = fit.seed.domain();
+        let (lo, hi) = axis.extent(k);
+        let extent = ContinuousScale::new(
+            fit.seed.transform(),
+            (low + lo).min(low),
+            (low + hi).max(high),
+            CONTEXT,
+        )
+        .map(|scale| scale.domain())
+        .map_err(|_| (i, Unfit::OutOfRange(axis.piece(k).bubble)))?;
+        extents[i] = Some(extent);
+    }
+    Ok(extents)
+}
+
 /// How the bubbles of the panels are filled, which decides which of them are drawn: the
 /// theme, and each panel's color scale, in the order of the panels.
 #[derive(Debug, Clone, Copy)]
@@ -902,11 +1302,30 @@ impl BubbleFits {
     }
 
     /// Fits again every axis whose bubbles need it on the axes `resolved` and the solved plots
-    /// `plots` (see [`BubbleFit::update`]). Returns whether any extent changed, in which case
-    /// the axes must be resolved and the layout solved again, unless a fit failed
-    /// ([`failure`](Self::failure)).
-    pub fn update(&mut self, resolved: &[Resolved], plots: &[PlotSize]) -> bool {
-        self.each(resolved, plots, BubbleFit::update)
+    /// `plots`: each axis on its own (see [`BubbleFit::update`]), and both axes of a panel with
+    /// an entry in `rooms` on one scale (see [`fit_jointly`]).
+    /// Returns whether any extent changed, in which case the axes must be resolved and the
+    /// layout solved again, unless a fit failed ([`failure`](Self::failure)).
+    pub fn update(
+        &mut self,
+        resolved: &[Resolved],
+        plots: &[PlotSize],
+        rooms: &[Option<JointRoom>],
+    ) -> bool {
+        let mut changed = false;
+        for (i, pair) in self.fits.iter_mut().enumerate() {
+            if let Some(joint) = rooms[i] {
+                changed |= fit_jointly(pair, &resolved[i], (i, joint), plots);
+                continue;
+            }
+            for fit in pair.iter_mut().flatten() {
+                let Some(scale) = fit.axis.scale(&resolved[i]) else {
+                    continue;
+                };
+                changed |= fit.update(scale, plots);
+            }
+        }
+        changed
     }
 
     /// The first fit, in panel order and x before y, that no extent can make, as the failure
@@ -958,6 +1377,15 @@ impl BubbleFits {
             .flatten()
             .flatten()
             .all(|fit| fit.on_demand || fit.state != State::Clipped)
+    }
+
+    /// Whether a fit of the panel `panel` holding a bubble fell back to the limits of the data
+    /// positions, so that the plot clips its bubbles.
+    pub fn clipped(&self, panel: usize) -> bool {
+        self.fits[panel]
+            .iter()
+            .flatten()
+            .any(|fit| !fit.on_demand && fit.state == State::Clipped)
     }
 
     /// Clips every fit whose bubbles still reach past the plot edges of the axes `resolved` on

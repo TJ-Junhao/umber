@@ -1379,6 +1379,97 @@ mod tests {
         }
     }
 
+    /// `count` deterministic points over a 10 by 4 rectangle.
+    fn hexbin_cloud(count: usize) -> (Vec<f64>, Vec<f64>) {
+        (0..count)
+            .map(|i| {
+                let u = (i as f64 * 0.618_033_988_7).fract();
+                let v = (i as f64 * 0.414_213_562_3).fract();
+                (u * 10.0, v * 4.0)
+            })
+            .unzip()
+    }
+
+    /// A hexbin of [`hexbin_cloud`] with equal aspect, on a `width` by `height` figure.
+    fn equal_aspect_hexbin(
+        (width, height): (f64, f64),
+        xlim: Option<(f64, f64)>,
+        ylim: Option<(f64, f64)>,
+    ) -> Figure {
+        let (x, y) = hexbin_cloud(600);
+        let mut f = Figure::new(width, height, crate::Theme::pigment()).unwrap();
+        let mut axes = f
+            .add_axes(crate::ScaleKind::Linear, crate::ScaleKind::Linear)
+            .unwrap();
+        axes.hexbin(
+            &x,
+            &y,
+            HexbinOptions {
+                gridsize: 12,
+                ..HexbinOptions::default()
+            },
+        )
+        .unwrap();
+        if let Some((low, high)) = xlim {
+            axes.xlim(low, high).unwrap();
+        }
+        if let Some((low, high)) = ylim {
+            axes.ylim(low, high).unwrap();
+        }
+        axes.equal_aspect().unwrap();
+        f
+    }
+
+    /// Asserts that the scales of `f` are equal and that its whole hexagons are regular.
+    #[track_caller]
+    fn assert_equal_aspect_hexagons(f: &Figure) {
+        let (resolved, layout) = crate::pipeline::plan_figure(f, (0, 0), FontLibrary::global());
+        let span = |scale: &crate::ContinuousScale| scale.domain().1 - scale.domain().0;
+        let x_scale = layout.plot.width / span(resolved.x.continuous_scale());
+        let y_scale = layout.plot.height / span(resolved.y.continuous_scale());
+        assert!(
+            (x_scale / y_scale - 1.0).abs() < 1e-12,
+            "{x_scale} {y_scale}"
+        );
+        let panels = hex_panels(f);
+        let whole: Vec<_> = panels[0].cells.iter().filter(|cell| cell.whole).collect();
+        assert!(whole.len() >= 10, "{} cells", whole.len());
+        for cell in whole {
+            assert!(regular(&cell.hexagon), "{:?}", cell.hexagon);
+        }
+    }
+
+    #[test]
+    fn hexagons_are_regular_with_equal_aspect() {
+        for size in [(9.0, 3.0), (3.0, 7.0), (6.0, 4.0)] {
+            assert_regular_whole(&equal_aspect_hexbin(size, None, None));
+            assert_equal_aspect_hexagons(&equal_aspect_hexbin(size, None, None));
+        }
+    }
+
+    #[test]
+    fn hexagons_are_regular_with_equal_aspect_and_explicit_limits() {
+        let (x, y) = (Some((-1.0, 11.0)), Some((-1.0, 5.0)));
+        for size in [(9.0, 3.0), (3.0, 7.0), (6.0, 4.0)] {
+            for (xlim, ylim) in [(x, y), (x, None), (None, y)] {
+                assert_equal_aspect_hexagons(&equal_aspect_hexbin(size, xlim, ylim));
+            }
+        }
+    }
+
+    #[test]
+    fn hexbins_with_equal_aspect_settle_at_once() {
+        // One pass counts the lattice and fits whole cells; the layout after it finds that
+        // nothing moved.
+        for size in [(9.0, 3.0), (3.0, 7.0)] {
+            for limits in [None, Some((-1.0, 11.0))] {
+                let f = equal_aspect_hexbin(size, limits, None);
+                crate::pipeline::plan_figure(&f, (0, 0), FontLibrary::global());
+                assert!(crate::pipeline::SETTLED_PASS.with(std::cell::Cell::get) <= 1);
+            }
+        }
+    }
+
     fn assert_hexbin_points_covered(limits: [bool; 2], columns: i64) {
         let mut failures = Vec::new();
         for (normal, width, height, gridsize, ylim) in [

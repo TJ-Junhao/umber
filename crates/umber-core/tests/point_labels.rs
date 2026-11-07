@@ -373,13 +373,9 @@ fn labels_take_the_series_color_at_full_opacity() {
         )
         .unwrap();
     let scene = render(&f);
-    assert_eq!(
-        text(&scene, "1.5").color,
-        Rgba {
-            a: 255,
-            ..palette[0]
-        }
-    );
+    // The first Pigment color is a little under 4.5:1 on the background, so its labels take it
+    // moved darker; `tests/series_text.rs` covers the rule. A color that reads is kept as given.
+    assert_eq!(text(&scene, "1.5").color, Rgba::opaque(189, 79, 52));
     assert_eq!(text(&scene, "2.5").color, Rgba { a: 255, ..red });
     // With groups, each group's labels take the group's color.
     let mut f = figure(ScaleKind::Linear, ScaleKind::Linear);
@@ -396,13 +392,7 @@ fn labels_take_the_series_color_at_full_opacity() {
         )
         .unwrap();
     let scene = render(&f);
-    assert_eq!(
-        text(&scene, "3.5").color,
-        Rgba {
-            a: 255,
-            ..palette[0]
-        }
-    );
+    assert_eq!(text(&scene, "3.5").color, Rgba::opaque(189, 79, 52));
     assert_eq!(
         text(&scene, "4.5").color,
         Rgba {

@@ -1015,6 +1015,104 @@ pub(crate) fn resolve(
     Resolved::new(x, y, None)
 }
 
+/// Whether `mark` fills cells, whose edges are the limits of its axis.
+fn is_cell(mark: &ResolvedMark<'_>) -> bool {
+    matches!(
+        mark,
+        ResolvedMark::Mesh { .. }
+            | ResolvedMark::Hist2d { .. }
+            | ResolvedMark::Hexbin { .. }
+            | ResolvedMark::Contour { .. }
+    )
+}
+
+/// How the automatic limits of an axis of `role` with `transform` fit `marks`, none of which
+/// fill cells, with `padding` the padding of their data (see [`axis_data`]) and `has_data` whether
+/// the axis has an extent.
+fn automatic_limits<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    which: ValueAxis,
+    role: AxisRole,
+    transform: Transform,
+    padding: Padding,
+    has_data: bool,
+) -> AutoLimits {
+    if role == AxisRole::Value {
+        // An ECDF runs from 0 to 1: a value axis of ECDFs alone, references apart, shows exactly
+        // that range.
+        let unit_range = || {
+            let mut contributing = marks
+                .clone()
+                .filter(|mark| !mark.is_reference() && mark.numbers(which).any(f64::is_finite))
+                .peekable();
+            contributing.peek().is_some() && contributing.all(ResolvedMark::spans_unit_range)
+        };
+        if transform == Transform::Linear && unit_range() {
+            AutoLimits::Exact
+        } else if transform == Transform::Linear {
+            AutoLimits::Padded(padding)
+        } else {
+            AutoLimits::LogBelowData(padding)
+        }
+    } else {
+        let contributing = || {
+            marks
+                .clone()
+                .filter(move |mark| mark.numbers(which).any(f64::is_finite))
+        };
+        let only_references = has_data && contributing().all(ResolvedMark::is_reference);
+        let all_lines = !only_references
+            && contributing()
+                .filter(|mark| !mark.is_reference())
+                .all(|mark| mark.has_exact_extent(which));
+        if all_lines {
+            AutoLimits::Exact
+        } else {
+            AutoLimits::Padded(padding)
+        }
+    }
+}
+
+/// How resolve finishes an extent that a fit gives a linear axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExtentPadding {
+    /// The limits are the extent.
+    Exact,
+    /// The limits are the extent and [`AUTO_LIMIT_PADDING`] of its span on each side.
+    BothSides,
+    /// As [`ExtentPadding::BothSides`], except that an end at exactly 0 stays there.
+    KeepZero,
+}
+
+/// How resolve finishes an extent that a fit gives the automatic linear axis `which` of `role`
+/// holding `marks`, as [`resolve_axis`] does: cells keep their own limits, and the other marks
+/// decide the padding of what they hold.
+pub(crate) fn extent_padding<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
+    which: ValueAxis,
+    role: AxisRole,
+) -> ExtentPadding {
+    let others: Vec<_> = marks.filter(|mark| !is_cell(mark)).collect();
+    let transform = Transform::Linear;
+    let (_, padding) = axis_data(others.iter().copied(), which, transform);
+    match automatic_limits(
+        others.iter().copied(),
+        which,
+        role,
+        transform,
+        padding,
+        true,
+    ) {
+        AutoLimits::Exact => ExtentPadding::Exact,
+        AutoLimits::Padded(Padding::KeepZero) | AutoLimits::LogBelowData(Padding::KeepZero) => {
+            ExtentPadding::KeepZero
+        }
+        AutoLimits::Padded(Padding::BothSides) | AutoLimits::LogBelowData(Padding::BothSides) => {
+            ExtentPadding::BothSides
+        }
+    }
+}
+
 /// Resolves the axis `which` of one group, with members' marks in row-major panel order, then
 /// mark order, playing `role` for them ([`AxisRole::of_group`]), and returns it with its base
 /// position: where the
@@ -1052,19 +1150,10 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
     let transform = limits.transform;
     let (data, padding) = axis_data(marks.clone(), which, transform);
     let mut data = union(data, bubbles);
-    let is_cell = |mark: &&ResolvedMark<'_>| {
-        matches!(
-            mark,
-            ResolvedMark::Mesh { .. }
-                | ResolvedMark::Hist2d { .. }
-                | ResolvedMark::Hexbin { .. }
-                | ResolvedMark::Contour { .. }
-        )
-    };
     let cells = extent(
         marks
             .clone()
-            .filter(is_cell)
+            .filter(|mark| is_cell(mark))
             .flat_map(|mark| mark.numbers(which)),
     );
     let auto = if cells.is_some() {
@@ -1085,39 +1174,15 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             }
         }
         AutoLimits::Exact
-    } else if role == AxisRole::Value {
-        // An ECDF runs from 0 to 1: a value axis of ECDFs alone, references apart, shows exactly
-        // that range.
-        let unit_range = || {
-            let mut contributing = marks
-                .clone()
-                .filter(|mark| !mark.is_reference() && mark.numbers(which).any(f64::is_finite))
-                .peekable();
-            contributing.peek().is_some() && contributing.all(ResolvedMark::spans_unit_range)
-        };
-        if transform == Transform::Linear && unit_range() {
-            AutoLimits::Exact
-        } else if transform == Transform::Linear {
-            AutoLimits::Padded(padding)
-        } else {
-            AutoLimits::LogBelowData(padding)
-        }
     } else {
-        let contributing = || {
-            marks
-                .clone()
-                .filter(move |mark| mark.numbers(which).any(f64::is_finite))
-        };
-        let only_references = data.is_some() && contributing().all(ResolvedMark::is_reference);
-        let all_lines = !only_references
-            && contributing()
-                .filter(|mark| !mark.is_reference())
-                .all(|mark| mark.has_exact_extent(which));
-        if all_lines {
-            AutoLimits::Exact
-        } else {
-            AutoLimits::Padded(padding)
-        }
+        automatic_limits(
+            marks.clone(),
+            which,
+            role,
+            transform,
+            padding,
+            data.is_some(),
+        )
     };
     let ContinuousAxis {
         scale,

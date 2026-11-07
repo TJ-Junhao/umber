@@ -17,8 +17,10 @@
 //!
 //! Every panel of a figure is laid out by one solve ([`grid::solve_grid`]): each panel is
 //! measured ([`panel::measure_panel`]), the solve chooses every plot area at once, and each
-//! panel is placed for its plot area ([`panel::place_panel`]).
+//! panel is placed for its plot area ([`panel::place_panel`]). A panel with equal aspect shrinks
+//! its plot inside the area the solve chose ([`aspect::fit_equal_aspect`]) before it is placed.
 
+mod aspect;
 #[cfg(test)]
 mod cache_tests;
 mod caption;
@@ -36,6 +38,7 @@ mod title_tests;
 pub(crate) mod twin;
 mod value_column;
 
+pub(crate) use aspect::{check_equal_aspect_size, fit_equal_aspect};
 pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
 pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
@@ -285,6 +288,8 @@ pub(crate) struct Layout {
     /// The plot area the axes' cells have where the grid lines up the plots of its panels (see
     /// [`PanelSlot::aligned`](panel::PanelSlot::aligned)).
     pub aligned: Area,
+    /// The room the layout gave the plot (see [`PanelSlot::room`](panel::PanelSlot::room)).
+    pub room: Area,
     /// Where the header ends, gap included, as an absolute canvas y; the header's top when the
     /// header is empty.
     #[cfg(test)]

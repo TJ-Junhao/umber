@@ -241,11 +241,25 @@ left.twin_y().line(months, [4, 5, 9, 13, 18, 22], label="Temperature").ylabel("Â
 left.figure.save_png("weather.png")
 ```
 
+## Physical space
+
+`ax.equal_aspect()` makes one data unit equally long on both axes, so a circle stays a circle at any figure size. The limits stay as they are, except that automatic hexbin limits grow to hold whole cells: the plot shrinks along one side and is centred in its room, and its ticks, labels and colorbar follow it. Both axes must be linear and not shared with another panel.
+
+```python
+import numpy as np
+import umber as ub
+
+angle = np.linspace(0, 2 * np.pi, 200)
+ax = ub.Figure(8, 4).add_axes().equal_aspect()
+ax.line(np.cos(angle), np.sin(angle)).xlabel("x (m)").ylabel("y (m)")
+ax.figure.save_png("domain.png")
+```
+
 ## Text and annotations
 
 `ax.text(text, (x, y))` writes text at a data position, and `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a distance away in points, with an arrow to the position unless `arrow=False`. Positions use each axis' own values: numbers, times, or category names. `at=ub.InPlot(x, y)` places text at fractions of the plot area instead, so a note stays in its corner when the data changes, and `annotate(..., text_at=ub.InPlot(x, y))` writes the text there with the arrow still pointing at the data position. Text and annotations never change the axis limits. `"\n"` breaks them into lines: the first line sits where a single line would, and the others follow below it.
 
-`annotate=True` on `bar`, `grouped_bar` and `stacked_bar` writes each bar's value; automatic limits grow so that every value fits, and `format=` chooses how values are written. With explicit limits, a value that does not fit raises `StyleError` naming the bar. On `scatter`, `annotate=True` writes each point's value next to it in the series color, on the first side of above, right, below and left that is clear of the marks and labels, or on a fixed side such as `place=ub.Place.ABOVE`, for which the automatic limits grow. `place=ub.Place.COLUMN` writes the values in a column beside the plot instead, one sub-column per series, which `ax.value_column("Mean (%)")` titles, as in a table beside a forest plot.
+`annotate=True` on `bar`, `grouped_bar` and `stacked_bar` writes each bar's value; automatic limits grow so that every value fits, and `format=` chooses how values are written. With explicit limits, a value that does not fit raises `StyleError` naming the bar. On `scatter`, `annotate=True` writes each point's value next to it in the series color (darkened or lightened just enough to read against the background), on the first side of above, right, below and left that is clear of the marks and labels, or on a fixed side such as `place=ub.Place.ABOVE`, for which the automatic limits grow. `place=ub.Place.COLUMN` writes the values in a column beside the plot instead, one sub-column per series, which `ax.value_column("Mean (%)")` titles, as in a table beside a forest plot.
 
 ```python
 import numpy as np
