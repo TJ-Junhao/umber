@@ -559,13 +559,10 @@ fn bubbles_widen_the_limits_and_the_scales_stay_equal() {
         axes.equal_aspect().unwrap();
         let (resolved, layout) = plan_figure(&f, (0, 0), lib());
         assert_equal_scales(&resolved, &layout);
-        let extent = |values: &[f64]| {
-            let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-            let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            min - 0.05 * (max - min)..max + 0.05 * (max - min)
-        };
+        let max = x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let min = x.iter().copied().fold(f64::INFINITY, f64::min);
         let (lo, hi) = resolved.x.continuous_scale().domain();
-        assert!(lo < extent(&x).start && hi > extent(&x).end, "{lo} {hi}");
+        assert!(lo < min && hi > max, "{lo} {hi}");
         // Two renders of the same figure are the same.
         assert_eq!(
             f.to_svg(crate::SvgText::Editable).unwrap(),
@@ -884,7 +881,7 @@ fn tick_labels_that_grow_stay_in_their_bounds() {
     let left = |axes: &mut crate::AxesMut<'_>| {
         axes.bubbles(
             &[0.0, 20.0],
-            &[1.0, 6.0],
+            &[0.0, 9.0],
             &[1.0, 1.0],
             BubbleOptions::default(),
         )
@@ -940,6 +937,211 @@ fn signed_tick_labels_stay_out_of_the_padding() {
         assert!(label.x >= crate::layout::PADDING - 1e-9, "{}", label.x);
     }
     assert_eq!(planned[1].1.plot, plain[1].1.plot);
+}
+
+/// Asserts that the figure `build` makes fails with the same message with and without equal
+/// aspect on its left panel.
+#[track_caller]
+fn fails_either_way(build: impl Fn(bool) -> Figure) {
+    let plain = build(false).to_scene(lib()).unwrap_err();
+    let equal = build(true).to_scene(lib()).unwrap_err();
+    assert_eq!(equal.to_string(), plain.to_string());
+}
+
+#[test]
+fn hexbins_that_cannot_be_counted_fail_beside_equal_aspect() {
+    // Silently leaving these out would lose data.
+    let right = |axes: &mut crate::AxesMut<'_>| {
+        let options = crate::HexbinOptions::default;
+        axes.hexbin(&[0.0, 1.0, 1.0], &[0.0, 0.5, 1.0], options())
+            .unwrap();
+        axes.hexbin(&[0.0, 1.0e20], &[0.0, 1.0], options()).unwrap();
+    };
+    let build = |equal| left_and_right((12.0, 4.0), equal, plain_line, right);
+    fails_either_way(build);
+    let error = build(true).to_scene(lib()).unwrap_err();
+    assert!(matches!(error, Error::Data { .. }), "{error}");
+    assert!(error.to_string().contains("too far apart"), "{error}");
+}
+
+#[test]
+fn what_fails_on_another_panel_fails_with_equal_aspect() {
+    // Bubbles too large for the panel beside the one with the setting.
+    let bubbles = |axes: &mut crate::AxesMut<'_>| {
+        axes.bubbles(
+            &[0.0, 1.0],
+            &[0.0, 1.0],
+            &[1.0, 1.0],
+            BubbleOptions::default(),
+        )
+        .unwrap();
+    };
+    fails_either_way(|equal| left_and_right((12.0, 0.9), equal, plain_line, bubbles));
+    // A direct label too wide for its panel.
+    let direct = |axes: &mut crate::AxesMut<'_>| {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: "W".repeat(40),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+        axes.legend(LegendStyle::Direct, crate::SizeSpec::Auto)
+            .unwrap();
+    };
+    fails_either_way(|equal| left_and_right((12.0, 3.0), equal, plain_line, direct));
+    // A value label on a fixed side that leaves a plot with explicit limits.
+    let labels = |axes: &mut crate::AxesMut<'_>| {
+        axes.scatter(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            ScatterOptions {
+                labels: PointLabels {
+                    annotate: true,
+                    place: Place::Above,
+                    ..PointLabels::default()
+                },
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap();
+        axes.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
+    };
+    fails_either_way(|equal| left_and_right((12.0, 3.0), equal, plain_line, labels));
+}
+
+#[test]
+fn hexbins_only_the_setting_can_count_are_not_refused_on_the_way() {
+    // Without the setting the window is too narrow for whole cells on the automatic axis; with
+    // it, the automatic axis takes what the cells need.
+    let (x, y): (Vec<f64>, Vec<f64>) = (0..600)
+        .map(|i| {
+            let i = f64::from(i);
+            (
+                (i * 0.618_033_988_7).fract() * 10.0,
+                (i * 0.414_213_562_3).fract() * 4.0,
+            )
+        })
+        .unzip();
+    let left = |axes: &mut crate::AxesMut<'_>| {
+        axes.hexbin(
+            &x,
+            &y,
+            crate::HexbinOptions {
+                gridsize: 12,
+                ..crate::HexbinOptions::default()
+            },
+        )
+        .unwrap();
+        axes.xlim(-1.0, 11.0).unwrap();
+    };
+    let planned =
+        try_plan_panels(&left_and_right((12.0, 3.0), true, left, plain_line), lib()).unwrap();
+    assert_equal_scales(&planned[0].0, &planned[0].1);
+}
+
+/// The left and right end of every text of `f` that reaches past its canvas.
+fn past_the_canvas(f: &Figure) -> Vec<(f32, f32)> {
+    let scene = f.to_scene(lib()).unwrap();
+    texts(&scene.items)
+        .into_iter()
+        .map(|text| (text.origin.x, text.origin.x + text.width))
+        .filter(|&(left, right)| left < 0.0 || right > scene.width)
+        .collect()
+}
+
+/// A line on both limits 0..1 in a short figure, with the labels `x` at the x limits and long y
+/// tick labels, equal aspect where `equal` says.
+fn long_ticks(x: [String; 2], equal: bool) -> Figure {
+    let mut f = Figure::new(6.0, 1.2, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(LINEAR, LINEAR).unwrap();
+    plain_line(&mut axes);
+    let [low, high] = x;
+    axes.xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec![low, high])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec!["Y".repeat(40), "top".into()])
+        .unwrap();
+    if equal {
+        axes.equal_aspect().unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_plot_narrower_than_its_labels_room_keeps_them_on_the_canvas() {
+    let labels = || ["W".repeat(50), "end".to_owned()];
+    assert_eq!(past_the_canvas(&long_ticks(labels(), false)), []);
+    let f = long_ticks(labels(), true);
+    assert_eq!(past_the_canvas(&f), []);
+    let (resolved, layout) = plan_figure(&f, (0, 0), lib());
+    assert_equal_scales(&resolved, &layout);
+    let widest = layout.x_tick_labels.first().unwrap();
+    assert!(widest.x >= crate::layout::X_LABEL_EDGE_GAP - 1e-9);
+    assert!(widest.x + widest.width() <= 432.0 - crate::layout::X_LABEL_EDGE_GAP + 1e-9);
+}
+
+#[test]
+fn tick_labels_that_outgrow_the_room_are_refused() {
+    // Whole cells give limits with decimals, whose wider labels leave no plot in a room chosen
+    // for the labels of the figure without the setting.
+    let left = |axes: &mut crate::AxesMut<'_>| {
+        axes.hexbin(
+            &[0.0, 1.0, 1.0 / 3.0],
+            &[0.0, 1.0, 0.5],
+            crate::HexbinOptions {
+                gridsize: 3,
+                ..crate::HexbinOptions::default()
+            },
+        )
+        .unwrap();
+        axes.ytick_format(crate::TickFormat::AUTO.affix("WWWWWW", "").unwrap())
+            .unwrap();
+    };
+    assert!(
+        left_and_right((3.0, 4.0), false, left, plain_line)
+            .to_scene(lib())
+            .is_ok()
+    );
+    let error = left_and_right((3.0, 4.0), true, left, plain_line)
+        .to_scene(lib())
+        .unwrap_err();
+    assert!(matches!(error, Error::Style { .. }), "{error}");
+    let message = error.to_string();
+    assert!(message.contains("row 0, col 0: y tick label"), "{message}");
+    assert!(
+        message.contains("leaves room for the plot area"),
+        "{message}"
+    );
+}
+
+#[test]
+fn padding_counts_towards_the_reach_of_bubbles() {
+    // The room is 37 pt high and the two bubbles reach 36.8 pt together: limits that hold them
+    // exist, and the padded limits are such limits.
+    let mut f = Figure::new(6.0, 1.16, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(LINEAR, LINEAR).unwrap();
+    axes.bubbles(
+        &[0.0, 1.0],
+        &[0.0, 1.0],
+        &[1.0, 1.0],
+        BubbleOptions::default(),
+    )
+    .unwrap();
+    axes.equal_aspect().unwrap();
+    let (resolved, layout) = plan_figure(&f, (0, 0), lib());
+    assert_equal_scales(&resolved, &layout);
+    let (lo, hi) = resolved.y.continuous_scale().domain();
+    let scale = layout.plot.height / (hi - lo);
+    assert!(
+        lo * scale <= -18.0 && (hi - 1.0) * scale >= 18.0,
+        "{lo} {hi}"
+    );
 }
 
 #[test]

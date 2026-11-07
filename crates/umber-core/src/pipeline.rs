@@ -368,10 +368,17 @@ pub(crate) enum Rooms<'a> {
     /// A figure without equal aspect: each solve of the grid gives the plots.
     Solved,
     /// The figure that a figure with equal aspect is without the setting, laid out only for its
-    /// rooms, which land in this cell after each plan: each solve of the grid gives the plots,
-    /// and nothing is refused that depends on where things are placed, since it is the final
-    /// figure that has to hold them.
-    Reference(&'a std::cell::RefCell<Option<Reference>>),
+    /// rooms: each solve of the grid gives the plots, and nothing is refused that depends on
+    /// where things are placed, since it is the final figure that has to hold them. The reference
+    /// lands in `settled` once the layout is complete. `equal` says which panels have the setting
+    /// in that final figure: they count their hexbins themselves there, so their cells are no
+    /// reason to stop here.
+    Reference {
+        /// Where the reference lands.
+        settled: &'a std::cell::RefCell<Option<Reference>>,
+        /// Whether each panel has equal aspect in the final figure.
+        equal: &'a [bool],
+    },
     /// A figure with equal aspect: the grid keeps the solve of this reference, and the plots
     /// with equal aspect shrink inside its rooms, so that no change of their limits or tick
     /// labels reaches the other panels.
@@ -831,7 +838,7 @@ fn plan(
         };
     let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
         let mut solution = match rooms {
-            Rooms::Solved | Rooms::Reference(_) => solve_rooms(resolved, bands)?,
+            Rooms::Solved | Rooms::Reference { .. } => solve_rooms(resolved, bands)?,
             Rooms::Given(reference) | Rooms::Provisional(reference) => reference.solution.clone(),
         };
         // Every solve ends here, so whatever reads a plot below reads the final rectangle.
@@ -884,6 +891,18 @@ fn plan(
         scales: &scales,
     };
     let mut fits = BubbleFits::new(&marks, &ends, &limits, groups, fills);
+    // How the extents of the panels with equal aspect, whose axes are their own, are finished.
+    let extent_paddings: Vec<_> = (0..panels.len())
+        .map(|i| {
+            equal_aspect[i].then(|| {
+                Side::BOTH.map(|side| {
+                    let member = (limits[i].orientation(), marks[i]);
+                    let role = AxisRole::of_group(side.axis(), std::iter::once(member));
+                    resolve::extent_padding(marks[i].iter(), side.axis(), role)
+                })
+            })
+        })
+        .collect();
     let show_labels: Vec<_> = panels
         .iter()
         .map(|panel| match panel.axes {
@@ -1174,13 +1193,20 @@ fn plan(
         let joint: Vec<_> = solution
             .panels
             .iter()
-            .zip(&equal_aspect)
-            .map(|(slot, &equal)| equal.then(|| slot.plot_room.size()))
+            .zip(&extent_paddings)
+            .map(|(slot, padding)| {
+                padding.map(|padding| crate::bubble_fit::JointRoom {
+                    room: slot.plot_room.size(),
+                    padding,
+                })
+            })
             .collect();
         let refitted = fits.update(&resolved, &plots, &joint);
         // A reference has data limits where bubbles do not fit: the final figure reports them.
-        if let (false, Some(failure)) = (matches!(rooms, Rooms::Reference(_)), fits.failure(&marks))
-        {
+        if let (false, Some(failure)) = (
+            matches!(rooms, Rooms::Reference { .. }),
+            fits.failure(&marks),
+        ) {
             return Err(Unplanned::Bubbles(failure));
         }
         if refitted {
@@ -1515,12 +1541,6 @@ fn plan(
     if rooms.is_final() {
         layout::check_panel_contents(&grid, &layouts, &solution.panels)?;
     }
-    if let Rooms::Reference(reference) = rooms {
-        reference.replace(Some(Reference {
-            solution: solution.clone(),
-            hexbins: panels.iter().map(hexbin_counts).collect(),
-        }));
-    }
     Ok(FigurePlan {
         header,
         panels: resolved.into_iter().zip(layouts).collect(),
@@ -1571,7 +1591,15 @@ fn plan_panels(
     rooms: Rooms<'_>,
 ) -> Result<FigurePlan> {
     match lay_out(figure, panels, groups, lib, context, labels, rooms) {
-        Ok(planned) => Ok(planned),
+        Ok(planned) => {
+            if let Rooms::Reference { settled, .. } = rooms {
+                settled.replace(Some(Reference {
+                    solution: planned.solution.clone(),
+                    hexbins: panels.iter().map(hexbin_counts).collect(),
+                }));
+            }
+            Ok(planned)
+        }
         Err(Unplanned::Failed(error)) => Err(error),
         Err(Unplanned::Bubbles(failure)) => Err(in_cell(
             figure,
@@ -1612,15 +1640,22 @@ fn hexbin_counts(panel: &Panel<'_>) -> Vec<crate::bin2d::HexBins> {
 /// `None` for a figure without the setting, which solves the grid itself.
 ///
 /// The reference is that figure laid out to the end, with its own hexbin counts and the sides
-/// of its own value labels, so its rooms hold nothing that the setting changed. Only the rooms
-/// matter here, so an error of drawing, of hexbin cells that do not settle or of the labels of a
-/// later pass keeps the rooms of the last plan. Since the bubbles of a reference never fail
-/// ([`Rooms::Reference`]), an error before any plan is one that the figure has with or without
-/// the setting.
+/// of its own value labels, so its rooms hold nothing that the setting changed.
+///
+/// A layout that fails is an error of `figure` too, so it is raised here, on whichever pass of
+/// the labels it comes. The panels with the setting are the one exception: their hexbins are
+/// counted again in `figure`, so cells that cannot be counted or do not settle there are left
+/// as they are ([`Rooms::Reference`]), and `figure` decides about them.
+///
+/// Nothing but a completed layout counts as a reference, so every hexbin of a panel without the
+/// setting in it is counted and settled. After the layout, only drawing can fail, or labels that
+/// do not settle. The reference is then that of the last completed layout: the rooms hold, and
+/// `figure` draws all its panels itself, so the same error comes from it for the panels the
+/// setting leaves alone, and a panel with the setting is judged on its own plot.
 ///
 /// # Errors
 ///
-/// As [`plan_panels`], when no plan was made.
+/// As [`plan_panels`], for a layout that fails.
 fn reference_rooms(
     figure: &Figure,
     groups: &ShareGroups,
@@ -1632,21 +1667,35 @@ fn reference_rooms(
         return Ok(None);
     }
     let plain = figure.without_equal_aspect();
-    let reference = std::cell::RefCell::new(None);
+    let equal: Vec<_> = figure
+        .layers()
+        .map(|layer| layer.cartesian().is_some_and(Axes::has_equal_aspect))
+        .collect();
+    let mut complete = None;
+    let mut no_layout = false;
     let outcome = point_labels::fit_then_place(|held| {
-        let mut panels = panels(&plain, groups, fonts)?;
+        let settled = std::cell::RefCell::new(None);
+        let mut records = panels(&plain, groups, fonts).inspect_err(|_| no_layout = true)?;
         if let Some(held) = held {
-            for (panel, sides) in panels.iter_mut().zip(held) {
+            for (panel, sides) in records.iter_mut().zip(held) {
                 panel.points.hold(sides.clone());
             }
         }
-        let rooms = Rooms::Reference(&reference);
-        draw_scene(&plain, &mut panels, groups, fonts, context, labels, rooms)
+        let rooms = Rooms::Reference {
+            settled: &settled,
+            equal: &equal,
+        };
+        let drawn = draw_scene(&plain, &mut records, groups, fonts, context, labels, rooms);
+        match settled.into_inner() {
+            Some(reference) => complete = Some(reference),
+            None => no_layout = true,
+        }
+        drawn
     });
-    match (reference.into_inner(), outcome) {
-        (Some(reference), _) => Ok(Some(reference)),
-        (None, Err(error)) => Err(error),
-        (None, Ok(_)) => Ok(None),
+    match outcome {
+        Err(error) if no_layout => Err(error),
+        // Drawing errors are for the figure itself to raise.
+        Ok(_) | Err(_) => Ok(complete),
     }
 }
 
@@ -1788,6 +1837,12 @@ fn bubbles_error(
     last.needs_figure(context, size, own)
 }
 
+/// Whether the hexbins of the panel at `index` are counted by the final figure, whatever they do
+/// on the way to `rooms`: on a reference, those of a panel that has equal aspect there.
+fn counted_later(rooms: Rooms<'_>, index: usize) -> bool {
+    matches!(rooms, Rooms::Reference { equal, .. } if equal[index])
+}
+
 /// [`plan_panels`] without naming a figure size for bubbles that no automatic limits hold.
 fn lay_out(
     figure: &Figure,
@@ -1824,7 +1879,7 @@ fn lay_out(
             resolve_colors(figure, panels, groups);
             Rooms::Provisional(reference)
         }
-        Rooms::Solved | Rooms::Reference(_) | Rooms::Provisional(_) => rooms,
+        Rooms::Solved | Rooms::Reference { .. } | Rooms::Provisional(_) => rooms,
     };
     let mut planned = plan(figure, panels, groups, lib, context, labels, passing)?;
     let axis_scales = |planned: &FigurePlan| {
@@ -1849,6 +1904,7 @@ fn lay_out(
         .collect();
     let mut seen_states = Vec::new();
     let mut tight = true;
+    let mut moving: Vec<bool> = Vec::new();
     for pass in 0..64 {
         let aspects: Vec<_> = planned
             .panels
@@ -1898,35 +1954,37 @@ fn lay_out(
                     aspect_change < -1e-12
                 };
             let axes = panel.axes;
-            for mark in &mut panel.marks {
-                if let ResolvedMark::Hexbin { mark, bins, .. } = mark {
-                    if pass == 0 || recount {
-                        let counted = if independent {
-                            crate::bin2d::HexBins::new(
-                                &mark.x,
-                                &mark.y,
-                                mark.gridsize,
-                                mark.transforms,
-                                aspects[i],
-                            )
-                        } else {
-                            let [x, y] = counting_scales[i].map(|scale| {
-                                let (lo, hi) = scale.domain();
-                                hi - lo
-                            });
-                            crate::bin2d::HexBins::on_axes(
-                                &mark.x,
-                                &mark.y,
-                                mark.gridsize,
-                                counting_scales[i],
-                                // The shape of the limits, which a provisional plot may not
-                                // have, and no room for end caps: both keep the metric equal.
-                                if equal { x / y } else { aspects[i] },
-                                if equal { [None, None] } else { limits },
-                            )
-                        };
-                        *bins = counted.map_err(|_| {
-                            in_cell(
+            let mut count = || -> std::result::Result<(), Unplanned> {
+                for mark in &mut panel.marks {
+                    if let ResolvedMark::Hexbin { mark, bins, .. } = mark {
+                        if pass == 0 || recount {
+                            let counted = if independent {
+                                crate::bin2d::HexBins::new(
+                                    &mark.x,
+                                    &mark.y,
+                                    mark.gridsize,
+                                    mark.transforms,
+                                    aspects[i],
+                                )
+                            } else {
+                                let [x, y] = counting_scales[i].map(|scale| {
+                                    let (lo, hi) = scale.domain();
+                                    hi - lo
+                                });
+                                crate::bin2d::HexBins::on_axes(
+                                    &mark.x,
+                                    &mark.y,
+                                    mark.gridsize,
+                                    counting_scales[i],
+                                    // The shape of the limits, which a provisional plot may not
+                                    // have, and no room for end caps: both keep the metric equal.
+                                    if equal { x / y } else { aspects[i] },
+                                    if equal { [None, None] } else { limits },
+                                )
+                            };
+                            *bins =
+                                counted.map_err(|_| {
+                                    in_cell(
                                 figure,
                                 axes,
                                 crate::Error::data(
@@ -1936,31 +1994,37 @@ fn lay_out(
                                 )
                                 .with_hint("draw them on separate axes, or set explicit limits."),
                             )
-                        })?;
-                    }
-                    if equal {
-                        bins.fit_equal_aspect(scales[i], limits);
-                    } else if independent && only_hexbin && tight {
-                        bins.fit(aspects[i]);
-                    } else {
-                        bins.fit_on_axes(aspects[i], scales[i], limits, context)
-                            .map_err(Unplanned::Failed)?;
-                    }
-                    for j in 0..2 {
-                        if let [lo, hi] = bins.domain(j) {
-                            crate::ContinuousScale::new(mark.transforms[j], *lo, *hi, context)
-                                .map_err(|_| {
-                                    crate::Error::data(
-                                        context,
-                                        "the whole hexagons exceed the supported axis range; \
-                                         their bounds must fit a numeric axis.",
-                                    )
-                                    .with_parameter(if j == 0 { "x" } else { "y" })
-                                    .with_hint("rescale the coordinates, or use hist2d().")
                                 })?;
+                        }
+                        if equal {
+                            bins.fit_equal_aspect(scales[i], limits);
+                        } else if independent && only_hexbin && tight {
+                            bins.fit(aspects[i]);
+                        } else {
+                            bins.fit_on_axes(aspects[i], scales[i], limits, context)
+                                .map_err(Unplanned::Failed)?;
+                        }
+                        for j in 0..2 {
+                            if let [lo, hi] = bins.domain(j) {
+                                crate::ContinuousScale::new(mark.transforms[j], *lo, *hi, context)
+                                    .map_err(|_| {
+                                        crate::Error::data(
+                                            context,
+                                            "the whole hexagons exceed the supported axis range; \
+                                         their bounds must fit a numeric axis.",
+                                        )
+                                        .with_parameter(if j == 0 { "x" } else { "y" })
+                                        .with_hint("rescale the coordinates, or use hist2d().")
+                                    })?;
+                            }
                         }
                     }
                 }
+                Ok(())
+            };
+            match count() {
+                Err(_) if counted_later(passing, i) => {}
+                outcome => outcome?,
             }
             if pass == 0 || recount {
                 counting_aspects[i] = aspects[i];
@@ -1968,29 +2032,37 @@ fn lay_out(
         }
         resolve_colors(figure, panels, groups);
         planned = plan(figure, panels, groups, lib, context, labels, passing)?;
-        if planned
+        moving = planned
             .panels
             .iter()
             .zip(&aspects)
             .zip(&scales)
-            .all(|(((r, layout), aspect), old)| {
-                ((layout.plot.width / layout.plot.height) / aspect - 1.0).abs() < 1e-12
+            .map(|(((r, layout), aspect), old)| {
+                !(((layout.plot.width / layout.plot.height) / aspect - 1.0).abs() < 1e-12
                     && [&r.x, &r.y].iter().zip(old).all(|(new, old)| {
                         let Some(new) = new.continuous() else {
                             return true;
                         };
                         let (lo, hi) = new.domain();
                         old.normalize(lo).abs() < 1e-10 && (old.normalize(hi) - 1.0).abs() < 1e-10
-                    })
+                    }))
             })
-        {
+            .collect();
+        if !moving.contains(&true) {
             #[cfg(test)]
             SETTLED_PASS.with(|settled| settled.set(pass));
             return match passing {
                 Rooms::Provisional(_) => plan(figure, panels, groups, lib, context, labels, rooms),
-                Rooms::Solved | Rooms::Reference(_) | Rooms::Given(_) => Ok(planned),
+                Rooms::Solved | Rooms::Reference { .. } | Rooms::Given(_) => Ok(planned),
             };
         }
+    }
+    let settled_enough = moving
+        .iter()
+        .enumerate()
+        .all(|(i, moves)| !moves || counted_later(passing, i));
+    if settled_enough {
+        return Ok(planned);
     }
     Err(crate::Error::data(
         context,

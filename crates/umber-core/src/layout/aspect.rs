@@ -51,10 +51,51 @@ fn centred(room: &Area, scales: [&ContinuousScale; 2]) -> Area {
     }
 }
 
-/// The part of the room of `slot` that keeps the tick labels of `bands` within their bounds:
-/// the y tick label column right of the outer padding, or of the frame next to another panel,
-/// and the x tick labels within the frame, up to [`X_LABEL_EDGE_GAP`] from the canvas. `outer`
-/// says whether the left and right sides of the frame are edges of the canvas.
+/// Where the tick labels of a panel must stay: the left end of the y tick label column, and
+/// the left and right ends of the x tick labels. The column stays right of the outer padding, or
+/// of the frame next to another panel, and the x tick labels within the frame, up to
+/// [`X_LABEL_EDGE_GAP`] from the canvas.
+#[derive(Debug, Clone, Copy)]
+struct LabelBounds {
+    /// The leftmost x of the y tick label column.
+    column: f64,
+    /// The leftmost x of an x tick label.
+    lo: f64,
+    /// The rightmost x of an x tick label.
+    hi: f64,
+}
+
+impl LabelBounds {
+    /// The bounds in the frame of `slot`, `outer` saying whether its left and right sides are
+    /// edges of the canvas.
+    fn of(slot: &PanelSlot, outer: [bool; 2]) -> LabelBounds {
+        let frame = slot.frame;
+        LabelBounds {
+            column: frame.x + if outer[0] { PADDING } else { 0.0 },
+            lo: frame.x + if outer[0] { X_LABEL_EDGE_GAP } else { 0.0 },
+            hi: frame.right() - if outer[1] { X_LABEL_EDGE_GAP } else { 0.0 },
+        }
+    }
+
+    /// The left edges at which a plot `width` wide keeps the labels of `bands` in bounds and
+    /// itself in `room`, as the least and the most; the first is above the second when there
+    /// are none.
+    fn left_edges(self, bands: &PanelBands, room: &Area, width: f64) -> (f64, f64) {
+        let start = (
+            room.x.max(self.column + bands.y_tick_column),
+            room.right() - width,
+        );
+        bands.x_spans.iter().fold(start, |(least, most), span| {
+            (
+                least.max(self.lo + span.half - span.pos * width),
+                most.min(self.hi - span.half - span.pos * width),
+            )
+        })
+    }
+}
+
+/// The part of the room of `slot` that a plot may take with the tick labels of `bands` within
+/// `bounds`: the widest plot that keeps them there.
 ///
 /// # Errors
 ///
@@ -63,25 +104,24 @@ fn centred(room: &Area, scales: [&ContinuousScale; 2]) -> Area {
 fn label_room(
     slot: &PanelSlot,
     bands: &PanelBands,
-    outer: [bool; 2],
+    bounds: LabelBounds,
     context: &'static str,
 ) -> Result<Area> {
     let room = slot.room;
     let frame = slot.frame;
-    let inner = frame.x + if outer[0] { PADDING } else { 0.0 };
-    let left = room.x.max(inner + bands.y_tick_column);
+    let left = room.x.max(bounds.column + bands.y_tick_column);
     let cap = end_label_cap(frame.width);
     let fit = Room {
         left,
         right: room.right(),
         left_max: left.max(frame.x + PADDING + cap),
         right_min: room.right().min(frame.right() - PADDING - cap),
-        lo: frame.x + if outer[0] { X_LABEL_EDGE_GAP } else { 0.0 },
-        hi: frame.right() - if outer[1] { X_LABEL_EDGE_GAP } else { 0.0 },
+        lo: bounds.lo,
+        hi: bounds.hi,
         min_width: MIN_PLOT,
     };
     if matches!(fit_x_labels(&fit, &[]), XInset::Overflowing) {
-        let y_room = room.right() - MIN_PLOT - inner - Y_LABEL_GAP;
+        let y_room = room.right() - MIN_PLOT - bounds.column - Y_LABEL_GAP;
         return Err(widest(&bands.y_labels).map_or_else(
             || x_labels_overflow(context, &bands.x_labels, &fit, &bands.x_spans, 0.0),
             |label| y_labels_leave_no_room(context, label, y_room),
@@ -103,18 +143,21 @@ fn label_room(
     }
 }
 
-/// Whether the tick labels of `bands` stay within the bounds of [`label_room`] on `plot`.
-fn labels_fit(plot: &Area, slot: &PanelSlot, bands: &PanelBands, outer: [bool; 2]) -> bool {
-    let frame = slot.frame;
-    let inner = frame.x + if outer[0] { PADDING } else { 0.0 };
-    let lo = frame.x + if outer[0] { X_LABEL_EDGE_GAP } else { 0.0 };
-    let hi = frame.right() - if outer[1] { X_LABEL_EDGE_GAP } else { 0.0 };
-    plot.x - bands.y_tick_column >= inner - CONTAINMENT_TOLERANCE
-        && bands.x_spans.iter().all(|span| {
-            let centre = plot.x + span.pos * plot.width;
-            centre - span.half >= lo - CONTAINMENT_TOLERANCE
-                && centre + span.half <= hi + CONTAINMENT_TOLERANCE
-        })
+/// `plot` moved along x to the nearest place in `room` that keeps the tick labels of `bands`
+/// within `bounds` at its own width, which a plot narrower than `room` can need: its ends are not
+/// where the ends of the widest plot are.
+///
+/// `room` holds a plot as wide as it is ([`label_room`]), so such a place exists. A narrower plot
+/// only relaxes what its right end and its labels ask of the left edge, except where a label
+/// near the right end pushes the edge right as the plot narrows, against a label near the left
+/// end pushing it left; two labels can only meet that way if their half widths add up to more
+/// than the bounds, and each label alone fits the bounds.
+fn moved_for_labels(plot: Area, room: &Area, bands: &PanelBands, bounds: LabelBounds) -> Area {
+    let (least, most) = bounds.left_edges(bands, room, plot.width);
+    Area {
+        x: plot.x.max(least).min(most.max(least)),
+        ..plot
+    }
 }
 
 /// Shrinks the plot of `slot`, whose room the layout chose, along one side until the x and y
@@ -122,10 +165,12 @@ fn labels_fit(plot: &Area, slot: &PanelSlot, bands: &PanelBands, outer: [bool; 2
 /// other side keeps the size it had, to the bit.
 ///
 /// The room was chosen for the tick labels of the same figure without the setting. Other limits
-/// and a smaller plot give other labels, so the final ones are held to the same bounds here. A
-/// plot whose labels reach past them is laid out in the part of the room that keeps them inside,
-/// on this panel's side of the bounds, so no other panel moves; labels no such plot can hold
-/// are refused ([`label_room`]).
+/// and a smaller plot give other labels, and a plot narrower than its room has its ends elsewhere,
+/// so the final labels are held to the same bounds here, on the rectangle that is drawn. When
+/// they reach past them the plot takes the part of the room that keeps them inside
+/// ([`label_room`]) at the width of its scales, in the nearest place that does
+/// ([`moved_for_labels`]). All of this stays inside the room, so no other panel moves. Labels
+/// that not even the widest plot in the room holds are refused.
 ///
 /// What is placed from the slot follows the plot. The header moves down by what the plot left
 /// above it and its box moves in by what the plot left at each side
@@ -164,10 +209,17 @@ pub(crate) fn fit_equal_aspect(
     context: &'static str,
 ) -> Result<()> {
     let room = slot.room;
+    let bounds = LabelBounds::of(slot, outer);
     let mut plot = centred(&room, scales);
-    if !labels_fit(&plot, slot, bands, outer) {
-        slot.plot_room = label_room(slot, bands, outer, context)?;
-        plot = centred(&slot.plot_room, scales);
+    let (least, most) = bounds.left_edges(bands, &room, plot.width);
+    if plot.x < least - CONTAINMENT_TOLERANCE || plot.x > most + CONTAINMENT_TOLERANCE {
+        slot.plot_room = label_room(slot, bands, bounds, context)?;
+        plot = moved_for_labels(
+            centred(&slot.plot_room, scales),
+            &slot.plot_room,
+            bands,
+            bounds,
+        );
     }
     let drop = plot.y - room.y;
     slot.plot = plot;

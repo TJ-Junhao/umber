@@ -160,7 +160,7 @@ def test_in_plot_positions_are_fractions_of_the_smaller_plot() -> None:
 def test_tick_labels_that_grow_keep_the_padding() -> None:
     def build(equal: bool) -> ub.Figure:
         fig = ub.Figure(12, 4, cols=2, legend=ub.Legend.PER_PANEL)
-        left = fig.add_axes(col=0).bubbles([0, 20], [1, 6], [1, 1])
+        left = fig.add_axes(col=0).bubbles([0, 20], [0, 9], [1, 1])
         if equal:
             left.equal_aspect()
         fig.add_axes(col=1).line([0, 1], [0, 1]).text("End", at=ub.InPlot(1, 0.5))
@@ -234,3 +234,34 @@ def test_a_tall_legend_is_not_told_to_make_the_figure_taller() -> None:
         assert hint is not None
         assert "wider" in str(hint[1])
         assert "taller" not in str(hint[1])
+
+
+def test_hexbins_that_cannot_be_counted_fail_beside_equal_aspect() -> None:
+    def build(equal: bool) -> ub.Figure:
+        fig = ub.Figure(12, 4, cols=2, legend=ub.Legend.PER_PANEL)
+        left = fig.add_axes(col=0).line([0, 1], [0, 1])
+        if equal:
+            left.equal_aspect()
+        fig.add_axes(col=1).hexbin([0, 1, 1], [0, 0.5, 1]).hexbin([0, 1e20], [0, 1])
+        return fig
+
+    for equal in [False, True]:
+        with pytest.raises(ub.DataError, match="too far apart"):
+            build(equal).to_svg()
+
+
+def test_long_tick_labels_stay_on_the_canvas() -> None:
+    long = "W" * 50
+    ax = ub.Figure(6, 1.2).add_axes().line([0, 1], [0, 1]).xlim(0, 1).ylim(0, 1)
+    ax.xticks_labeled([0, 1], [long, "end"]).yticks_labeled([0, 1], ["Y" * 40, "top"])
+    ax.equal_aspect()
+    root = ET.fromstring(ax.figure.to_svg(text=ub.SvgText.EDITABLE))
+    node = next(n for n in root.iter(NS + "text") if n.text == long)
+    centre = float(node.attrib["x"])
+    assert node.attrib.get("text-anchor", "start") == "start"
+    assert centre >= 6
+
+
+def test_padding_counts_towards_the_reach_of_bubbles() -> None:
+    ax = ub.Figure(6, 1.16).add_axes().bubbles([0, 1], [0, 1], [1, 1]).equal_aspect()
+    assert ax.figure.to_svg()
