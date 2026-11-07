@@ -25,6 +25,8 @@ ENUMS = [
     ub.Hist,
     ub.Stat,
     ub.Contour,
+    ub.Pivot,
+    ub.Direction,
     ub.Place,
 ]
 

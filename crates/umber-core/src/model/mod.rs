@@ -21,6 +21,7 @@ mod contour;
 mod ecdf;
 mod error_bars;
 mod events;
+mod field;
 mod figure;
 mod grid;
 mod heatmap;
@@ -67,6 +68,12 @@ pub use contour::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_
 pub use ecdf::{EcdfMark, EcdfOptions};
 pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
 pub use events::{EventsMark, EventsOptions};
+pub(crate) use field::MAX_ARROW_LENGTH;
+pub(crate) use field::Sample;
+pub use field::{
+    ArrowKey, ArrowLength, BarbOptions, BarbsMark, Direction, FieldForm, FieldVectors, Pivot,
+    QuiverMark, QuiverOptions, VectorField,
+};
 pub use figure::Figure;
 pub use grid::{Cell, CellRange, Grid, GridIndex, LegendMode, MAX_GRID, Placement, Share};
 pub use heatmap::{HeatmapMark, HeatmapOptions};

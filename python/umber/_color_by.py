@@ -1,35 +1,44 @@
 """``ColorBy``: one value per point, mapped through a colormap to the point's color."""
 
+from collections.abc import Sized
 from operator import attrgetter
 from typing import Final, Never, Self, cast, final
+
+import numpy as np
 
 from umber import _cmap, _color, _scale, _umber
 from umber._args import instance, real, type_name
 from umber._cmap import CMAP_HINT, Cmap
 from umber._color import Color
 from umber._enums import AUTO, Auto
-from umber._errors import new_error
+from umber._errors import DataError, new_error
 from umber._report import api_call
 from umber._scale import Scale
 from umber._types import Values
-from umber._values import check_floats_type, floats
+from umber._values import FloatArray, check_floats_type, dimensions, floats, matrix
 
 _SCALE_HINT: Final = "use Scale.linear() or Scale.log()."
 _CENTER_HINT: Final = "pass a number such as 0, or AUTO for a sequential mapping."
 _POINT_COLOR_HINT: Final = (
     'use Color.hex("#3366B8"), Color.rgb(), a named color such as Color.BLUE, or ColorBy(values).'
 )
+_ROWS_HINT: Final = "pass one row of values per y coordinate, all of the same length."
+_FIELD_SHAPE_HINT: Final = "pass one color value per vector, shaped as u."
+_POINT_SHAPE_HINT: Final = (
+    "pass one value per point; two-dimensional values are for the grid form of quiver() and "
+    "barbs()."
+)
 
 
 @final
 class ColorBy:
-    """Values mapped through a colormap: pass it as the ``color`` of a scatter or bubbles.
+    """Values mapped through a colormap: pass it as the ``color`` of a mark of points.
 
-    Each point takes the color its value maps to; a NaN value leaves its point undrawn, and its
-    position still counts in the axis limits. All color-mapped marks of an axes share one
-    color scale: the same ``cmap``, ``scale`` and ``center``, and one color range, from the
-    smallest to the largest finite value unless ``Axes.clim()`` sets it. Values outside the
-    range take the colormap's end colors.
+    Scatters, bubbles, arrows and wind barbs take it. Each point takes the color its value maps
+    to; a NaN value leaves its point undrawn, and its position still counts in the axis limits.
+    All color-mapped marks of an axes share one color scale: the same ``cmap``, ``scale`` and
+    ``center``, and one color range, from the smallest to the largest finite value unless
+    ``Axes.clim()`` sets it. Values outside the range take the colormap's end colors.
 
     Mapped fills are opaque and keep the colormap's colors. Points have an opaque 0.5 pt
     outline that contrasts with the background when the fill is close to it, fading to the
@@ -44,7 +53,9 @@ class ColorBy:
     colormap and the side with less extent does not reach its end color.
 
     Args:
-        values: One number per point: finite, or NaN to leave the point undrawn.
+        values: One number per point: finite, or NaN to leave the point undrawn. On the grid
+            form of ``quiver()`` and ``barbs()`` it has the shape of ``u``, so it is
+            two-dimensional, as an array or a list of rows.
         cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center`` is
             given and its sequential colormap otherwise.
         scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
@@ -64,8 +75,9 @@ class ColorBy:
         >>> ax = ax.scatter([1, 2, 3], [4.0, 2.0, 5.0], color=temperature)
     """
 
-    __slots__ = ("_native",)
+    __slots__ = ("_native", "_shape")
     _native: _umber.ColorBy
+    _shape: tuple[int, ...]
 
     def __init__(
         self,
@@ -79,9 +91,10 @@ class ColorBy:
             context = "ColorBy()"
             check_floats_type(context, "values", values)
             native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
-            data = floats(context, "values", values)
+            data, shape = _mapped_values(context, values)
             native = _umber.ColorBy(data, native_cmap, kind, base, middle)
             object.__setattr__(self, "_native", native)
+            object.__setattr__(self, "_shape", shape)
 
     def __copy__(self) -> Self:
         return self
@@ -107,6 +120,22 @@ class ColorBy:
 
 
 _NATIVE: Final = attrgetter("_native")
+_SHAPE: Final = attrgetter("_shape")
+
+
+def _mapped_values(context: str, values: object) -> tuple[FloatArray, tuple[int, ...]]:
+    """Return the values of a ``ColorBy`` row by row, with the shape they were given in."""
+    if dimensions(values) != 2:
+        data = floats(context, "values", values)
+        return data, data.shape
+    if hasattr(values, "__array__"):
+        rows, columns = np.asarray(values).shape
+    else:
+        given = cast(list[Sized], values)
+        rows, columns = len(given), len(given[0])
+    shape = (rows, columns)
+    lengths = f"({rows}, {columns})"
+    return matrix(context, "values", values, shape, lengths=lengths, hint=_ROWS_HINT), shape
 
 
 def native_color_scale(
@@ -174,6 +203,45 @@ def native_point_color(context: str, value: object) -> tuple[int, int, float] | 
         (0, 0, 1.0)
     """
     if isinstance(value, ColorBy):
+        shape = cast(tuple[int, ...], _SHAPE(value))
+        if len(shape) != 1:
+            message = f"color has {len(shape)} dimensions; values must be one-dimensional."
+            raise new_error(DataError, context, message, parameter="color", hint=_POINT_SHAPE_HINT)
+        return cast(_umber.ColorBy, _NATIVE(value))
+    if isinstance(value, Color):
+        return _color.native(value)
+    message = f"color is {type_name(value)}; color must be of type Color or ColorBy."
+    raise new_error(TypeError, context, message, parameter="color", hint=_POINT_COLOR_HINT)
+
+
+def native_field_color(
+    context: str, value: object, shape: tuple[int, ...]
+) -> tuple[int, int, float] | _umber.ColorBy:
+    """Check the ``color`` argument of a vector field and return its native form.
+
+    Args:
+        context: The API call, such as ``"Axes.quiver()"``.
+        value: The value passed.
+        shape: The shape of ``u``, which the values of a ``ColorBy`` must have.
+
+    Returns:
+        The native color argument of a ``Color``, or the native mapping of a ``ColorBy``.
+
+    Raises:
+        TypeError: If the value is neither a ``Color`` nor a ``ColorBy``.
+        DataError: If the values of a ``ColorBy`` do not have the shape of ``u``.
+
+    Example:
+        >>> import umber as ub
+        >>> from umber._color_by import native_field_color
+        >>> native_field_color("Axes.quiver()", ub.Color.AUTO, (2, 3))
+        (0, 0, 1.0)
+    """
+    if isinstance(value, ColorBy):
+        given = cast(tuple[int, ...], _SHAPE(value))
+        if given != shape:
+            message = f"color has shape {given} but u has shape {shape}; they must be the same."
+            raise new_error(DataError, context, message, parameter="color", hint=_FIELD_SHAPE_HINT)
         return cast(_umber.ColorBy, _NATIVE(value))
     if isinstance(value, Color):
         return _color.native(value)

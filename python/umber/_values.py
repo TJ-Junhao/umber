@@ -642,6 +642,36 @@ def axis_values(context: str, name: str, values: object) -> FloatArray | list[st
     return _floats(context, name, data, mixed=True)
 
 
+def dimensions(values: object) -> int:
+    """Return how many dimensions numeric data has, without converting or checking it.
+
+    An array or an object with ``__array__`` has its own number. A sequence whose first element
+    is itself a sequence or an array of numbers has one more than that element; any other value
+    counts as one-dimensional, and its conversion says what is wrong with it.
+
+    Args:
+        values: The data passed.
+
+    Returns:
+        The number of dimensions.
+
+    Example:
+        >>> import numpy as np
+        >>> from umber._values import dimensions
+        >>> dimensions([1.0, 2.0]), dimensions([[1.0], [2.0]]), dimensions(np.zeros((2, 3)))
+        (1, 2, 2)
+    """
+    if hasattr(values, "__array__"):
+        return np.asarray(values).ndim
+    if is_text_or_buffer(values) or not isinstance(values, Sequence):
+        return 1
+    rows = cast(Sequence[object], values)
+    first = rows[0] if len(rows) > 0 else None
+    if hasattr(first, "__array__"):
+        return 1 + np.asarray(first).ndim
+    return 1 if is_text_or_buffer(first) or not isinstance(first, Sequence) else 2
+
+
 def matrix(
     context: str,
     name: str,

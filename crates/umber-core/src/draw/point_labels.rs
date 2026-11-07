@@ -716,6 +716,8 @@ fn obstacle_marks(mark: &ResolvedMark<'_>) -> bool {
         | ResolvedMark::Area { .. }
         | ResolvedMark::Scatter { .. }
         | ResolvedMark::Bubbles { .. }
+        | ResolvedMark::Quiver { .. }
+        | ResolvedMark::Barbs { .. }
         | ResolvedMark::Stem { .. }
         | ResolvedMark::Bar { .. }
         | ResolvedMark::Grouped { .. }

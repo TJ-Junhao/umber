@@ -29,6 +29,12 @@
 //! A time axis is fitted in seconds from its origin, the earliest time of its data and explicit
 //! ticks (see [`resolve::time_extents`]), as a linear axis is in its own units.
 //!
+//! Arrows and wind barbs reach by a number of points as bubbles do, one reach per side, so they
+//! are fitted as bubbles are ([`field_reaches`]): an arrow reaches along each axis as far as its
+//! outline does in the frame of the current layout. The frame of automatic arrows comes from the
+//! previous layout ([`crate::pipeline`]), so within one layout their reach is a fixed number of
+//! points, like any other here.
+//!
 //! Only the bubbles that are drawn are fitted: a bubble whose value maps to no color has no
 //! fill and is not drawn ([`has_fill`]). A marker's reach is first estimated with the widest
 //! outline, that of one color; when the estimate leaves no extent, the fit measures each
@@ -61,9 +67,10 @@
 use crate::color_scale::ResolvedColorScale;
 use crate::draw::{MARKER_OUTLINE, has_fill, marker_outline, marker_reach};
 use crate::error::{number, quoted};
+use crate::field::Reach;
+use crate::field::barb::{self, Barb};
 use crate::layout::PlotSize;
-use crate::model::ShareGroups;
-use crate::model::SharedValues;
+use crate::model::{Sample, ShareGroups, SharedValues, VectorField};
 use crate::resolve::{
     self, AxisLimits, AxisScale, ContinuousLimits, ExtentPadding, Limits, Resolved, ResolvedMark,
     TimeLimits, ValueAxis,
@@ -109,10 +116,39 @@ const LONGEST_PLOT: f64 = crate::model::MAX_FIGURE_IN * 72.0 - 2.0 * crate::layo
 /// The bisection steps that find the shortest plot length holding the bubbles within the
 /// supported range.
 const BISECTION_STEPS: usize = 64;
-/// The hint of the error for bubbles too large for their plot.
-const HINT: &str = "make the figure larger, or set explicit limits, which clip the bubbles.";
-/// The hint of the error for bubbles that no figure holds within the supported range.
-const RANGE_HINT: &str = "set explicit limits, which clip the bubbles.";
+/// What the error for marks too large for their plot calls them, with its two hints: for
+/// marks that a larger figure can hold, and for marks that no figure holds within the supported
+/// range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Named {
+    /// The name of the marks.
+    noun: &'static str,
+    /// The hint when a larger figure holds them.
+    hint: &'static str,
+    /// The hint when no figure does.
+    range_hint: &'static str,
+}
+
+/// The error of bubbles, and of bar labels.
+static BUBBLES: Named = Named {
+    noun: "bubbles",
+    hint: "make the figure larger, or set explicit limits, which clip the bubbles.",
+    range_hint: "set explicit limits, which clip the bubbles.",
+};
+/// The error of arrows.
+static ARROWS: Named = Named {
+    noun: "arrows",
+    hint: "pass a smaller pt_per_unit, make the figure larger, or set explicit limits, which \
+           clip the arrows.",
+    range_hint: "pass a smaller pt_per_unit, or set explicit limits, which clip the arrows.",
+};
+/// The error of wind barbs.
+static BARBS: Named = Named {
+    noun: "barbs",
+    hint: "pass a smaller size, make the figure larger, or set explicit limits, which clip the \
+           barbs.",
+    range_hint: "pass a smaller size, or set explicit limits, which clip the barbs.",
+};
 
 /// The axis a fit is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,7 +456,13 @@ impl BubbleFit {
             .flat_map(|(panel, marks)| {
                 let fill = (fills.theme, fills.scales[panel]);
                 marks.iter().enumerate().flat_map(move |(index, mark)| {
-                    bubbles(mark, axis, (panel, index), origin, fill)
+                    bubbles(mark, axis, (panel, index), origin, fill).chain(field_reaches(
+                        mark,
+                        axis,
+                        (panel, index),
+                        origin,
+                        fill,
+                    ))
                 })
             })
             .collect()
@@ -530,11 +572,15 @@ impl BubbleFit {
         Some(long)
     }
 
-    /// The label of the bubbles mark of the bubble at `bubble` in an error, a space first; empty
-    /// for a mark without one. For a bar label, or no bubble, the furthest reaching bubble of
-    /// `panel` is named, or of any panel without one there; `marks` are the resolved marks of
-    /// every panel.
-    fn label(&self, bubble: Option<usize>, panel: usize, marks: &[&[ResolvedMark<'_>]]) -> String {
+    /// The mark an error names for the bubble at `bubble`: its own, or for a bar label, or no
+    /// bubble, that of the furthest reaching bubble of `panel`, or of any panel without one
+    /// there; `marks` are the resolved marks of every panel.
+    fn named<'m, 'd>(
+        &self,
+        bubble: Option<usize>,
+        panel: usize,
+        marks: &'m [&[ResolvedMark<'d>]],
+    ) -> Option<&'m ResolvedMark<'d>> {
         let named = bubble
             .map(|i| &self.bubbles[i])
             .filter(|bubble| bubble.mark.is_some())
@@ -550,14 +596,7 @@ impl BubbleFit {
                             .then(a_low.max(a_high).total_cmp(&b_low.max(b_high)))
                     })
             });
-        let label = named
-            .and_then(|bubble| marks[bubble.panel].get(bubble.mark?))
-            .and_then(|mark| match mark {
-                ResolvedMark::Bubbles { mark, .. } => Some(mark.options().label.as_str()),
-                _ => None,
-            })
-            .filter(|label| !label.is_empty());
-        label.map_or(String::new(), |label| format!(" {}", quoted(label)))
+        named.and_then(|bubble| marks[bubble.panel].get(bubble.mark?))
     }
 
     /// Whether every bubble reaches no further than the plot edges of `scale`, on plots of
@@ -1200,6 +1239,80 @@ fn bubbles<'a>(
         })
 }
 
+/// The arrows or barbs of `mark`, the mark at `index` of the panel `panel`, as `axis` of that
+/// panel sees them, each reaching as far as its shape does: none for any other mark. An arrow or
+/// barb is held when its sample is present and it has a fill under the theme and color scale
+/// `fill`, as drawing decides ([`has_fill`]). The times of a time axis are seconds from `origin`.
+fn field_reaches(
+    mark: &ResolvedMark<'_>,
+    axis: Axis,
+    (panel, index): (usize, usize),
+    origin: Option<Instant>,
+    (theme, scale): (&Theme, Option<&ResolvedColorScale>),
+) -> Vec<Bubble> {
+    let held =
+        |field: &VectorField, reach: &dyn Fn(Sample) -> Reach, filled: &dyn Fn(usize) -> bool| {
+            field
+                .samples()
+                .filter(|sample| filled(sample.index))
+                .map(|sample| {
+                    let reach = reach(sample);
+                    let (value, low, high) = match axis {
+                        Axis::X => (
+                            coordinate(field.x_values(), sample.column, origin),
+                            reach.left,
+                            reach.right,
+                        ),
+                        Axis::Y => (
+                            coordinate(field.y_values(), sample.row, origin),
+                            reach.down,
+                            reach.up,
+                        ),
+                    };
+                    Bubble {
+                        value,
+                        low,
+                        high,
+                        drawn: (low, high),
+                        panel,
+                        mark: Some(index),
+                    }
+                })
+                .collect()
+        };
+    match mark {
+        ResolvedMark::Quiver {
+            mark,
+            color,
+            mapped,
+            frame,
+            ..
+        } => {
+            let pivot = mark.options().pivot;
+            held(
+                mark.field(),
+                &|sample| frame.reach(sample.u, sample.v, pivot),
+                &|i| has_fill(theme, scale, *color, mapped.as_ref(), i),
+            )
+        }
+        ResolvedMark::Barbs {
+            mark,
+            color,
+            mapped,
+            staff,
+            ..
+        } => {
+            let flip = mark.options().flip;
+            held(
+                mark.field(),
+                &|sample| Barb::new(sample.u, sample.v, *staff, flip).reach(*staff * barb::STROKE),
+                &|i| has_fill(theme, scale, *color, mapped.as_ref(), i),
+            )
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Whether the coordinate at `i` places a bubble: a finite number, or a present time.
 fn is_drawn(values: &SharedValues, i: usize) -> bool {
     match values {
@@ -1360,9 +1473,27 @@ impl BubbleFits {
                 .as_ref()
                 .and_then(BubbleFit::sufficient_length)
         });
+        let named = fit.named(reason.bubble(), panel, marks);
+        let (label, kind) = match named {
+            Some(ResolvedMark::Bubbles { mark, .. }) => (mark.options().label.as_str(), &BUBBLES),
+            Some(ResolvedMark::Quiver { mark, .. }) => (mark.key_text(), &ARROWS),
+            Some(ResolvedMark::Barbs { mark, .. }) => (mark.options().label.as_str(), &BARBS),
+            _ => ("", &BUBBLES),
+        };
+        let label = match label {
+            "" => String::new(),
+            label => format!(" {}", quoted(label)),
+        };
+        let lowers = matches!(
+            named,
+            Some(ResolvedMark::Quiver { mark, .. })
+                if mark.options().length == crate::ArrowLength::Auto
+        );
         Some(BubbleFailure {
             panel,
-            label: fit.label(reason.bubble(), panel, marks),
+            label,
+            kind,
+            lowers,
             axis: fit.axis,
             plot: plots[panel],
             estimate,
@@ -1423,8 +1554,12 @@ impl BubbleFits {
 pub(crate) struct BubbleFailure {
     /// The panel of the bubble whose bound fails, in the order of the panels.
     pub panel: usize,
-    /// The label of the bubbles mark in an error, a space first; empty without one.
+    /// The label of the mark in an error, a space first; empty without one.
     label: String,
+    /// What the error calls the mark.
+    kind: &'static Named,
+    /// Whether the mark is a quiver of automatic scale, which a shorter scale may fit.
+    pub lowers: bool,
     /// The axis of the failing fit.
     axis: Axis,
     /// The plot of the panel when the fit failed.
@@ -1450,11 +1585,11 @@ impl BubbleFailure {
         Error::style(
             context,
             format!(
-                "the bubbles{} need a figure at least {w} × {h} pt; the figure is {fw} × {fh} pt.",
-                self.label
+                "the {}{} need a figure at least {w} × {h} pt; the figure is {fw} × {fh} pt.",
+                self.kind.noun, self.label
             ),
         )
-        .with_hint(HINT)
+        .with_hint(self.kind.hint)
     }
 
     /// The error for bubbles that no figure holds within the supported numeric range, reported
@@ -1463,12 +1598,13 @@ impl BubbleFailure {
         Error::style(
             context,
             format!(
-                "the bubbles{} need {} limits beyond the supported range.",
+                "the {}{} need {} limits beyond the supported range.",
+                self.kind.noun,
                 self.label,
                 self.axis.name()
             ),
         )
-        .with_hint(RANGE_HINT)
+        .with_hint(self.kind.range_hint)
     }
 }
 

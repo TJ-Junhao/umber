@@ -99,6 +99,8 @@ pub(super) enum LabelSource {
     Distributions,
     /// The name of each of the call's `groups`, as `groups[i]`.
     Groups,
+    /// The text of the call's `key`.
+    Key,
 }
 
 impl LabelSource {
@@ -107,7 +109,7 @@ impl LabelSource {
     fn locate(self, error: crate::Error, i: usize) -> crate::Error {
         match self {
             Self::Series | Self::Groups => error.in_group(i),
-            Self::Options | Self::Distributions => error,
+            Self::Options | Self::Distributions | Self::Key => error,
         }
     }
 
@@ -118,6 +120,7 @@ impl LabelSource {
             Self::Series => ("series", format!("series[{i}].label")),
             Self::Distributions => ("distributions", format!("distributions[{i}].label")),
             Self::Groups => ("groups", format!("groups[{i}]")),
+            Self::Key => ("key", "the key text".to_owned()),
         }
     }
 }

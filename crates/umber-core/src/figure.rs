@@ -38,6 +38,10 @@ pub use crate::model::{
     LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
     SeriesView, Share, Step, StepMark, StepOptions, TickHighlight,
 };
+pub use crate::model::{
+    ArrowKey, ArrowLength, BarbOptions, BarbsMark, Direction, FieldForm, FieldVectors, Pivot,
+    QuiverMark, QuiverOptions, VectorField,
+};
 pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use crate::model::{BandMark, BandOptions};
 pub use crate::model::{
@@ -156,6 +160,13 @@ impl Figure {
     /// value maps to no color is left out, and a color-mapped marker counts with its thinner
     /// outline. Limits that do not settle in the final layout fall back to the data positions,
     /// and the plot clips the bubbles (see [`AxesMut::bubbles`](crate::AxesMut::bubbles)).
+    ///
+    /// Arrows and wind barbs are held as bubbles are, and fail the same way, as `the arrows "…"
+    /// need …` and `the barbs "…" need …`, the label being the text of the key or the label of
+    /// the barbs; an automatic scale shortens the arrows instead, to what limits can hold.
+    /// `Error::Style` with the parameter `key` for a key arrow longer than the shorter side of its
+    /// plot (`the arrow of the key "…" is … pt long; the shorter side of the plot is … pt.`), and
+    /// for a key whose automatic scale has no length to go by, since no arrow has one.
     ///
     /// On a grid of more than one cell the same checks run for the grid's columns and rows, in
     /// the same order. A figure too narrow for its columns of plots names the width it needs

@@ -82,10 +82,7 @@ impl LineColor<'_> {
                 background,
             } => {
                 let color = scale?.color(level)?;
-                let color = background.contrast(color).map_or(color, |contrast| {
-                    crate::cmap::from_oklab(contrast.weighted())
-                });
-                Some(color.with_alpha(alpha))
+                Some(background.apart(color).with_alpha(alpha))
             }
         }
     }

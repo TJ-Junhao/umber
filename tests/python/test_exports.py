@@ -23,6 +23,7 @@ EXPECTED = [
     "Contour",
     "DataError",
     "Dash",
+    "Direction",
     "Distribution",
     "FillStyle",
     "Figure",
@@ -34,6 +35,7 @@ EXPECTED = [
     "LegendPosition",
     "LegendStyle",
     "Marker",
+    "Pivot",
     "PieAxes",
     "Place",
     "Render",
@@ -114,6 +116,8 @@ def test_enums_are_exported_as_enums() -> None:
         "Hist",
         "Stat",
         "Contour",
+        "Pivot",
+        "Direction",
     }
 
 

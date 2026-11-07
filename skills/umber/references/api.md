@@ -355,6 +355,78 @@ Example:
 >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
 ```
 
+### `umber.Axes.barbs`
+
+```text
+Axes.barbs(self: SXY, x: Values[X], y: Values[Y], u: object, v: object, *, label: str='', color: Color | ColorBy=Color.AUTO, size: Size=Size.AUTO, flip: bool=False) -> SXY
+```
+
+Add wind barbs on a vector field, of points or of a grid.
+
+The input forms are those of ``quiver()``: one-dimensional ``u`` and ``v`` for points, and
+two-dimensional ones shaped ``(len(y), len(x))`` for a grid, such as a time-height
+section. A NaN (or a missing time) in ``x``, ``y``, ``u`` or ``v`` leaves that barb out.
+
+The speed ``sqrt(u**2 + v**2)`` is rounded to the nearest 5, halves upward, and written
+from the outer end of the staff inwards: a flag for each 50, a full line for each 10, a
+half line for a remaining 5, set in from the end of the staff when it stands alone. These
+are the meteorological steps, normally in knots; the values are taken as they are, and
+no unit is converted. A speed that rounds to 0 draws a small open circle. Above 200 the
+staff grows to hold its flags.
+
+``(u, v)`` is where the wind blows to, as in ``quiver()``. The staff starts at the sample
+and runs against it, towards where the wind comes from, always in the screen direction,
+because barbs are read as compass bearings. Lines and flags lie to the right when looking
+from the sample along the staff: in the northern hemisphere that is towards low pressure.
+
+Sizes are shares of the staff length ``s``: a full line rises ``0.4 s`` and leans
+``0.125 s`` towards the outer end, a half line half of that, a flag has a base of
+``0.25 s`` and a height of ``0.4 s``, lines stand ``0.125 s`` apart, and they are
+``0.04 s`` wide. The circle of a calm has a radius of ``0.125 s``.
+
+Automatic limits hold whole barbs, as they hold whole bubbles; explicit limits are kept,
+and the plot clips the barbs. All barbs of a mark have one size, so a label needs no
+reference: the legend entry is a line swatch, in the row under every legend style.
+
+Args:
+    x: The x coordinates: numbers on a linear or log x axis, times on a time x axis.
+    y: The y coordinates: numbers on a linear or log y axis, times on a time y axis.
+    u: The component along x of each wind, as for ``quiver()``.
+    v: The component along y of each wind, of the shape of ``u``.
+    label: The legend label; empty skips this mark's legend entry.
+    color: The barb color. ``Color.AUTO`` takes the next palette color. ``ColorBy`` maps
+        one value per barb, as for ``quiver()``, and the legend entry takes the theme's
+        text color.
+    size: The length of the staff. ``Size.AUTO`` is 24 pt times the theme's font scale,
+        ``Size.times()`` a multiple of that, and ``Size.pt()`` a fixed length. Lines and
+        flags scale with it.
+    flip: Whether lines and flags lie on the left, as in the southern hemisphere.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: As for ``quiver()``.
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character, or a ``ColorBy`` does not suit the color range set by ``clim()``.
+    UsageError: If an axis is a category axis (type checkers refuse such axes), or a
+        ``ColorBy`` differs in ``cmap``, ``scale`` or ``center`` from the other
+        color-mapped marks.
+
+Example:
+
+```python
+>>> import datetime as dt
+>>> import numpy as np
+>>> import umber as ub
+>>> times = [dt.datetime(2026, 1, 1, hour) for hour in (0, 6, 12, 18)]
+>>> heights = [500.0, 1000.0, 2000.0]
+>>> u, v = np.full((3, 4), 25.0), np.full((3, 4), -10.0)
+>>> ax = ub.Figure().add_axes(x=ub.Scale.time()).barbs(times, heights, u, v)
+>>> south = ub.Figure().add_axes().barbs([0, 1], [0, 0], [5, 65], [0, 0], flip=True)
+```
+
 ### `umber.Axes.baseline`
 
 ```text
@@ -1496,6 +1568,112 @@ Example:
 >>> times = [dt.datetime(2026, 1, 1, hour) for hour in (0, 6, 12)]
 >>> hours = hours.mesh(times, [0, 2], [[1.0, 4.0]])
 >>> ax = ax.mesh([0, 1, 2], [0, 1], [[2.0, 3.0]], render=ub.Render.RASTER)
+```
+
+### `umber.Axes.quiver`
+
+```text
+Axes.quiver(self: SXY, x: Values[X], y: Values[Y], u: object, v: object, *, color: Color | ColorBy=Color.AUTO, pivot: Pivot=Pivot.TAIL, direction: Direction=Direction.SCREEN, pt_per_unit: float | Auto=AUTO, key: tuple[float, str] | Auto=AUTO) -> SXY
+```
+
+Add arrows on a vector field, of points or of a grid.
+
+``x`` and ``y`` are always one-dimensional, and the shape of ``u`` says which form is
+meant. One-dimensional ``u`` and ``v`` are points: all four have the same length.
+Two-dimensional ``u`` and ``v`` are a grid shaped ``(len(y), len(x))``, as ``contour()``
+takes it, whose ``x`` and ``y`` are strictly increasing; the arrays of ``np.meshgrid()``
+are not taken, so pass the coordinates they were made from. To draw fewer arrows, thin the
+arrays: ``ax.quiver(x[::4], y[::4], u[::4, ::4], v[::4, ::4])``. A NaN (or a missing
+time) in ``x``, ``y``, ``u`` or ``v`` leaves that arrow out, of the plot, of the limits
+and of the automatic scale.
+
+A length is exactly proportional to the magnitude ``sqrt(u**2 + v**2)``: an arrow twice
+as long means twice the magnitude, and a short arrow is never lengthened. With
+``pt_per_unit=3`` a magnitude of 10 is 30 pt long, and passing one number to several
+axes makes them comparable. ``AUTO`` makes the longest arrow as long as the typical
+spacing in points on the final plot: on a grid the smaller of the median column and row
+spacing, for points the median distance to the nearest neighbour, where points at one
+place count as one. All quivers of an axes with ``AUTO`` share one scale, with the
+longest of their arrows and the smallest of their spacings. Without any spacing, for a
+single arrow or points all at one place, the longest arrow is 24 pt long, times the
+theme's font scale. A row of a few samples can have a spacing longer than the plot is
+high: the longest arrow is then at most three quarters of the plot's shorter side, and
+shorter still where automatic limits could not hold it.
+
+An arrow is a filled shape: a shaft 1 pt wide and a head 5 pt long and 4 pt wide,
+neither of which grows with it, so a page of arrows looks even. An arrow shorter than
+its head shrinks, head and shaft together, so that its length stays true. A zero vector
+draws a dot as wide as the shaft: the sample exists, and nothing moves there.
+
+Automatic limits hold whole arrows, as they hold whole bubbles, in log space on a log
+axis and in seconds on a time axis. Explicit limits are kept, and the plot clips the
+arrows. With ``pt_per_unit``, an arrow too long for any automatic limits raises
+``StyleError`` when rendering, naming the smallest figure that holds it, for example
+``the arrows need a figure at least 540 × 300 pt; the figure is 432 × 288 pt.``.
+
+``key`` adds a legend entry: an arrow drawn at the true length of a magnitude, then the
+text, which the caller writes, so that value and unit are stated in one place. It follows
+the legend of the axes, in every position and style, and under ``LegendStyle.DIRECT`` it
+takes a place in the legend row, which widens for a long arrow. Without a key an arrow
+has no legend entry, since an entry without a length would say nothing. Two quivers
+have two entries; in a merged legend entries of one text merge only when their arrows have
+the same length, since each is true for its own panel. Rendering raises ``StyleError``
+when a key arrow is longer than the shorter side of the plot, and when ``AUTO`` has
+no scale for it because no arrow has a length.
+
+Args:
+    x: The x coordinates: numbers on a linear or log x axis, times on a time x axis.
+    y: The y coordinates: numbers on a linear or log y axis, times on a time y axis.
+    u: The component along x of each vector: finite, at most 1e300 in magnitude, or NaN
+        to leave the arrow out. One-dimensional for points; two-dimensional for a grid,
+        as an array or a list of rows.
+    v: The component along y of each vector, of the shape of ``u``.
+    color: The arrow color. ``Color.AUTO`` takes the next palette color. ``ColorBy``
+        maps one value per arrow, with the shape of ``u``, on the color scale of the
+        axes; a color close to the background is darkened or lightened as a contour line
+        is, and the key takes the theme's text color.
+    pivot: The part of the arrow that sits on the sample: ``Pivot.TAIL``,
+        ``Pivot.MIDDLE`` or ``Pivot.TIP``.
+    direction: What ``(u, v)`` is measured against. ``Direction.SCREEN`` points along
+        ``(u, v)`` on the screen, positive ``u`` right and positive ``v`` up, so
+        ``u == v`` is always 45°. ``Direction.DATA`` points from ``(x, y)`` towards
+        ``(x + u, y + v)`` on the plot, so that an arrow is tangent to a streamline of
+        the same field on any plot shape; both axes must be linear. On axes with
+        ``equal_aspect()`` the two draw the same arrows.
+    pt_per_unit: Points per unit of magnitude, for this mark alone; ``AUTO`` for the
+        automatic scale.
+    key: A tuple of a magnitude and the text of its legend entry, such as
+        ``(10, "10 m/s")``; ``AUTO`` for no entry.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type.
+    DataError: If ``x`` or ``y`` is two-dimensional, ``u`` and ``v`` are neither both
+        one-dimensional nor both two-dimensional, lengths or shapes differ, the
+        coordinates of a grid do not strictly increase, a coordinate is invalid for its
+        axis, a component is infinite or beyond 1e300 in magnitude, or a ``ColorBy``
+        does not have the shape of ``u``.
+    StyleError: If ``pt_per_unit`` is not finite and greater than 0 or draws an arrow
+        longer than 14,400 pt, the value of ``key`` is not greater than 0 and at most
+        1e300, its text is empty or not one line, or a ``ColorBy`` does not suit the
+        color range set by ``clim()``.
+    UsageError: If an axis is a category axis (type checkers refuse such axes),
+        ``Direction.DATA`` comes with a log or time axis, or a ``ColorBy`` differs in
+        ``cmap``, ``scale`` or ``center`` from the other color-mapped marks.
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> x, y = np.linspace(-2, 2, 9), np.linspace(-1, 1, 5)
+>>> u, v = -y[:, None] + 0 * x, x[None, :] + 0 * y[:, None]
+>>> ax = ub.Figure().add_axes().quiver(x, y, u, v, key=(1, "1 m/s"))
+>>> speed = ub.ColorBy(np.hypot(u, v))
+>>> mapped = ub.Figure().add_axes().quiver(x, y, u, v, color=speed, pt_per_unit=12)
+>>> points = ub.Figure().add_axes().quiver([0, 1, 3], [0, 2, 1], [1, 0, 1], [0, 1, 1])
 ```
 
 ### `umber.Axes.scatter`
@@ -3469,13 +3647,13 @@ True
 class ColorBy
 ```
 
-Values mapped through a colormap: pass it as the ``color`` of a scatter or bubbles.
+Values mapped through a colormap: pass it as the ``color`` of a mark of points.
 
-Each point takes the color its value maps to; a NaN value leaves its point undrawn, and its
-position still counts in the axis limits. All color-mapped marks of an axes share one
-color scale: the same ``cmap``, ``scale`` and ``center``, and one color range, from the
-smallest to the largest finite value unless ``Axes.clim()`` sets it. Values outside the
-range take the colormap's end colors.
+Scatters, bubbles, arrows and wind barbs take it. Each point takes the color its value maps
+to; a NaN value leaves its point undrawn, and its position still counts in the axis limits.
+All color-mapped marks of an axes share one color scale: the same ``cmap``, ``scale`` and
+``center``, and one color range, from the smallest to the largest finite value unless
+``Axes.clim()`` sets it. Values outside the range take the colormap's end colors.
 
 Mapped fills are opaque and keep the colormap's colors. Points have an opaque 0.5 pt
 outline that contrasts with the background when the fill is close to it, fading to the
@@ -3490,7 +3668,9 @@ values (or of the range set by ``Axes.clim()``), so ``center`` maps to the middl
 colormap and the side with less extent does not reach its end color.
 
 Args:
-    values: One number per point: finite, or NaN to leave the point undrawn.
+    values: One number per point: finite, or NaN to leave the point undrawn. On the grid
+        form of ``quiver()`` and ``barbs()`` it has the shape of ``u``, so it is
+        two-dimensional, as an array or a list of rows.
     cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center`` is
         given and its sequential colormap otherwise.
     scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
@@ -3659,6 +3839,44 @@ Dash.SOLID
 ```
 
 A continuous line.
+
+## `umber.Direction`
+
+```text
+class Direction(Enum)
+```
+
+What the ``(u, v)`` of an arrow is measured against.
+
+Only the angle changes; the length follows the magnitude in both.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes()
+>>> ax = ax.quiver([0, 1], [0, 1], [1, 0], [0, 1], direction=ub.Direction.DATA)
+```
+
+### `umber.Direction.DATA`
+
+```text
+Direction.DATA
+```
+
+The arrow points from ``(x, y)`` towards ``(x + u, y + v)`` on the plot, so it is tangent
+to a streamline of the same field and square to a contour of its potential, on any plot
+shape. Both axes must be linear: a log or time axis has no single scale for a step.
+
+### `umber.Direction.SCREEN`
+
+```text
+Direction.SCREEN
+```
+
+The arrow points along ``(u, v)`` on the screen, positive ``u`` right and positive ``v``
+up, whatever the scales of the axes: ``u == v`` is always 45°. It works on every axis
+``quiver()`` accepts.
 
 ## `umber.Distribution`
 
@@ -4874,6 +5092,46 @@ Marker.TRIANGLE
 ```
 
 A filled triangle pointing up.
+
+## `umber.Pivot`
+
+```text
+class Pivot(Enum)
+```
+
+The part of an arrow that sits on its sample.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ax = ub.Figure().add_axes()
+>>> ax = ax.quiver([0, 1], [0, 1], [1, 0], [0, 1], pivot=ub.Pivot.MIDDLE)
+```
+
+### `umber.Pivot.MIDDLE`
+
+```text
+Pivot.MIDDLE
+```
+
+The sample is at the middle of the arrow.
+
+### `umber.Pivot.TAIL`
+
+```text
+Pivot.TAIL
+```
+
+The sample is where the arrow starts.
+
+### `umber.Pivot.TIP`
+
+```text
+Pivot.TIP
+```
+
+The sample is where the arrow ends.
 
 ## `umber.PieAxes`
 

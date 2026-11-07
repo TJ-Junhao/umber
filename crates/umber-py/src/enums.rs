@@ -8,8 +8,8 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
-    Align, ColorbarPosition, ContourStyle, Dash, FillStyle, GridLines, LegendMode, LegendPosition,
-    LegendStyle, Marker, Place, Render, Share, Step, SvgText,
+    Align, ColorbarPosition, ContourStyle, Dash, Direction, FillStyle, GridLines, LegendMode,
+    LegendPosition, LegendStyle, Marker, Pivot, Place, Render, Share, Step, SvgText,
 };
 use umber_core::{HistStat, HistStyle};
 
@@ -171,6 +171,17 @@ int_enum!("Contour", ContourStyle {
     "BOTH" => ContourStyle::Both = 2,
 });
 
+int_enum!("Pivot", Pivot {
+    "TAIL" => Pivot::Tail = 0,
+    "MIDDLE" => Pivot::Middle = 1,
+    "TIP" => Pivot::Tip = 2,
+});
+
+int_enum!("Direction", Direction {
+    "SCREEN" => Direction::Screen = 0,
+    "DATA" => Direction::Data = 1,
+});
+
 /// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
 pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
     Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
@@ -188,7 +199,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 17] = [
+const TABLES: [(&str, &[(&str, i64)]); 19] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
@@ -205,6 +216,8 @@ const TABLES: [(&str, &[(&str, i64)]); 17] = [
     (HistStyle::PY_NAME, HistStyle::MEMBERS),
     (HistStat::PY_NAME, HistStat::MEMBERS),
     (ContourStyle::PY_NAME, ContourStyle::MEMBERS),
+    (Pivot::PY_NAME, Pivot::MEMBERS),
+    (Direction::PY_NAME, Direction::MEMBERS),
     (Place::PY_NAME, Place::MEMBERS),
 ];
 
@@ -258,6 +271,8 @@ mod tests {
         round_trips::<HistStyle>();
         round_trips::<HistStat>();
         round_trips::<ContourStyle>();
+        round_trips::<Pivot>();
+        round_trips::<Direction>();
         round_trips::<Place>();
     }
 
@@ -290,6 +305,8 @@ mod tests {
                 "Hist",
                 "Stat",
                 "Contour",
+                "Pivot",
+                "Direction",
                 "Place"
             ]
         );

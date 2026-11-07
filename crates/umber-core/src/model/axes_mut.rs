@@ -17,6 +17,9 @@ use super::color_by::{check_point_color, check_scatter_label};
 use super::contour::{ContourMark, ContourOptions};
 use super::ecdf::{EcdfMark, EcdfOptions};
 use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation};
+use super::field::{
+    BARBS_CONTEXT, BarbOptions, BarbsMark, FieldVectors, QUIVER_CONTEXT, QuiverMark, QuiverOptions,
+};
 use super::figure::Figure;
 use super::heatmap::{HeatmapMark, HeatmapOptions};
 use super::hist::{GroupedHistOptions, HistGroupMark, HistMark, HistOptions};
@@ -1107,6 +1110,95 @@ impl<'a> AxesMut<'a> {
             ))],
         )?;
         Ok(self)
+    }
+
+    /// Adds arrows on a field. `x` and `y` hold numbers on a linear or log axis and times on a
+    /// time axis, and `vectors` says whether they are points or the columns and rows of a grid
+    /// ([`FieldForm`](crate::FieldForm)). [`QuiverMark`] states how long the arrows are.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as [`QuiverMark`] validates a quiver, then a color
+    /// mapping as [`AxesMut::scatter`] checks one, and `Error::Style` for a key text that is
+    /// not one line. At render time, `Error::Style` for a key arrow longer than the shorter side
+    /// of the plot, or a key on a field whose automatic scale has no length because no arrow has.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, FieldVectors, Figure, QuiverOptions, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x = AxisData::Numbers(vec![0.0, 1.0, 2.0]);
+    /// let y = AxisData::Numbers(vec![0.0, 1.0]);
+    /// let (u, v) = (vec![1.0; 6], vec![0.5; 6]);
+    /// axes.quiver(x, y, FieldVectors::grid(u, v), QuiverOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn quiver(
+        &mut self,
+        x: AxisData,
+        y: AxisData,
+        vectors: FieldVectors,
+        options: QuiverOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = QuiverMark::new((axes.x, axes.y), (x, y), vectors, options)?;
+        self.check_field_color(QUIVER_CONTEXT, &mark.options().color, mark.field().len())?;
+        self.axes_mut()
+            .add_marks(QUIVER_CONTEXT, LabelSource::Key, [Mark::Quiver(mark)])?;
+        Ok(self)
+    }
+
+    /// Adds wind barbs on a field, taken as [`AxesMut::quiver`] takes one. [`BarbsMark`] states
+    /// how a speed is written.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as [`BarbsMark`] validates barbs, then a color mapping
+    /// as [`AxesMut::scatter`] checks one, and `Error::Style` for a label that is not one line.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{AxisData, BarbOptions, FieldVectors, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let x = AxisData::Numbers(vec![0.0, 1.0]);
+    /// let vectors = FieldVectors::points(vec![15.0, 0.0], vec![5.0, 0.0]);
+    /// axes.barbs(x.clone(), x, vectors, BarbOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn barbs(
+        &mut self,
+        x: AxisData,
+        y: AxisData,
+        vectors: FieldVectors,
+        options: BarbOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = BarbsMark::new((axes.x, axes.y), (x, y), vectors, options)?;
+        self.check_field_color(BARBS_CONTEXT, &mark.options().color, mark.field().len())?;
+        self.axes_mut()
+            .add_marks(BARBS_CONTEXT, LabelSource::Options, [Mark::Barbs(mark)])?;
+        Ok(self)
+    }
+
+    /// Checks the `color` of a new field mark of `count` vectors, for the call `context`, as
+    /// [`check_point_color`] does, and against the color group of the panel.
+    fn check_field_color(
+        &mut self,
+        context: &'static str,
+        color: &super::color_by::PointColor,
+        count: usize,
+    ) -> Result<()> {
+        check_point_color(context, self.axes_mut(), color, count)?;
+        self.figure
+            .check_shared_point_color(self.index, color, context)
     }
 
     /// Adds a line from the baseline to each value and a scatter marker at the value. Same

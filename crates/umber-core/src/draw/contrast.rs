@@ -7,8 +7,8 @@
 //! its color's Oklab lightness away from the background, down when the background's lightness
 //! is at least 0.5 and up otherwise, a and b unchanged. Color-mapped scatter points and bubbles
 //! take the color moved by the full 0.25 ([`CONTRAST_LIGHTNESS`]), mixed with the background by
-//! `w`, for their outline ([`Contrast::full`]); color-mapped contour lines are drawn in their
-//! color moved by `w × 0.25` ([`Contrast::weighted`]).
+//! `w`, for their outline ([`Contrast::full`]); color-mapped contour lines, arrows and wind barbs
+//! are drawn in their color moved by `w × 0.25` ([`Contrast::weighted`]).
 //!
 //! Text is judged by the WCAG 2 contrast ratio instead ([`relative_luminance`]): the values
 //! written on cells and bars take black or white by it, and the emphasis color of each preset
@@ -141,6 +141,14 @@ impl Background {
     /// The background's Oklab coordinates.
     pub(super) fn lab(self) -> Oklab {
         self.lab
+    }
+
+    /// `color` as a color-mapped line or arrow draws it: its Oklab lightness moved away from the
+    /// background by [`Contrast::weighted`] when it comes close to it, and `color` itself
+    /// otherwise, alpha ignored.
+    pub(super) fn apart(self, color: Rgba) -> Rgba {
+        self.contrast(color)
+            .map_or(color, |contrast| from_oklab(contrast.weighted()))
     }
 
     /// The contrast `color`, taken opaque, needs against the background: `None` when it lies at

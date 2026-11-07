@@ -93,6 +93,11 @@ pub(crate) enum Swatch {
         /// The median stroke width, in points.
         width: f32,
     },
+    /// An arrow at the true length of the value of a key.
+    Arrow {
+        /// The length of the arrow, in points.
+        length: f32,
+    },
     /// A short bar with a cap at each end, for error bars.
     ErrorBar {
         /// Whether the bar runs along y; otherwise along x.
@@ -107,10 +112,16 @@ impl Swatch {
     /// except that an area's counts as a line's, as an area is labelled as the line that bounds
     /// it. So a line and an area of one label merge into one entry, as they did when both had
     /// line swatches.
-    fn merge_kind(&self) -> std::mem::Discriminant<Swatch> {
+    ///
+    /// Arrows of different lengths are told apart too: each key is true for its own panel only,
+    /// so two keys merge only when they draw the same arrow.
+    fn merge_kind(&self) -> (std::mem::Discriminant<Swatch>, u32) {
         match *self {
-            Swatch::Area { dash, width } => std::mem::discriminant(&Swatch::Line { dash, width }),
-            ref swatch => std::mem::discriminant(swatch),
+            Swatch::Area { dash, width } => {
+                (std::mem::discriminant(&Swatch::Line { dash, width }), 0)
+            }
+            Swatch::Arrow { length } => (std::mem::discriminant(self), length.to_bits()),
+            ref swatch => (std::mem::discriminant(swatch), 0),
         }
     }
 
@@ -130,6 +141,7 @@ impl Swatch {
             SeriesKind::Box { width } => Swatch::Box { width },
             SeriesKind::Violin { width } => Swatch::Violin { width },
             SeriesKind::ErrorBar { vertical, width } => Swatch::ErrorBar { vertical, width },
+            SeriesKind::Arrow { length } => Swatch::Arrow { length },
         }
     }
 }
