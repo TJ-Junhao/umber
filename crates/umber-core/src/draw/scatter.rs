@@ -36,20 +36,21 @@ pub(crate) fn marker_reach(shape: Marker, diameter: f32, outline: f32) -> (f64, 
     (half_w + join, half_h + join)
 }
 
-/// The scene item of one scatter: one batch of `shape` markers of diameter `size` (the mark's
-/// drawn size, see [`ResolvedMark::Scatter`](crate::resolve::ResolvedMark::Scatter)), filled
-/// with `color` at the theme's marker alpha times the color's own, outlined 0.8 pt in the
-/// background color. Points whose marker cannot reach the plot area are dropped.
-pub(super) fn scatter_item(
+/// The scene items of one scatter: one batch of `shape` markers of diameter `size` (the
+/// diameter of the fill, see [`Theme::drawn_fill_size`]), filled with `color` at the theme's
+/// marker alpha times the color's own, outlined 0.8 pt in the background color. Points whose
+/// marker cannot reach the plot area are dropped. The outlines come first and the fills after
+/// them, so no outline lies over a fill of the same batch.
+pub(super) fn scatter_layers(
     context: &MarkContext<'_>,
     xs: &[f64],
     ys: &[f64],
     color: Rgba,
     shape: Marker,
     size: f32,
-) -> Option<Item> {
+) -> Vec<Item> {
     let fill = color.scale_alpha(marker_alpha(context.theme));
-    markers_item(context, (xs, ys), fill, shape, size, Outline::Background)
+    markers_layers(context, (xs, ys), fill, shape, size, Outline::Background)
 }
 
 /// The outline of a uniform or color-mapped marker batch.
@@ -159,17 +160,18 @@ fn mapped_outline_color(background: Background, fill: Rgba) -> Rgba {
     }
 }
 
-/// The scene item of one batch of `shape` markers of diameter `size`, filled with `fill` as
-/// given. Mapped fills get a 0.5 pt [`mapped_outline_color`]; uniform fills keep the 0.8 pt
-/// background outline. Culling includes the outline's width.
-pub(super) fn markers_item(
+/// The scene items of one batch of `shape` markers of diameter `size`, filled with `fill` as
+/// given: first all the outlines, as markers without a fill, then all the fills, as markers
+/// without an outline, so a marker's outline never covers the fill of another marker of the
+/// batch. Uniform fills get the 0.8 pt background outline. Culling includes the outline's width.
+fn markers_layers(
     context: &MarkContext<'_>,
     (xs, ys): (&[f64], &[f64]),
     fill: Rgba,
     shape: Marker,
     size: f32,
     outline: Outline,
-) -> Option<Item> {
+) -> Vec<Item> {
     let stroke = outline.style(context.theme);
     let geometry = MarkerGeometry::new(context, shape, size, stroke.width);
     let positions: Vec<Point> = xs
@@ -178,14 +180,22 @@ pub(super) fn markers_item(
         .filter_map(|(&x, &y)| geometry.position(context, x, y))
         .collect();
     if positions.is_empty() {
-        return None;
+        return Vec::new();
     }
-    Some(Item::Markers {
-        shape: geometry.shape,
-        fill: Some(fill),
-        stroke: Some(stroke),
-        positions,
-    })
+    vec![
+        Item::Markers {
+            shape: geometry.shape.clone(),
+            fill: None,
+            stroke: Some(stroke),
+            positions: positions.clone(),
+        },
+        Item::Markers {
+            shape: geometry.shape,
+            fill: Some(fill),
+            stroke: None,
+            positions,
+        },
+    ]
 }
 
 /// The fill colors of the points of a mark: one color at the theme's marker alpha, or the
@@ -219,9 +229,10 @@ impl PointFill<'_> {
 }
 
 /// The scene items of one scatter whose points are filled by `fill`: uniform colors use
-/// [`scatter_item`], mapped colors use a 0.5 pt [`mapped_outline_color`]. One batch per run of
-/// consecutive points of one fill also shares one outline color, keeping data order so later
-/// points still cover earlier ones. Points whose value maps to no color are not drawn.
+/// [`scatter_layers`], mapped colors use a 0.5 pt [`mapped_outline_color`]. Every outline lies
+/// under every fill of the scatter: the outlines come first, then the fills, each in data order,
+/// so later points still cover earlier ones. One batch per run of consecutive points of one
+/// fill also shares one outline color. Points whose value maps to no color are not drawn.
 pub(super) fn scatter_items(
     context: &MarkContext<'_>,
     (xs, ys): (&[f64], &[f64]),
@@ -231,35 +242,41 @@ pub(super) fn scatter_items(
     items: &mut Vec<Item>,
 ) {
     if let PointFill::Uniform(color) = fill {
-        items.extend(scatter_item(context, xs, ys, color, shape, size));
+        items.extend(scatter_layers(context, xs, ys, color, shape, size));
         return;
     }
     let mut outlines = MappedOutlines::new(context.theme);
     let geometry = MarkerGeometry::new(context, shape, size, MAPPED_MARKER_OUTLINE);
-    let mut run: Option<(Rgba, Vec<Point>)> = None;
-    let mut append = |color, positions: Vec<Point>| {
-        if !positions.is_empty() {
-            items.push(Item::Markers {
-                shape: geometry.shape.clone(),
-                fill: Some(color),
-                stroke: Some(Outline::Contrasting(outlines.color(color)).style(context.theme)),
-                positions,
-            });
-        }
-    };
+    // (fill, outline) of each run with its positions.
+    let mut runs: Vec<(Rgba, Rgba, Vec<Point>)> = Vec::new();
     for (index, (&x, &y)) in xs.iter().zip(ys).enumerate() {
         let Some(color) = fill.at(context.theme, index) else {
             continue;
         };
-        if run.as_ref().is_some_and(|(current, _)| *current != color)
-            && let Some((color, positions)) = run.take()
-        {
-            append(color, positions);
+        let Some(position) = geometry.position(context, x, y) else {
+            continue;
+        };
+        match runs.last_mut() {
+            Some((current, _, positions)) if *current == color => positions.push(position),
+            _ => runs.push((color, outlines.color(color), vec![position])),
         }
-        let (_, positions) = run.get_or_insert_with(|| (color, Vec::new()));
-        positions.extend(geometry.position(context, x, y));
     }
-    if let Some((color, positions)) = run {
-        append(color, positions);
-    }
+    let layer =
+        |fill: Option<Rgba>, stroke: Option<StrokeStyle>, positions: &[Point]| Item::Markers {
+            shape: geometry.shape.clone(),
+            fill,
+            stroke,
+            positions: positions.to_vec(),
+        };
+    items.extend(runs.iter().map(|(_, outline, positions)| {
+        layer(
+            None,
+            Some(Outline::Contrasting(*outline).style(context.theme)),
+            positions,
+        )
+    }));
+    items.extend(
+        runs.iter()
+            .map(|(color, _, positions)| layer(Some(*color), None, positions)),
+    );
 }

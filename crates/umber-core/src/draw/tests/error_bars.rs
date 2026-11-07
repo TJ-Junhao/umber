@@ -38,7 +38,7 @@ fn scene_of(figure: &Figure) -> Scene {
 /// The items of the marks group of `figure`; empty when nothing is visible.
 fn items(figure: &Figure) -> Vec<Item> {
     let scene = scene_of(figure);
-    super::mark_items(&scene).to_vec()
+    super::merged_layers(super::mark_items(&scene))
 }
 
 type Segment = ((f64, f64), (f64, f64));

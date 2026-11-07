@@ -224,7 +224,8 @@ fn mapped_scatter_batches_share_fill_and_outline_in_data_order() {
                 )
                 .unwrap();
             let scene = f.to_scene(FontLibrary::global()).unwrap();
-            let items = mark_group(&scene).1;
+            let layers = super::merged_layers(mark_group(&scene).1);
+            let items = layers.as_slice();
             assert_eq!(items.len(), 4);
             for (item, (t, count)) in items.iter().zip([(0.5, 2), (1.0, 1), (0.0, 1), (0.5, 1)]) {
                 let Item::Markers {
@@ -351,6 +352,7 @@ fn uniform_scatter_and_bubbles_keep_background_outlines_even_for_near_fills() {
             )
             .unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let layers = super::merged_layers(mark_group(&scene).1);
         let [
             Item::Markers {
                 fill: Some(scatter_fill),
@@ -365,7 +367,7 @@ fn uniform_scatter_and_bubbles_keep_background_outlines_even_for_near_fills() {
                 style: bubble_stroke,
                 ..
             },
-        ] = mark_group(&scene).1
+        ] = layers.as_slice()
         else {
             panic!("a scatter and a bubble")
         };
@@ -398,6 +400,7 @@ fn mapped_center_outline_is_visible_in_png() {
             )
             .unwrap();
         let scene = f.to_scene(FontLibrary::global()).unwrap();
+        let layers = super::merged_layers(mark_group(&scene).1);
         let [
             Item::Markers {
                 shape,
@@ -405,7 +408,7 @@ fn mapped_center_outline_is_visible_in_png() {
                 fill: Some(fill),
                 stroke: Some(stroke),
             },
-        ] = mark_group(&scene).1
+        ] = layers.as_slice()
         else {
             panic!("one marker")
         };
@@ -413,7 +416,9 @@ fn mapped_center_outline_is_visible_in_png() {
         let png = Pixels::decode(&f.to_png(dpi as i64).unwrap());
         let center = positions[0];
         let (lo, _) = shape.bounds().unwrap();
-        let at = (f64::from(center.x + lo.x), f64::from(center.y));
+        // The outline lies under the fill, so it shows outside the fill's edge: 0.25 pt wide,
+        // sampled 0.12 pt beyond the edge.
+        let at = (f64::from(center.x + lo.x - 0.12), f64::from(center.y));
         assert_ne!(stroke.color, theme.background());
         assert!(near(png.at_point(at, dpi), stroke.color, 2));
         assert!(near(

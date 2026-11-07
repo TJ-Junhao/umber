@@ -24,7 +24,8 @@ class Size:
 
     ``Size.AUTO`` is the size of the theme. ``Size.times()`` is a multiple of it, so an
     emphasized series stays emphasized under any theme. ``Size.pt()`` is a fixed size in
-    points that ignores the theme. Sizes compare equal when they are the same kind with the
+    points that ignores the theme; for a marker it is the diameter of the fill, with its
+    outline around it. Sizes compare equal when they are the same kind with the
     same value. Text sizes resolve against the role's size after font scaling; fixed
     points ignore font scaling.
 

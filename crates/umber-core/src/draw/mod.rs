@@ -233,7 +233,7 @@ pub(crate) fn drawn_marks(
             ResolvedMark::Scatter {
                 mark: scatter_mark,
                 color,
-                size,
+                fill_size,
                 ref mapped,
                 width,
                 ..
@@ -251,7 +251,14 @@ pub(crate) fn drawn_marks(
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
                 if let Some(fill) = point_fill(resolved.color.as_ref(), color, mapped.as_ref()) {
-                    scatter::scatter_items(&context, (&xs, &ys), fill, marker, size, &mut items);
+                    scatter::scatter_items(
+                        &context,
+                        (&xs, &ys),
+                        fill,
+                        marker,
+                        fill_size,
+                        &mut items,
+                    );
                 }
             }
             ResolvedMark::Bar {
@@ -420,10 +427,16 @@ pub(crate) fn drawn_marks(
             ResolvedMark::Stem {
                 mark: stem_mark,
                 color,
-                size,
+                fill_size,
                 ..
             } => {
-                stem::stem_items(&context, resolved, stem_mark, (color, size), &mut items);
+                stem::stem_items(
+                    &context,
+                    resolved,
+                    stem_mark,
+                    (color, fill_size),
+                    &mut items,
+                );
             }
             ResolvedMark::Box {
                 categories,
@@ -494,6 +507,7 @@ pub(crate) fn drawn_marks(
                 groups,
                 color,
                 size,
+                fill_size,
                 orientation,
                 placement,
                 ..
@@ -503,7 +517,7 @@ pub(crate) fn drawn_marks(
                     resolved.along_and_values(orientation),
                     categories,
                     groups,
-                    (color, size, placement),
+                    (color, (size, fill_size), placement),
                     &mut items,
                 );
             }

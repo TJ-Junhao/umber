@@ -108,10 +108,14 @@ impl Geometry {
                 stroke,
                 ..
             } => {
-                if fill.is_some_and(|c| c.a > 0)
-                    || stroke
-                        .as_ref()
-                        .is_some_and(|s| s.color.a > 0 && s.width > 0.0)
+                // A batch of markers is an outline-only item under a fill-only one at the same
+                // positions: only the fill item counts, so each marker counts once.
+                let outline_layer = fill.is_none() && stroke.is_some();
+                if !outline_layer
+                    && (fill.is_some_and(|c| c.a > 0)
+                        || stroke
+                            .as_ref()
+                            .is_some_and(|s| s.color.a > 0 && s.width > 0.0))
                 {
                     self.points.extend(positions.iter().copied().map(xy));
                 }

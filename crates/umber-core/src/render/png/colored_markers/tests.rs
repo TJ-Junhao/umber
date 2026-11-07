@@ -149,6 +149,39 @@ fn shared_sprites_match_original_markers_in_order() {
 }
 
 #[test]
+fn outlines_and_fills_as_separate_items_match_original_markers() {
+    for marker in [Shape::Circle, Shape::Square, Shape::Cross] {
+        let shape = shape(marker);
+        for dpi in [72, 144, 200] {
+            let both = items(&shape, dpi, LineCap::Butt, LineJoin::Miter);
+            let layer = |outline: bool| -> Vec<Item> {
+                both.iter()
+                    .map(|item| {
+                        let Item::Markers {
+                            shape,
+                            fill,
+                            stroke,
+                            positions,
+                        } = item
+                        else {
+                            unreachable!()
+                        };
+                        Item::Markers {
+                            shape: shape.clone(),
+                            fill: if outline { None } else { *fill },
+                            stroke: if outline { stroke.clone() } else { None },
+                            positions: positions.clone(),
+                        }
+                    })
+                    .collect()
+            };
+            assert_exact(&layer(true), dpi);
+            assert_exact(&layer(false), dpi);
+        }
+    }
+}
+
+#[test]
 fn caps_joins_and_open_paths_match_original_markers() {
     let mut open = Path::new();
     open.move_to(Point { x: -3.5, y: 2.0 });
@@ -169,7 +202,8 @@ fn caps_joins_and_open_paths_match_original_markers() {
 fn incompatible_batches_leave_surface_untouched() {
     let base = items(&shape(Shape::Circle), 144, LineCap::Butt, LineJoin::Miter);
     let mut cases = vec![Vec::new(), base[..MIN_BATCH_ITEMS - 1].to_vec()];
-    for change in 0..5 {
+    // An outline or a fill alone is a form of its own: see the layered test.
+    for change in 0..3 {
         let mut items = base.clone();
         for item in &mut items {
             let Item::Markers { fill, stroke, .. } = item else {
@@ -178,9 +212,7 @@ fn incompatible_batches_leave_surface_untouched() {
             match change {
                 0 => fill.as_mut().unwrap().a = 254,
                 1 => stroke.as_mut().unwrap().color.a = 254,
-                2 => stroke.as_mut().unwrap().dash = vec![1.0, 2.0],
-                3 => *fill = None,
-                _ => *stroke = None,
+                _ => stroke.as_mut().unwrap().dash = vec![1.0, 2.0],
             }
         }
         cases.push(items);

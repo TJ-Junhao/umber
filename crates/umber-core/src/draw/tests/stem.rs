@@ -30,7 +30,7 @@ fn limited(theme: Theme) -> Figure {
 fn items(f: &Figure) -> Vec<Item> {
     let scene = f.to_scene(FontLibrary::global()).unwrap();
     assert_scene_bounded(&scene);
-    super::mark_items(&scene).to_vec()
+    super::merged_layers(super::mark_items(&scene))
 }
 
 #[track_caller]

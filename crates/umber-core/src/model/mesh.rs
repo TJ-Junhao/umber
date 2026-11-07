@@ -1911,7 +1911,8 @@ mod tests {
                 }
             }
         }
-        assert_eq!(markers, 2);
+        // Each marker is its outline and its fill.
+        assert_eq!(markers, 4);
     }
 
     #[test]

@@ -100,7 +100,12 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                     shape, positions, ..
                 } => {
                     let (lo, hi) = shape.bounds().unwrap();
-                    (positions[0].x + lo.x, positions[0].y + (lo.y + hi.y) / 2.0)
+                    // The outline lies under the fill: its visible half is outside the
+                    // fill's edge, 0.25 pt wide; sample 0.125 pt beyond the edge.
+                    (
+                        positions[0].x + lo.x - 0.125,
+                        positions[0].y + (lo.y + hi.y) / 2.0,
+                    )
                 }
                 Item::Stroke { path, .. } => {
                     let (lo, hi) = path.bounds().unwrap();
@@ -108,8 +113,9 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                 }
                 _ => unreachable!(),
             };
-            // At 360 dpi the 0.5 pt ring covers a full pixel at the path's left midpoint.
-            let dpi = 360;
+            // At 720 dpi the 0.5 pt ring covers a full pixel at the path's left midpoint, and
+            // the pixel 0.125 pt outside a fill's edge lies wholly in its visible half.
+            let dpi = 720;
             let png = f.to_png(dpi).unwrap();
             let pixels = image::decode_rgba8(&png).unwrap();
             let scale = dpi as f32 / 72.0;

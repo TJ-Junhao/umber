@@ -1757,8 +1757,11 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a ScatterMark,
         /// The marker color.
         color: Rgba,
-        /// The marker diameter as drawn, in points.
+        /// The marker size that layout uses, in points: the legend swatch and the point labels
+        /// measure it. The outline is not part of it, and it is not the fill's diameter.
         size: f32,
+        /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
+        fill_size: f32,
         /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
         /// color; `None` for one marker color.
         mapped: Option<MappedColors<'a>>,
@@ -1911,8 +1914,10 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a StemMark,
         /// The color of the stems and their markers.
         color: Rgba,
-        /// The marker diameter as drawn, in points.
+        /// The marker size that layout uses, in points; not the fill's diameter.
         size: f32,
+        /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
+        fill_size: f32,
     },
     /// Plain or grouped boxes, with each group's statistics computed once.
     Box {
@@ -1985,8 +1990,10 @@ pub(crate) enum ResolvedMark<'a> {
         label: &'a str,
         /// Marker color before opacity.
         color: Rgba,
-        /// Marker diameter in points.
+        /// The marker size that packing uses, in points; not the fill's diameter.
         size: f32,
+        /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
+        fill_size: f32,
         /// Category and value axis order.
         orientation: Orientation,
         /// Offsets within each band.
@@ -4297,6 +4304,7 @@ fn resolve_panel_marks_from<'a>(
                     geometry: None,
                     color,
                     size: theme.drawn_marker_size(mark.options().size),
+                    fill_size: theme.drawn_fill_size(mark.options().size),
                     mapped,
                     width: theme.drawn_line_width(crate::SizeSpec::Auto) * OWN_STROKE_SHARE,
                 }
@@ -4355,6 +4363,7 @@ fn resolve_panel_marks_from<'a>(
                 geometry: None,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
+                fill_size: theme.drawn_fill_size(mark.options().size),
             },
             Mark::Area(mark) => ResolvedMark::Area {
                 mark,
@@ -4546,6 +4555,7 @@ fn resolve_panel_marks_from<'a>(
                     label: &mark.options().label,
                     color: color_of(mark.options().color, &mark.options().label),
                     size: theme.drawn_marker_size(mark.options().size),
+                    fill_size: theme.drawn_fill_size(mark.options().size),
                     orientation,
                     placement: swarm::Placement::Jitter {
                         fraction: mark.options().jitter,
@@ -4560,6 +4570,7 @@ fn resolve_panel_marks_from<'a>(
                 label: &mark.options().label,
                 color: color_of(mark.options().color, &mark.options().label),
                 size: theme.drawn_marker_size(mark.options().size),
+                fill_size: theme.drawn_fill_size(mark.options().size),
                 orientation,
                 placement: swarm::Placement::Swarm,
             },
