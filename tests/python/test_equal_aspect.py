@@ -265,3 +265,24 @@ def test_long_tick_labels_stay_on_the_canvas() -> None:
 def test_padding_counts_towards_the_reach_of_bubbles() -> None:
     ax = ub.Figure(6, 1.16).add_axes().bubbles([0, 1], [0, 1], [1, 1]).equal_aspect()
     assert ax.figure.to_svg()
+
+
+def test_a_label_with_no_clear_position_beside_equal_aspect_fails() -> None:
+    def render(equal: bool) -> str:
+        fig = ub.Figure(4, 1.6, cols=2, legend=ub.Legend.PER_PANEL)
+        left = fig.add_axes(col=0).line([0, 1], [0, 1])
+        if equal:
+            left.equal_aspect()
+        fig.add_axes(col=1).scatter(
+            [0, 50, 50],
+            [0, 8, 8],
+            annotate=True,
+            size=ub.Size.pt(6),
+            label_size=ub.Size.pt(18),
+            format=ub.TickFormat.fixed(3),
+        )
+        with pytest.raises(ub.StyleError) as caught:
+            fig.to_svg()
+        return str(caught.value)
+
+    assert render(True) == render(False)

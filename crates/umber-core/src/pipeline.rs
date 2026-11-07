@@ -371,8 +371,8 @@ pub(crate) enum Rooms<'a> {
     /// rooms: each solve of the grid gives the plots, and nothing is refused that depends on
     /// where things are placed, since it is the final figure that has to hold them. The reference
     /// lands in `settled` once the layout is complete. `equal` says which panels have the setting
-    /// in that final figure: they count their hexbins themselves there, so their cells are no
-    /// reason to stop here.
+    /// in that final figure: they are laid out and drawn again there, so what fails on them here
+    /// is no error, and a panel that fails to draw is left out.
     Reference {
         /// Where the reference lands.
         settled: &'a std::cell::RefCell<Option<Reference>>,
@@ -1639,23 +1639,20 @@ fn hexbin_counts(panel: &Panel<'_>) -> Vec<crate::bin2d::HexBins> {
 /// The same figure as `figure` without equal aspect, for the plots of `figure` to shrink in;
 /// `None` for a figure without the setting, which solves the grid itself.
 ///
-/// The reference is that figure laid out to the end, with its own hexbin counts and the sides
-/// of its own value labels, so its rooms hold nothing that the setting changed.
+/// The reference is that figure laid out and drawn to the end, with its own hexbin counts and
+/// the sides of its own value labels, so its rooms hold nothing that the setting changed.
 ///
-/// A layout that fails is an error of `figure` too, so it is raised here, on whichever pass of
-/// the labels it comes. The panels with the setting are the one exception: their hexbins are
-/// counted again in `figure`, so cells that cannot be counted or do not settle there are left
-/// as they are ([`Rooms::Reference`]), and `figure` decides about them.
-///
-/// Nothing but a completed layout counts as a reference, so every hexbin of a panel without the
-/// setting in it is counted and settled. After the layout, only drawing can fail, or labels that
-/// do not settle. The reference is then that of the last completed layout: the rooms hold, and
-/// `figure` draws all its panels itself, so the same error comes from it for the panels the
-/// setting leaves alone, and a panel with the setting is judged on its own plot.
+/// What fails on a panel without the setting fails `figure`, so it is raised here, with the cell
+/// it names. A panel with the setting is the exception: it is laid out and drawn again on
+/// another plot, so cells that cannot be counted, marks and labels that do not fit and labels
+/// that do not settle are left aside for `figure` to judge ([`Rooms::Reference`]). Only a
+/// completed layout counts as a reference, so every hexbin of a panel without the setting in
+/// it is counted and settled.
 ///
 /// # Errors
 ///
-/// As [`plan_panels`], for a layout that fails.
+/// As [`plan_panels`] and [`draw_scene`], and the error of labels that do not settle, for what
+/// fails outside the panels with the setting.
 fn reference_rooms(
     figure: &Figure,
     groups: &ShareGroups,
@@ -1672,10 +1669,11 @@ fn reference_rooms(
         .map(|layer| layer.cartesian().is_some_and(Axes::has_equal_aspect))
         .collect();
     let mut complete = None;
-    let mut no_layout = false;
-    let outcome = point_labels::fit_then_place(|held| {
+    let mut pass = 0;
+    let scene = point_labels::fit_then_place(|held| {
+        pass += 1;
         let settled = std::cell::RefCell::new(None);
-        let mut records = panels(&plain, groups, fonts).inspect_err(|_| no_layout = true)?;
+        let mut records = panels(&plain, groups, fonts)?;
         if let Some(held) = held {
             for (panel, sides) in records.iter_mut().zip(held) {
                 panel.points.hold(sides.clone());
@@ -1685,18 +1683,21 @@ fn reference_rooms(
             settled: &settled,
             equal: &equal,
         };
-        let drawn = draw_scene(&plain, &mut records, groups, fonts, context, labels, rooms);
-        match settled.into_inner() {
-            Some(reference) => complete = Some(reference),
-            None => no_layout = true,
+        let (scene, mut placements) =
+            draw_scene(&plain, &mut records, groups, fonts, context, labels, rooms)?;
+        complete = settled.into_inner().or(complete.take());
+        if pass == point_labels::MAX_PASSES {
+            for (placement, _) in placements
+                .iter_mut()
+                .zip(&equal)
+                .filter(|(_, equal)| **equal)
+            {
+                placement.accept();
+            }
         }
-        drawn
-    });
-    match outcome {
-        Err(error) if no_layout => Err(error),
-        // Drawing errors are for the figure itself to raise.
-        Ok(_) | Err(_) => Ok(complete),
-    }
+        Ok((scene, placements))
+    })?;
+    scene.map(|_| complete)
 }
 
 /// The most layouts [`bubbles_error`] makes of a figure at larger sizes.
@@ -1837,9 +1838,10 @@ fn bubbles_error(
     last.needs_figure(context, size, own)
 }
 
-/// Whether the hexbins of the panel at `index` are counted by the final figure, whatever they do
-/// on the way to `rooms`: on a reference, those of a panel that has equal aspect there.
-fn counted_later(rooms: Rooms<'_>, index: usize) -> bool {
+/// Whether the final figure judges the panel at `index` itself, so that nothing it does in
+/// `rooms` is an error: on a reference, a panel that has equal aspect there, whose cells are
+/// counted and whose marks and labels are placed again on another plot.
+fn judged_later(rooms: Rooms<'_>, index: usize) -> bool {
     matches!(rooms, Rooms::Reference { equal, .. } if equal[index])
 }
 
@@ -2023,7 +2025,7 @@ fn lay_out(
                 Ok(())
             };
             match count() {
-                Err(_) if counted_later(passing, i) => {}
+                Err(_) if judged_later(passing, i) => {}
                 outcome => outcome?,
             }
             if pass == 0 || recount {
@@ -2060,7 +2062,7 @@ fn lay_out(
     let settled_enough = moving
         .iter()
         .enumerate()
-        .all(|(i, moves)| !moves || counted_later(passing, i));
+        .all(|(i, moves)| !moves || judged_later(passing, i));
     if settled_enough {
         return Ok(planned);
     }
@@ -2356,11 +2358,11 @@ fn draw_scene(
     // Judged against the settled layout only, as the errors of value columns: an earlier pass
     // may lay the plot out smaller and thin out a highlighted label that the last one shows.
     let mut settled_error = check_tick_highlights(figure, panels, &planned, context)?;
-    let mut layers = draw_layers(figure, panels, &planned, fonts, context)?;
+    let mut layers = draw_layers(figure, panels, &planned, fonts, context, rooms)?;
     let mut placements: Vec<point_labels::Placement> = std::iter::repeat_with(Default::default)
         .take(panels.len())
         .collect();
-    let mut points = place_point_labels(figure, panels, &planned, &layers, context)?;
+    let mut points = place_point_labels(figure, panels, &planned, &layers, context, rooms)?;
     let mut annotations = Vec::new();
     let mut paired_legends = vec![None; panels.len()];
     for (i, (panel, (resolved, layout))) in panels.iter().zip(&planned.panels).enumerate() {
@@ -2410,6 +2412,7 @@ fn draw_scene(
             ),
         ) {
             Ok(column) => column,
+            Err(_) if judged_later(rooms, i) => None,
             Err(err) => {
                 // Judged against the settled layout only: see `scene_with_labels`.
                 settled_error.get_or_insert_with(|| in_cell(figure, panel.axes, err));
@@ -2469,9 +2472,12 @@ fn draw_scene(
                 caption_top: planned.header.caption.top(),
             },
             context,
-        )
-        .map_err(|err| in_cell(figure, panel.axes, err))?;
-        annotations.extend(notes);
+        );
+        match notes {
+            Ok(notes) => annotations.extend(notes),
+            Err(_) if judged_later(rooms, i) => {}
+            Err(err) => return Err(in_cell(figure, panel.axes, err)),
+        }
     }
     for (source, bar) in &planned.solution.colorbars {
         if let Some(color) = &planned.panels[*source].0.color {
@@ -2507,51 +2513,58 @@ struct LayerMarks {
 ///
 /// As [`draw::check_images`], [`draw::check_points`], [`draw::drawn_marks`],
 /// [`draw::heatmap_annotations`] and [`bar_labels::items`], for the first layer that fails,
-/// named by its cell.
+/// named by its cell. A layer that `rooms` leaves to be judged later is `None` instead
+/// ([`judged_later`]).
 fn draw_layers(
     figure: &Figure,
     panels: &[Panel<'_>],
     planned: &FigurePlan,
     fonts: &SceneFonts<'_>,
     context: &'static str,
+    rooms: Rooms<'_>,
 ) -> Result<Vec<Option<LayerMarks>>> {
     let theme = figure.theme();
+    let layer = |panel: &Panel<'_>, (resolved, layout): &(Resolved, Layout)| {
+        let Some(axes) = panel.axes.cartesian() else {
+            return Ok(None);
+        };
+        let cell = |err| in_cell(figure, panel.axes, err);
+        draw::check_images(resolved, layout, &panel.marks, context).map_err(cell)?;
+        draw::check_points(resolved, layout, &panel.marks, context).map_err(cell)?;
+        let drawn =
+            draw::drawn_marks(theme, fonts, resolved, layout, &panel.marks).map_err(cell)?;
+        let notes = draw::heatmap_annotations(
+            theme,
+            fonts,
+            resolved,
+            layout,
+            &panel.marks,
+            (axes.y_tick_format(), context),
+        )
+        .map_err(cell)?;
+        let values = bar_labels::items(
+            theme,
+            resolved,
+            layout,
+            axes,
+            &panel.marks,
+            &panel.labels,
+            context,
+        )
+        .map_err(cell)?;
+        Ok(Some(LayerMarks {
+            drawn,
+            notes,
+            values,
+        }))
+    };
     panels
         .iter()
         .zip(&planned.panels)
-        .map(|(panel, (resolved, layout))| {
-            let Some(axes) = panel.axes.cartesian() else {
-                return Ok(None);
-            };
-            let cell = |err| in_cell(figure, panel.axes, err);
-            draw::check_images(resolved, layout, &panel.marks, context).map_err(cell)?;
-            draw::check_points(resolved, layout, &panel.marks, context).map_err(cell)?;
-            let drawn =
-                draw::drawn_marks(theme, fonts, resolved, layout, &panel.marks).map_err(cell)?;
-            let notes = draw::heatmap_annotations(
-                theme,
-                fonts,
-                resolved,
-                layout,
-                &panel.marks,
-                (axes.y_tick_format(), context),
-            )
-            .map_err(cell)?;
-            let values = bar_labels::items(
-                theme,
-                resolved,
-                layout,
-                axes,
-                &panel.marks,
-                &panel.labels,
-                context,
-            )
-            .map_err(cell)?;
-            Ok(Some(LayerMarks {
-                drawn,
-                notes,
-                values,
-            }))
+        .enumerate()
+        .map(|(i, (panel, plan))| match layer(panel, plan) {
+            Err(_) if judged_later(rooms, i) => Ok(None),
+            outcome => outcome,
         })
         .collect()
 }
@@ -2564,12 +2577,14 @@ fn draw_layers(
 /// # Errors
 ///
 /// As [`point_labels::items`], for the first label that cannot be placed, named by its cell.
+/// Labels that `rooms` leaves to be judged later are `None` instead ([`judged_later`]).
 fn place_point_labels(
     figure: &Figure,
     panels: &[Panel<'_>],
     planned: &FigurePlan,
     layers: &[Option<LayerMarks>],
     context: &'static str,
+    rooms: Rooms<'_>,
 ) -> Result<Vec<Option<point_labels::Placed>>> {
     let theme = figure.theme();
     // The plot each layer is drawn in: its own for a primary axes, its parent's for a twin.
@@ -2608,8 +2623,12 @@ fn place_point_labels(
                 &mut obstacles,
                 context,
             )
-            .map_err(|err| in_cell(figure, panel.axes, err))?;
-            placed[i] = Some(labels);
+            .map_err(|err| in_cell(figure, panel.axes, err));
+            match labels {
+                Ok(labels) => placed[i] = Some(labels),
+                Err(_) if judged_later(rooms, i) => {}
+                Err(err) => return Err(err),
+            }
         }
     }
     Ok(placed)

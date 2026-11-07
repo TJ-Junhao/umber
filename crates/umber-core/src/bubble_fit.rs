@@ -37,7 +37,8 @@
 //!
 //! On a panel with equal aspect the plot takes its shape from its limits, so both axes are
 //! fitted together, on one scale in points per data unit ([`fit_jointly`]): the largest at which
-//! the data and every reach fit the room of the plot. Nothing in that fit is particular to
+//! the data and every reach fit the room of the plot, or a smaller one on an axis whose padding
+//! keeps an end at 0. Nothing in that fit is particular to
 //! bubbles, so whatever reaches by a number of points takes part as a reach.
 //!
 //! When no extent holds the bubbles of an axis, the layout fails ([`BubbleFits::failure`]): a
@@ -942,9 +943,11 @@ impl ScaleAxis {
 /// the room: far below anything visible, and above the rounding of the steps.
 const SCALE_TOLERANCE: f64 = 1e-12;
 
-/// The largest scale, in points per data unit, at which the limits of both `axes` fit their
-/// rooms; otherwise the index of the axis that no scale holds, with the bubble whose reach
-/// decides that.
+/// The largest scale, in points per data unit, at which the limits of both `axes`, as each
+/// [`ScaleAxis`] measures them, fit their rooms; otherwise the index of the axis that no scale
+/// holds, with the bubble whose reach decides that. That is the largest scale there is on
+/// [`Exact`](ExtentPadding::Exact) and [`BothSides`](ExtentPadding::BothSides) axes, and a
+/// conservative one on [`KeepZero`](ExtentPadding::KeepZero) axes (see [`fit_jointly`]).
 ///
 /// The worst share of the room over both axes is convex and piecewise linear in the scale, so
 /// the scales that fit form one interval, and this is its upper end. Newton's method from the
@@ -993,6 +996,14 @@ fn largest_scale(axes: &[ScaleAxis; 2]) -> std::result::Result<f64, (usize, Opti
 /// the fits hold, whichever mark it comes from, so everything that reaches by a number of points
 /// takes part. The fit is made again only when a reach leaves a plot that tick labels have since
 /// made smaller.
+///
+/// The scale is the largest that holds the marks on [`ExtentPadding::Exact`] and
+/// [`ExtentPadding::BothSides`] axes, whose padding is known. On a
+/// [`ExtentPadding::KeepZero`] axis it is conservative: an end at 0 stays or moves depending on
+/// the extent, so the padding is charged in full and never counted towards a reach. The scale can
+/// then be smaller than need be, and bubbles that reach most of the room are refused although
+/// some limits would hold them; the error names a figure that holds them, and explicit limits
+/// are the other way out.
 ///
 /// No scale fits only when the reaches alone leave no room along one axis, whatever the other
 /// does: that axis fails, measured against the room, so only its side of the figure has to grow.

@@ -658,6 +658,38 @@ fn bubbles_fit_a_flat_domain_at_its_own_figure_size() {
     assert!(lo * scale <= -18.0 && (hi - 1.0) * scale >= 18.0);
 }
 
+#[test]
+fn a_kept_zero_is_charged_and_refuses_what_limits_could_hold() {
+    // An area keeps y at 0, so the padding of y counts for nothing and the fit is conservative:
+    // the bubbles alone fit this figure, and with the area they need a taller one.
+    let build = |height: f64| {
+        let mut f = Figure::new(6.0, height, Theme::pigment()).unwrap();
+        let mut axes = f.add_axes(LINEAR, LINEAR).unwrap();
+        axes.area(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            crate::AreaOptions::default(),
+        )
+        .unwrap();
+        axes.bubbles(
+            &[0.0, 1.0],
+            &[0.0, 1.0],
+            &[1.0, 1.0],
+            BubbleOptions::default(),
+        )
+        .unwrap();
+        axes.equal_aspect().unwrap();
+        f
+    };
+    let error = build(1.16).to_scene(lib()).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("need a figure at least"), "{message}");
+    let [width, height] = named_size(&message);
+    assert_eq!(width, 6.0 * 72.0);
+    let (resolved, layout) = plan_figure(&build(height / 72.0), (0, 0), lib());
+    assert_equal_scales(&resolved, &layout);
+}
+
 /// The size a bubbles error names, in points.
 fn named_size(message: &str) -> [f64; 2] {
     let sides: Vec<f64> = message
@@ -1010,6 +1042,84 @@ fn what_fails_on_another_panel_fails_with_equal_aspect() {
         axes.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
     };
     fails_either_way(|equal| left_and_right((12.0, 3.0), equal, plain_line, labels));
+}
+
+#[test]
+fn a_label_with_no_clear_position_beside_equal_aspect_fails() {
+    let build = |equal: bool| {
+        let grid = Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel);
+        let mut f = Figure::with_grid(4.0, 1.6, Theme::pigment(), grid).unwrap();
+        let mut left = f.add_axes_at(at(0), LINEAR, LINEAR).unwrap();
+        plain_line(&mut left);
+        if equal {
+            left.equal_aspect().unwrap();
+        }
+        f.add_axes_at(at(1), LINEAR, LINEAR)
+            .unwrap()
+            .scatter(
+                AxisData::Numbers(vec![0.0, 50.0, 50.0]),
+                &[0.0, 8.0, 8.0],
+                ScatterOptions {
+                    size: crate::SizeSpec::pt(6.0).unwrap(),
+                    labels: PointLabels {
+                        annotate: true,
+                        format: Some(crate::TickFormat::fixed(3).unwrap()),
+                        size: crate::SizeSpec::pt(18.0).unwrap(),
+                        ..PointLabels::default()
+                    },
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        f
+    };
+    fails_either_way(build);
+    let error = build(true).to_scene(lib()).unwrap_err();
+    assert!(matches!(error, Error::Style { .. }), "{error}");
+    let message = error.to_string();
+    assert!(message.contains("row 0, col 1: "), "{message}");
+    assert!(message.contains("8.000"), "{message}");
+}
+
+#[test]
+fn what_fails_on_a_panel_with_the_setting_is_judged_on_its_own_plot() {
+    // Without the setting the fixed-side label leaves the plot; the reference lets that pass,
+    // and the panel is judged on the plot it gets.
+    let left = |axes: &mut crate::AxesMut<'_>| {
+        axes.scatter(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            ScatterOptions {
+                labels: PointLabels {
+                    annotate: true,
+                    place: Place::Above,
+                    ..PointLabels::default()
+                },
+                ..ScatterOptions::default()
+            },
+        )
+        .unwrap();
+        axes.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
+    };
+    let plain = left_and_right((12.0, 3.0), false, left, plain_line);
+    assert!(plain.to_scene(lib()).is_err());
+    let equal = left_and_right((12.0, 3.0), true, left, plain_line);
+    let fonts = crate::layout::figure_fonts(lib(), equal.theme())
+        .unwrap()
+        .in_context("Figure.to_scene()");
+    let reference = super::reference_rooms(
+        &equal,
+        &crate::model::ShareGroups::new(&equal),
+        &fonts,
+        "Figure.to_scene()",
+        &crate::layout::LabelCache::new(&fonts),
+    );
+    assert!(reference.is_ok_and(|reference| reference.is_some()));
+    // The label fails in the end all the same, raised by the final figure.
+    assert_eq!(
+        equal.to_scene(lib()).unwrap_err().to_string(),
+        plain.to_scene(lib()).unwrap_err().to_string()
+    );
 }
 
 #[test]
