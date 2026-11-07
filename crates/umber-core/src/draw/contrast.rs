@@ -45,21 +45,21 @@ pub(super) const TEXT_CONTRAST: f64 = 4.5;
 /// The number of equal steps of one unit of Oklab lightness in the search of [`readable_text`].
 const TEXT_STEPS: u32 = 1024;
 
-/// The color for text written in the series color `color` on the theme's background: `color`
-/// itself, bit for bit, when its contrast ratio against the background is at least
-/// [`TEXT_CONTRAST`]. Otherwise its Oklab lightness moves away from the background (down when
-/// the background's lightness is at least 0.5, up otherwise), a and b unchanged, by the
-/// smallest multiple of `1 / 1024` that reaches [`TEXT_CONTRAST`], staying in the sRGB gamut by
-/// clamping each channel as [`from_oklab`] does. When even black or white does not reach it,
-/// that extreme is returned. The alpha of `color` is kept.
+/// The color for text written in the series color `color` on the theme's background: always
+/// opaque, since text in a series color is drawn at full opacity. When `color`'s channels
+/// already reach [`TEXT_CONTRAST`] against the background they are returned unchanged, bit for
+/// bit. Otherwise its Oklab lightness moves away from the background (down when the
+/// background's lightness is at least 0.5, up otherwise), a and b unchanged, by the smallest
+/// multiple of `1 / 1024` that reaches [`TEXT_CONTRAST`], staying in the sRGB gamut by clamping
+/// each channel as [`from_oklab`] does. When that direction cannot reach it, as on a mid-gray
+/// background where black falls short, the other direction is searched the same way; on an
+/// opaque background black or white always reaches it.
 pub(super) fn readable_text(color: Rgba, theme: &Theme) -> Rgba {
     let background = theme.background();
+    let color = Rgba { a: 255, ..color };
     match readable_step(color, background) {
         None => color,
-        Some((step, lightness, chroma, darker)) => Rgba {
-            a: color.a,
-            ..text_step(lightness, chroma, darker, step)
-        },
+        Some((step, lightness, chroma, darker)) => text_step(lightness, chroma, darker, step),
     }
 }
 
@@ -71,15 +71,30 @@ fn readable_step(color: Rgba, background: Rgba) -> Option<(u32, f64, [f64; 2], b
         return None;
     }
     let [lightness, a, b] = to_oklab(color);
-    let darker = to_oklab(background)[0] >= 0.5;
-    let room = if darker { lightness } else { 1.0 - lightness };
-    let last = (room * f64::from(TEXT_STEPS)).ceil() as u32;
-    let step = (1..=last)
-        .find(|&step| {
-            contrast_ratio(text_step(lightness, [a, b], darker, step), background) >= TEXT_CONTRAST
+    let preferred = to_oklab(background)[0] >= 0.5;
+    let first_passing = |darker: bool| {
+        let room = if darker { lightness } else { 1.0 - lightness };
+        let last = (room * f64::from(TEXT_STEPS)).ceil() as u32;
+        (1..=last).find_map(|step| {
+            let moved = text_step(lightness, [a, b], darker, step);
+            (contrast_ratio(moved, background) >= TEXT_CONTRAST).then_some((
+                step,
+                lightness,
+                [a, b],
+                darker,
+            ))
         })
-        .unwrap_or(last);
-    Some((step, lightness, [a, b], darker))
+    };
+    // Black and white end the two searches, and one of them reaches the contrast on any opaque
+    // background, so the second search finds a step when the first does not. Should neither
+    // find one, the answer is whichever of black and white has the higher contrast.
+    first_passing(preferred)
+        .or_else(|| first_passing(!preferred))
+        .or_else(|| {
+            let black = contrast_ratio(Rgba::opaque(0, 0, 0), background);
+            let white = contrast_ratio(Rgba::opaque(255, 255, 255), background);
+            Some((TEXT_STEPS, 0.5, [0.0, 0.0], black >= white))
+        })
 }
 
 /// The opaque color at Oklab lightness `lightness` moved by `step / 1024` down (`darker`) or up,
@@ -334,15 +349,44 @@ mod tests {
     }
 
     #[test]
-    fn series_text_keeps_the_alpha_of_the_series_color() {
-        let theme = Theme::pigment();
-        let translucent = Rgba {
-            a: 80,
-            ..theme.palette()[2]
+    fn series_text_is_opaque_and_judged_composited() {
+        let theme = Theme::graphite();
+        let background = theme.background();
+        let line = Rgba {
+            a: 0x50,
+            ..Rgba::opaque(0xF2, 0xA9, 0x00)
         };
-        let text = readable_text(translucent, &theme);
-        assert_eq!(text.a, 80);
-        assert!(contrast_ratio(text, theme.background()) >= TEXT_CONTRAST);
-        assert_ne!(text, translucent);
+        let text = readable_text(line, &theme);
+        assert_eq!(text.a, 255);
+        // Drawn at full opacity, the text is what the ratio measures.
+        assert!(contrast_ratio(text, background) >= TEXT_CONTRAST);
+        // An opaque color that reads comes back unchanged.
+        let reads = Rgba::opaque(0x23, 0x3F, 0x86);
+        assert_eq!(readable_text(reads, &theme), reads);
+        assert_eq!(readable_text(Rgba { a: 10, ..reads }, &theme), reads);
+    }
+
+    #[test]
+    fn series_text_on_a_mid_gray_background_takes_the_direction_that_reaches_it() {
+        for gray in [0x66, 0x70, 0x77, 0x80, 0x8C, 0x99] {
+            let theme = Theme::pigment()
+                .with_background(Rgba::opaque(gray, gray, gray))
+                .unwrap();
+            for color in [
+                Rgba::opaque(gray, gray, gray),
+                Rgba::opaque(0xF2, 0xA9, 0x00),
+                Rgba::opaque(0x4F, 0x6F, 0xA3),
+            ] {
+                let text = readable_text(color, &theme);
+                let ratio = contrast_ratio(text, theme.background());
+                assert!(ratio >= TEXT_CONTRAST, "{color:?} on {gray:#x}: {ratio}");
+            }
+        }
+        // Black reaches only 3.66:1 on #666666, white 5.74:1.
+        let theme = Theme::graphite()
+            .with_background(Rgba::opaque(0x66, 0x66, 0x66))
+            .unwrap();
+        let text = readable_text(Rgba::opaque(0x66, 0x66, 0x66), &theme);
+        assert!(to_oklab(text)[0] > 0.5, "{text:?}");
     }
 }

@@ -350,19 +350,25 @@ impl ScatterLabels {
             } else {
                 format!("the series {}", quoted(&options.label))
             };
+            // A color-mapped mark's labels are in the theme's text color, not a series color.
+            let text_color = if mapped.is_some() {
+                solid(*color)
+            } else {
+                readable_text(solid(*color), theme)
+            };
             match Placing::of(labels.place) {
                 Placing::InPlot(side) => measured.push(MarkLabels {
                     mark: index,
                     name,
                     side,
-                    color: readable_text(solid(*color), theme),
+                    color: text_color,
                     reach: marker_reach(options.marker, *size, marker_outline(mapped.is_some())),
                     points,
                 }),
                 Placing::Column if points.is_empty() => {}
                 Placing::Column => columns.push(column::ColumnValues::measure(
                     (lib, theme),
-                    (index, name, readable_text(solid(*color), theme)),
+                    (index, name, text_color),
                     points,
                     (on_x, format, labels.size),
                 )?),

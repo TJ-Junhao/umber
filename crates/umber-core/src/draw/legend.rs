@@ -23,7 +23,7 @@ const CHIP_TINT: f32 = 0.14;
 /// The legend of `layout` as one unclipped group: for each row entry in order, its chip when it
 /// has one, its swatch, and then its label in the theme's text color; then for each direct
 /// label in order, its end dot in the line color and its label when it has them, in the line
-/// color moved to reach [`readable_text`]'s contrast with the background. `None`
+/// color at full opacity, moved to reach [`readable_text`]'s contrast with the background. `None`
 /// when the legend has neither, so a figure without a legend gets no group.
 pub(crate) fn legend(theme: &Theme, layout: &Layout) -> Option<Item> {
     let (entries, direct) = (layout.legend.entries(), &layout.direct);

@@ -83,3 +83,4 @@ value-column-fold-row-pigment
 value-column-forest-graphite
 value-column-forest-pigment
 value-column-twin-row-pigment
+fig-direct-faded

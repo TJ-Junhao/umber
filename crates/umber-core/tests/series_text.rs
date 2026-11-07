@@ -408,3 +408,94 @@ fn png_svg_and_pdf_agree_on_the_moved_text_color() {
         eprintln!("skipped the PDF raster comparison: pdftoppm is not installed");
     }
 }
+
+#[test]
+fn a_translucent_series_gets_opaque_readable_label_text() {
+    let theme = Theme::graphite();
+    let line = Rgba {
+        a: 0x50,
+        ..Rgba::opaque(0xF2, 0xA9, 0x00)
+    };
+    let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes(&mut f)
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+            &[0.0, 1.0, 2.0],
+            LineOptions {
+                label: "Faint".to_owned(),
+                color: ColorSpec::Fixed(line),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    let scene = render(&f);
+    let label = text(&scene, "Faint");
+    assert_eq!(label.color.a, 255);
+    assert!(
+        ratio(label.color, theme.background()) >= LEAST,
+        "{:?}",
+        label.color
+    );
+    // The line and the end dot keep their color and alpha.
+    let marks: Vec<Rgba> = leaves(&scene.items)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Stroke { style, .. } => Some(style.color),
+            Item::Fill {
+                paint: Paint::Solid(c),
+                ..
+            } => Some(*c),
+            _ => None,
+        })
+        .collect();
+    assert!(marks.contains(&line), "{marks:?}");
+}
+
+#[test]
+fn a_mid_gray_page_gets_label_text_that_reads() {
+    let gray = Rgba::opaque(0x66, 0x66, 0x66);
+    let theme = Theme::graphite().with_background(gray).unwrap();
+    let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes(&mut f)
+        .line(
+            AxisData::Numbers(vec![0.0, 1.0, 2.0]),
+            &[0.0, 1.0, 2.0],
+            LineOptions {
+                label: "Gray".to_owned(),
+                color: ColorSpec::Fixed(gray),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    let label = text(&render(&f), "Gray").color;
+    assert!(ratio(label, gray) >= LEAST, "{label:?}");
+}
+
+#[test]
+fn color_mapped_labels_keep_the_theme_text_color() {
+    let theme = Theme::pigment().with_text_color(PALE).unwrap();
+    for place in [Place::Right, Place::Column] {
+        let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes(&mut f)
+            .scatter(
+                AxisData::Numbers(vec![1.0, 2.0]),
+                &[5.5, 6.5],
+                ScatterOptions {
+                    color: PointColor::By(umber_core::ColorBy::new(vec![0.0, 1.0])),
+                    labels: PointLabels {
+                        annotate: true,
+                        place,
+                        ..PointLabels::default()
+                    },
+                    ..ScatterOptions::default()
+                },
+            )
+            .unwrap();
+        let scene = render(&f);
+        assert_eq!(text(&scene, "5.5").color, PALE, "{place:?}");
+        assert_eq!(text(&scene, "6.5").color, PALE, "{place:?}");
+    }
+}
