@@ -6,7 +6,8 @@ Run from any directory:
 
 The tag must be ``v`` followed by the version of the ``umber-py`` crate, which maturin uses as
 the Python package version. ``pyproject.toml`` must declare the version as dynamic, so the
-crate stays its single source.
+crate stays its single source. A ``-dev`` version marks unreleased development on main and
+cannot be released.
 """
 
 from __future__ import annotations
@@ -43,6 +44,20 @@ def crate_version() -> str:
     return str(versions[0])
 
 
+def check_tag(tag: str, version: str) -> None:
+    """Exit with an error unless ``tag`` names the release ``version``."""
+    if "-dev" in version:
+        raise SystemExit(
+            f"error: the package version {version} is a development version, not a release;\n"
+            "hint: set the release version in Cargo.toml first"
+        )
+    if tag != f"v{version}":
+        raise SystemExit(
+            f"error: tag {tag} does not match the package version {version};\n"
+            f"hint: tag the release v{version}, or change the version in Cargo.toml first"
+        )
+
+
 def main() -> None:
     """Compare the tag given on the command line with the crate and project versions."""
     if len(sys.argv) != 2:
@@ -57,11 +72,7 @@ def main() -> None:
         )
 
     version = crate_version()
-    if tag != f"v{version}":
-        raise SystemExit(
-            f"error: tag {tag} does not match the package version {version};\n"
-            f"hint: tag the release v{version}, or change the version in Cargo.toml first"
-        )
+    check_tag(tag, version)
     print(f"tag {tag} matches the package version {version}")
 
 
