@@ -22,33 +22,62 @@ const MIN_BATCH_ITEMS: usize = PHASES * PHASES;
 /// The budget includes pixels, row spans and conservative vector/hash-table storage estimates.
 const COLORED_CACHE_BYTES: usize = 16 * 1024 * 1024;
 
-/// The prefix of marker items with the same geometry and opaque fills and outlines.
+/// Which of its two layers a marker item draws: both, or the outline and the fill of a batch
+/// as separate items, as scatters give them.
+#[derive(Clone, Copy, PartialEq)]
+struct Form {
+    fill: bool,
+    stroke: bool,
+}
+
+/// The form of `item` if it is a marker item with only opaque fills and outlines.
+fn form(item: &Item) -> Option<Form> {
+    let Item::Markers { fill, stroke, .. } = item else {
+        return None;
+    };
+    if fill.is_some_and(|fill| fill.a != 255)
+        || stroke
+            .as_ref()
+            .is_some_and(|s| s.color.a != 255 || !s.dash.is_empty())
+        || (fill.is_none() && stroke.is_none())
+    {
+        return None;
+    }
+    Some(Form {
+        fill: fill.is_some(),
+        stroke: stroke.is_some(),
+    })
+}
+
+/// The prefix of marker items with the same geometry, form and opaque fills and outlines.
 fn matching(items: &[Item]) -> usize {
     let Some(Item::Markers {
         shape,
-        fill: Some(fill),
-        stroke: Some(stroke),
+        stroke: first,
         ..
     }) = items.first()
     else {
         return 0;
     };
-    if fill.a != 255 || stroke.color.a != 255 || !stroke.dash.is_empty() {
+    let Some(first_form) = items.first().and_then(form) else {
         return 0;
-    }
+    };
     items
         .iter()
         .take_while(|item| {
             #[cfg(test)]
             tests::MATCHING_ITEMS.with(|count| count.set(count.get() + 1));
-            matches!(item, Item::Markers {
-                shape: other,
-                fill: Some(fill),
-                stroke: Some(style),
-                ..
-            } if other == shape && fill.a == 255 && style.color.a == 255
-                && style.width == stroke.width && style.cap == stroke.cap
-                && style.join == stroke.join && style.dash.is_empty())
+            matches!(item, Item::Markers { shape: other, stroke: style, .. }
+            if other == shape
+                && form(item) == Some(first_form)
+                && match (style, first) {
+                    (Some(style), Some(first)) => {
+                        style.width == first.width
+                            && style.cap == first.cap
+                            && style.join == first.join
+                    }
+                    _ => true,
+                })
         })
         .count()
 }
@@ -62,12 +91,10 @@ pub(super) fn draw(surface: &mut Surface<'_>, items: &[Item]) -> usize {
     if matching(&items[..items.len().min(MIN_BATCH_ITEMS)]) < MIN_BATCH_ITEMS {
         return 0;
     }
-    let Item::Markers {
-        shape,
-        stroke: Some(style),
-        ..
-    } = &items[0]
-    else {
+    let Item::Markers { shape, stroke, .. } = &items[0] else {
+        return 0;
+    };
+    let Some(first_form) = form(&items[0]) else {
         return 0;
     };
     let Some(normalized) = normalize_path(shape) else {
@@ -76,17 +103,30 @@ pub(super) fn draw(surface: &mut Surface<'_>, items: &[Item]) -> usize {
     let Some(path) = convert_path(&normalized) else {
         return 0;
     };
-    let Some(stroke) = prepare_stroke(&normalized, &path, style, surface.root) else {
-        return 0;
+    let prepared = match stroke {
+        Some(style) => {
+            let Some(prepared) = prepare_stroke(&normalized, &path, style, surface.root) else {
+                return 0;
+            };
+            Some(prepared)
+        }
+        None => None,
     };
     let marker = Marker {
         path,
-        fill: Some(solid_paint(Rgba::opaque(255, 255, 255))),
-        stroke: Some(stroke),
+        fill: first_form
+            .fill
+            .then(|| solid_paint(Rgba::opaque(255, 255, 255))),
+        stroke: prepared,
     };
     // Hairlines can visit a pixel more than once: retain the original colored rendering,
-    // rather than trying to recover those visits from their combined coverage.
-    if style.width * surface.scale.get() <= 1.0 {
+    // rather than trying to recover those visits from their combined coverage. The layers
+    // of a batch as separate items are rendered as sprites of their own colors, as the
+    // ordinary path renders them.
+    let hairline = stroke
+        .as_ref()
+        .is_some_and(|style| style.width * surface.scale.get() <= 1.0);
+    if hairline || !(first_form.fill && first_form.stroke) {
         draw_run(surface, items, marker, Cached::new(COLORED_CACHE_BYTES))
     } else {
         draw_run(surface, items, marker, Coverage)
@@ -106,19 +146,23 @@ fn draw_run<K: SpriteKind<Colors = (Rgba, Rgba)>>(
     let items = &items[..matching(items)];
     let mut sprites = Some(sprites);
     let mut queue = Vec::new();
+    // The color of a layer that an item does not draw is never used.
+    let unused = Rgba::opaque(0, 0, 0);
     for item in items {
         let Item::Markers {
-            fill: Some(fill),
-            stroke: Some(style),
+            fill,
+            stroke,
             positions,
             ..
         } = item
         else {
             continue;
         };
-        marker.fill = Some(solid_paint(*fill));
-        if let Some(stroke) = &mut marker.stroke {
-            stroke.paint = solid_paint(style.color);
+        if let Some(fill) = fill {
+            marker.fill = Some(solid_paint(*fill));
+        }
+        if let (Some(prepared), Some(style)) = (&mut marker.stroke, stroke) {
+            prepared.paint = solid_paint(style.color);
         }
         place_markers(
             surface,
@@ -126,7 +170,10 @@ fn draw_run<K: SpriteKind<Colors = (Rgba, Rgba)>>(
             positions,
             &mut sprites,
             &mut queue,
-            (*fill, style.color),
+            (
+                fill.unwrap_or(unused),
+                stroke.as_ref().map_or(unused, |style| style.color),
+            ),
         );
     }
     if let Some(mut sprites) = sprites {
@@ -204,7 +251,9 @@ impl SpriteKind for Cached {
         let render = |slots: &mut [Option<Sprite>], keys: &[CacheKey]| {
             let mut marker = marker.clone();
             for (slot, &(fill, outline, phase)) in slots.iter_mut().zip(keys) {
-                marker.fill = Some(solid_paint(fill));
+                if marker.fill.is_some() {
+                    marker.fill = Some(solid_paint(fill));
+                }
                 if let Some(stroke) = &mut marker.stroke {
                     stroke.paint = solid_paint(outline);
                 }

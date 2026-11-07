@@ -7,15 +7,15 @@ use super::MarkContext;
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
 use super::mapping::{AxisPoint, axis_values};
-use super::scatter::scatter_item;
+use super::scatter::scatter_layers;
 use crate::Rgba;
 use crate::geometry::Path;
 use crate::model::StemMark;
 use crate::resolve::Resolved;
 use crate::scene::Item;
 
-/// Adds the visible stems in `color`, at the theme's stem width, then their scatter markers of
-/// diameter `size`. A NaN in either coordinate skips the point. A stem exactly at an x limit
+/// Adds the visible stems in `color`, at the theme's stem width, then their scatter markers whose
+/// fill has diameter `size`. A NaN in either coordinate skips the point. A stem exactly at an x limit
 /// keeps its inside half; stems crossing a y limit stop there, while their markers are culled
 /// separately. A zero-length stem adds only its marker.
 pub(super) fn stem_items(
@@ -55,7 +55,7 @@ pub(super) fn stem_items(
             style: bar_style(width, color),
         });
     }
-    items.extend(scatter_item(
+    items.extend(scatter_layers(
         context,
         &xs,
         &ys,

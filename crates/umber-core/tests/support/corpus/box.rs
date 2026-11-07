@@ -38,7 +38,19 @@ fn distributions() -> Vec<Distribution> {
     ]
 }
 
-/// Emits plain, grouped, clipped, log and degenerate boxes in all themes, then their errors.
+/// Four groups of 4,400 values: a tight core and 400 outliers packed along one line above it,
+/// so neighbouring outlier markers overlap.
+fn dense_groups() -> Vec<Vec<f64>> {
+    (0..4)
+        .map(|g| {
+            let core = (0..4000).map(|i| f64::from(i) / 4000.0 + f64::from(g));
+            let outliers = (0..400).map(|i| f64::from(i) / 100.0 + 6.0 + f64::from(g));
+            core.chain(outliers).collect()
+        })
+        .collect()
+}
+
+/// Emits plain, grouped, clipped, log, degenerate and dense-outlier boxes in all themes, then their errors.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, theme) in themes() {
         let mut f = Figure::with_grid(12.0, 4.0, theme.clone(), Grid::new(1, 2).unwrap()).unwrap();
@@ -98,6 +110,17 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             .unwrap();
         emit_scene(
             &format!("box-limits-{name}"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
+
+        let mut f = figure(6.0, 4.0, theme.clone(), ScaleKind::Category, linear());
+        axes(&mut f)
+            .title("Dense outliers")
+            .box_plot(categories(), dense_groups(), BoxOptions::default())
+            .unwrap();
+        emit_scene(
+            &format!("box-dense-outliers-{name}"),
             &f.to_scene(lib).unwrap(),
             sink,
         );

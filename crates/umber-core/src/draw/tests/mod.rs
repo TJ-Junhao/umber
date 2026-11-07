@@ -136,6 +136,71 @@ fn mark_items(scene: &Scene) -> &[Item] {
     }
 }
 
+/// `items` with every marker batch's layers put back together: a run of outline-only marker
+/// items followed by as many fill-only ones becomes one item per pair, with fill and outline.
+fn merged_layers(items: &[Item]) -> Vec<Item> {
+    let outline_only = |item: &Item| {
+        matches!(
+            item,
+            Item::Markers {
+                fill: None,
+                stroke: Some(_),
+                ..
+            }
+        )
+    };
+    let fill_only = |item: &Item| {
+        matches!(
+            item,
+            Item::Markers {
+                fill: Some(_),
+                stroke: None,
+                ..
+            }
+        )
+    };
+    let mut merged = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        let run = items[i..]
+            .iter()
+            .take_while(|item| outline_only(item))
+            .count();
+        let fills = items[i + run..]
+            .iter()
+            .take(run)
+            .take_while(|item| fill_only(item))
+            .count();
+        if run == 0 || fills < run {
+            merged.push(items[i].clone());
+            i += 1;
+            continue;
+        }
+        for (outline, fill) in items[i..i + run].iter().zip(&items[i + run..i + 2 * run]) {
+            let (
+                Item::Markers {
+                    shape,
+                    stroke,
+                    positions,
+                    ..
+                },
+                Item::Markers { fill, .. },
+            ) = (outline, fill)
+            else {
+                unreachable!()
+            };
+            merged.push(Item::Markers {
+                shape: shape.clone(),
+                fill: *fill,
+                stroke: stroke.clone(),
+                positions: positions.clone(),
+            });
+        }
+        i += 2 * run;
+    }
+    merged
+}
+
 fn line_strokes(scene: &Scene) -> Vec<(&Path, &StrokeStyle)> {
     mark_group(scene)
         .1

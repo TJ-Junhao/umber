@@ -10,11 +10,12 @@ use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
 use super::fill::AREA_ALPHA;
 use super::mapping::{AxisPoint, axis_value};
-use super::scatter::scatter_item;
+use super::scatter::scatter_layers;
 use crate::geometry::Path;
 use crate::resolve::{AxisScale, ResolvedAxis, ResolvedDistribution};
 use crate::scene::{FillRule, Item, Paint};
 use crate::stats::BoxStats;
+use crate::theme::fill_size_of;
 use crate::{Marker, Rgba, SizeSpec};
 
 /// Draws distributions lying along the category axis `along` with their values on `values`, in
@@ -136,12 +137,14 @@ fn box_group(
     }
     let xs = vec![center; stats.outliers.len()];
     let ys: Vec<f64> = stats.outliers.iter().map(|&v| y(v)).collect();
-    items.extend(scatter_item(
+    // Outliers are 0.8 of the theme's marker size, nominally, and their fill is taken from that.
+    let nominal = context.theme.drawn_marker_size(SizeSpec::Auto) * 0.8;
+    items.extend(scatter_layers(
         context,
         &xs,
         &ys,
         color,
         Marker::Circle,
-        context.theme.drawn_marker_size(SizeSpec::Auto) * 0.8,
+        fill_size_of(nominal),
     ));
 }
