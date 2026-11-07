@@ -38,6 +38,15 @@ fn drawn_size(v: f32, max: f32) -> f32 {
     }
 }
 
+/// The diameter of the fill of a marker of nominal size `nominal` (the size the marker had when
+/// its outline covered the fill's edge): `nominal` less the outline's width, and at least half
+/// of `nominal`, so a small marker stays visible. For a circle of normal size the visible
+/// diameter is as it was; a cross or a triangle, whose outline used to eat into thin parts,
+/// draws a little heavier.
+pub(crate) fn fill_size_of(nominal: f32) -> f32 {
+    (nominal - crate::draw::MARKER_OUTLINE).max(nominal / 2.0)
+}
+
 /// A stroke width as drawn: finite and within `0..=MAX_STROKE_WIDTH`. Gridlines, the baseline
 /// and lines are stroked at this width of their token.
 pub(crate) fn drawn_stroke_width(width: f32) -> f32 {
@@ -1002,19 +1011,15 @@ impl Theme {
     }
 
     /// The diameter of the fill of a marker that asks for `size`, which is drawn over its own
-    /// outline of `MARKER_OUTLINE` points, centered on the fill's edge:
-    /// a fixed size is the fill's diameter, and the theme's marker size, alone or times a
-    /// factor, loses the outline's width, so the default markers look as they did when the
-    /// outline covered the fill's edge. Finite and within `0..=MAX_MARKER_SIZE`.
+    /// outline of `MARKER_OUTLINE` points, centered on the fill's edge. A fixed size is the
+    /// fill's diameter. The theme's marker size, alone or times a factor, is the nominal size
+    /// the fill is taken from by [`fill_size_of`]. Finite and within `0..=MAX_MARKER_SIZE`.
     pub(crate) fn drawn_fill_size(&self, size: SizeSpec) -> f32 {
-        let outline = crate::draw::MARKER_OUTLINE;
-        let size = match size {
+        let fill = match size {
             SizeSpec::Points(_) => size.resolve(self.marker_size),
-            SizeSpec::Auto | SizeSpec::Times(_) => {
-                size.resolve((self.marker_size - outline).max(0.0))
-            }
+            SizeSpec::Auto | SizeSpec::Times(_) => fill_size_of(size.resolve(self.marker_size)),
         };
-        drawn_size(size, MAX_MARKER_SIZE)
+        drawn_size(fill, MAX_MARKER_SIZE)
     }
 
     /// The marker opacity, from 0.0 to 1.0.
@@ -1720,6 +1725,33 @@ mod tests {
 
     fn hexes(theme: &Theme) -> Vec<String> {
         theme.palette().iter().map(|c| c.to_hex()).collect()
+    }
+
+    #[test]
+    fn fill_sizes_follow_one_rule_and_never_vanish() {
+        let near = |a: f32, b: f32| assert!((a - b).abs() < 1e-5, "{a} vs {b}");
+        let fill = |marker: f64, spec: SizeSpec| {
+            Theme::pigment()
+                .with_marker_size(marker)
+                .unwrap()
+                .drawn_fill_size(spec)
+        };
+        let times = |f| SizeSpec::times(f).unwrap();
+        // Normal sizes keep the visible size of the old outline: the nominal size less 0.8.
+        near(fill(6.0, SizeSpec::Auto), 5.2);
+        near(fill(6.0, times(1.0)), fill(6.0, SizeSpec::Auto));
+        near(fill(6.0, times(2.0)), 11.2);
+        // A small marker keeps half of its nominal size: a positive request never vanishes.
+        near(fill(0.5, times(10.0)), 4.2);
+        near(fill(0.81, SizeSpec::Auto), 0.405);
+        near(fill(6.0, times(0.1)), 0.3);
+        // The two branches meet at a nominal size of 1.6.
+        near(fill(1.6, SizeSpec::Auto), 0.8);
+        near(fill_size_of(1.6), 0.8);
+        near(fill_size_of(1.7), 0.9);
+        near(fill_size_of(1.5), 0.75);
+        // A fixed size is the fill's.
+        near(fill(6.0, SizeSpec::pt(1.5).unwrap()), 1.5);
     }
 
     #[test]

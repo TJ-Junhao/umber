@@ -1,6 +1,6 @@
 //! Box geometry, domain, clipping, degenerate groups and grouped-bar spacing.
 
-use super::{plot_of, subpaths};
+use super::{Pixels, near as near_color, plot_of, subpaths};
 use crate::draw::bar::group_slots;
 use crate::draw::fill::AREA_ALPHA;
 use crate::legend::{Legend, Swatch};
@@ -480,4 +480,68 @@ fn box_labels_use_small_box_swatches_and_direct_falls_back_to_rows() {
             );
         }
     }
+}
+
+#[test]
+fn outlier_fills_stay_visible_at_small_marker_sizes() {
+    for size in [0.5, 0.81, 1.0, 2.0, 6.0] {
+        let theme = Theme::pigment().with_marker_size(size).unwrap();
+        let mut f = figure(theme.clone(), ScaleKind::Linear);
+        f.single_axes_mut()
+            .box_plot(
+                vec!["A".into()],
+                vec![dense_samples(20)],
+                BoxOptions::default(),
+            )
+            .unwrap();
+        let drawn = items(&f);
+        let Some(Item::Markers { shape, fill, .. }) = drawn.last() else {
+            panic!("outliers expected last: {drawn:?}")
+        };
+        assert!(fill.is_some());
+        let (a, b) = shape.bounds().unwrap();
+        let nominal = size * 0.8;
+        let expected = (nominal - 0.8).max(nominal / 2.0);
+        assert!(expected > 0.0);
+        near(f64::from(b.x - a.x), expected);
+    }
+}
+
+#[test]
+fn a_dense_outlier_column_is_solid() {
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let theme = theme.with_marker_alpha(1.0).unwrap();
+        let mut f = figure(theme.clone(), ScaleKind::Linear);
+        f.single_axes_mut()
+            .ylim(0.0, 7.0)
+            .unwrap()
+            .box_plot(
+                vec!["A".into()],
+                vec![dense_samples(400)],
+                BoxOptions::default(),
+            )
+            .unwrap();
+        let plot = plot_of(&f);
+        let dpi = 300.0;
+        let pixels = Pixels::decode(&f.to_png(dpi as i64).unwrap());
+        let y = |value: f64| plot.bottom() - value / 7.0 * plot.height;
+        let x = plot.x + plot.width * 0.5;
+        let color = theme.palette()[0];
+        // Between the first and last outlier: the series color, not the background.
+        for i in 0..=12 {
+            let value = 5.1 + 0.8 * f64::from(i) / 12.0;
+            let pixel = pixels.at_point((x, y(value)), dpi);
+            assert!(
+                near_color(pixel, color, 2),
+                "{value}: {pixel:?} vs {color:?}"
+            );
+        }
+    }
+}
+
+/// Samples with a tight core and `count` outliers packed along one line above it.
+fn dense_samples(count: usize) -> Vec<f64> {
+    let core = (0..4000).map(|i| f64::from(i) / 4000.0);
+    let outliers = (0..count).map(|i| 5.0 + i as f64 / count as f64);
+    core.chain(outliers).collect()
 }

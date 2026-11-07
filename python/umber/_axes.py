@@ -1081,7 +1081,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         markers keep the theme's marker alpha and a 0.8 pt background-colored outline. All the
         outlines of a scatter are drawn under all its fills, so overlapping markers never cut
         into each other. ``size`` is the diameter of the fill: ``Size.pt(6)`` draws a fill 6 pt
-        across, and ``Size.AUTO`` is the theme's marker size less the outline's 0.8 pt.
+        across, and ``Size.AUTO`` is the theme's marker size less the outline's 0.8 pt (at least
+        half of it). Circles look as before; crosses and triangles draw a little heavier.
 
         With ``annotate=True`` each drawn point shows its value next to it: x on a category y
         axis and y otherwise, the time on a time axis. Points left out, and points outside

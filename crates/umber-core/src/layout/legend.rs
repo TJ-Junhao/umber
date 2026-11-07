@@ -1262,10 +1262,13 @@ mod tests {
         assert_eq!(marker_widths.len(), 2);
         // A fixed size is the fill's diameter, as the dot's; the theme's marker size times a
         // factor loses the 0.8 pt outline in the fill, and the dot keeps the full size.
-        let expected = [f64::from(0.5_f32 * (5.6 - 0.8)), 12.0];
+        let expected = [f64::from(crate::theme::fill_size_of(0.5 * 5.6)), 12.0];
         for ((dot, marker), expected) in dot_widths.iter().zip(&marker_widths).zip(expected) {
             assert!((marker - expected).abs() < 1e-3, "{marker} vs {expected}");
-            assert!(*dot >= *marker && dot - marker <= 0.8, "{dot} vs {marker}");
+            assert!(
+                *dot >= *marker && dot - marker <= 0.8 + 1e-4,
+                "{dot} vs {marker}"
+            );
         }
     }
 

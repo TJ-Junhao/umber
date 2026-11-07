@@ -5,6 +5,7 @@ use super::super::mapping::{AxisMap, AxisMaps};
 use super::super::marker::{extent, marker_shape};
 use super::super::scatter::scatter_layers;
 use super::{Pixels, mark_group, merged_layers, near, nums, plot_of, scatter_figure};
+use crate::geometry::PathVerb;
 use crate::layout::Area;
 use crate::model::{Figure, ScatterOptions};
 use crate::resolve::{Baseline, NormalizedPos, ValueAxis};
@@ -217,13 +218,15 @@ fn markers_are_culled_by_their_true_extent() {
 
 #[test]
 fn per_series_size_sets_the_marker_shape() {
-    // Graphite markers are 5.6 pt across by default, outline included: the fill is 0.8 pt less
-    // than the theme's size, alone or times a factor, and a fixed size is the fill's.
+    // Graphite markers are 5.6 pt across by default, outline included: the fill is 0.8 pt
+    // less than the theme's size times the factor (at least half of it), and a fixed size is
+    // the fill's.
     let auto = 5.6_f32 - 0.8;
     for (spec, d) in [
         (SizeSpec::Auto, auto),
         (SizeSpec::times(1.0).unwrap(), auto),
-        (SizeSpec::times(2.0).unwrap(), 2.0 * auto),
+        (SizeSpec::times(2.0).unwrap(), 2.0 * 5.6 - 0.8),
+        (SizeSpec::times(0.1).unwrap(), 0.56 / 2.0),
         (SizeSpec::pt(12.0).unwrap(), 12.0),
     ] {
         for m in [Marker::Circle, Marker::Cross] {
@@ -371,4 +374,37 @@ fn bubbles_keep_each_fill_with_its_outline_in_order() {
         kinds,
         ["fill", "outline", "fill", "outline", "fill", "outline"]
     );
+}
+
+#[test]
+fn default_shapes_are_pinned_to_the_fill_size() {
+    // Pigment markers are 6 pt, so the default fill is 5.2 pt. A circle looks as before; a
+    // cross and a triangle, thin or pointed where their outline used to eat into them, draw
+    // a little heavier: a cross's arms are 5.2 / 3 = 1.733 pt wide against 1.2 pt visible
+    // before.
+    let theme = Theme::pigment();
+    for m in [
+        Marker::Circle,
+        Marker::Square,
+        Marker::Triangle,
+        Marker::Diamond,
+        Marker::Cross,
+    ] {
+        let scene = scatter_figure(theme.clone(), &[0.5], &[0.5], m)
+            .to_scene(FontLibrary::global())
+            .unwrap();
+        let layers = merged_layers(mark_group(&scene).1);
+        let [Item::Markers { shape, .. }] = layers.as_slice() else {
+            panic!("expected one marker batch")
+        };
+        assert_eq!(shape, &marker_shape(m, 5.2), "{m:?}");
+    }
+    let cross = marker_shape(Marker::Cross, 5.2);
+    let (a, b) = cross.bounds().unwrap();
+    assert!((b.x - a.x - 5.2).abs() < 1e-4);
+    let arm = match cross.verbs()[..2] {
+        [PathVerb::MoveTo(p), PathVerb::LineTo(q)] => q.x - p.x,
+        _ => panic!("a cross starts with the top edge of its upper arm"),
+    };
+    assert!((arm - 5.2 / 3.0).abs() < 1e-4, "{arm}");
 }

@@ -1664,8 +1664,8 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a ScatterMark,
         /// The marker color.
         color: Rgba,
-        /// The marker diameter as drawn, in points, outline included: what the legend swatch
-        /// and the point labels measure.
+        /// The marker size that layout uses, in points: the legend swatch and the point labels
+        /// measure it. The outline is not part of it, and it is not the fill's diameter.
         size: f32,
         /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
         fill_size: f32,
@@ -1821,7 +1821,7 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a StemMark,
         /// The color of the stems and their markers.
         color: Rgba,
-        /// The marker diameter as drawn, in points, outline included.
+        /// The marker size that layout uses, in points; not the fill's diameter.
         size: f32,
         /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
         fill_size: f32,
@@ -1897,7 +1897,7 @@ pub(crate) enum ResolvedMark<'a> {
         label: &'a str,
         /// Marker color before opacity.
         color: Rgba,
-        /// Marker diameter in points, outline included: the spacing of packed points.
+        /// The marker size that packing uses, in points; not the fill's diameter.
         size: f32,
         /// The diameter of the marker's fill, in points: see [`Theme::drawn_fill_size`].
         fill_size: f32,
