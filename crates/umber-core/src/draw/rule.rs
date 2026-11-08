@@ -173,6 +173,8 @@ pub(super) fn span_layer(
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. }
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::StackedArea { .. }
@@ -231,6 +233,8 @@ pub(super) fn rule_layer(
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. }
             | ResolvedMark::Stem { .. }
             | ResolvedMark::Area { .. }
             | ResolvedMark::StackedArea { .. }

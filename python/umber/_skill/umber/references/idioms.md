@@ -76,6 +76,26 @@ ax.line(np.cos(angle), np.sin(angle)).xlabel("x (m)").ylabel("y (m)")
 svg = ax.figure.to_svg()
 ```
 
+## Vector fields
+
+For arrows from a vector field use `ax.quiver(x, y, u, v)`. `x` and `y` are always one-dimensional, and the shape of `u` says which form is meant: two-dimensional `u` and `v` are a grid shaped `(len(y), len(x))`, as `contour()` takes it, and one-dimensional ones are points. Pass the coordinates, not the arrays of `np.meshgrid()`. NaN in `u` or `v` leaves the arrow out; so does a NaN coordinate of points, while the coordinates of a grid are finite and strictly increasing.
+
+```python
+x, y = np.linspace(-3, 3, 25), np.linspace(-2, 2, 17)
+u, v = -y[:, None] + 0 * x, x[None, :] + 0 * y[:, None]
+ax = ub.Figure().add_axes().equal_aspect()
+ax.quiver(x, y, u, v, key=(2, "2 m/s")).xlabel("x (km)").ylabel("y (km)")
+svg = ax.figure.to_svg()
+```
+
+- **The key.** `key=(10, "10 m/s")` adds a legend entry: an arrow at the true length of a magnitude of 10, then the text you write. Do not draw a reference arrow by hand: the key is exact because it uses the mark's own scale, and it follows the legend in every position and style. There is no `label=`.
+- **Length.** Lengths are exactly proportional to the magnitudes. By default the longest arrow is as long as the typical spacing of the samples on the final plot, and at most three quarters of its shorter side, so arrows rarely cross. `pt_per_unit=3` draws a magnitude of 10 as 30 pt: pass the same number to compare several axes. The arrows of one axes share one automatic scale.
+- **Thinning.** umber never thins arrows: `ax.quiver(x[::4], y[::4], u[::4, ::4], v[::4, ::4])` is the way to draw fewer.
+- **Direction.** By default `(u, v)` is measured on the screen: `u == v` is always 45°. `direction=ub.Direction.DATA` points each arrow from `(x, y)` towards `(x + u, y + v)` on the plot, so it follows a streamline on any plot shape; both axes must be linear. On `equal_aspect()` axes both draw the same arrows, so spatial data usually wants `equal_aspect()`.
+- **Color.** `color=ub.ColorBy(np.hypot(u, v))` colors arrows by a value with the shape of `u`, on the color scale of the axes. Overlapping mapped arrows are not drawn in data order.
+
+For wind, use `ax.barbs(x, y, u, v)` with the same inputs. `(u, v)` is where the wind blows to, and the staff runs against it from the sample. The speed is rounded to the nearest 5: a flag is 50, a full line 10, a half line 5, and a calm a small circle. umber converts no units, so pass knots if that is what the barbs should read. `flip=True` puts lines and flags on the left, for the southern hemisphere, and `size=` sets the staff length. Barbs take an ordinary `label=`. A time-height section is `ax.barbs(times, heights, u, v)` on `x=ub.Scale.time()`.
+
 ## Values next to points
 
 Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color (darkened or lightened just enough to read at 4.5:1 against the background), and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
@@ -135,7 +155,7 @@ svg = ax.figure.to_svg()
 
 ## Colors, colormaps and color scales
 
-`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`/`bubbles` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter` and `bubbles` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
+`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver` and `barbs` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver` and `barbs` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
 
 ```python
 values = np.arange(12.0).reshape(3, 4) - 5.0

@@ -356,6 +356,8 @@ impl Resolved {
                 | Mark::VSpan(_)
                 | Mark::Mesh(_)
                 | Mark::Contour(_)
+                | Mark::Quiver(_)
+                | Mark::Barbs(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
                 | Mark::Heatmap(_)
@@ -975,7 +977,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Events(_) => &[],
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
-        Mark::Bubbles(_) => &[],
+        Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
             ErrorBarOrientation::Vertical => mark.positions().categories(),
@@ -1692,6 +1694,32 @@ pub(crate) enum ResolvedMark<'a> {
         /// Its lines along each level and its bands, computed once per render.
         shapes: std::sync::Arc<crate::contour::ContourShapes>,
     },
+    /// Arrows on a vector field.
+    Quiver {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated field and options.
+        mark: &'a crate::model::QuiverMark,
+        /// The arrow color; the theme's text color for a color-mapped mark, for its key.
+        color: Rgba,
+        /// The mapped values of a color-mapped mark; `None` for one arrow color.
+        mapped: Option<MappedColors<'a>>,
+        /// How the arrows are measured on the plot, as the last layout left it.
+        frame: crate::field::arrow::ArrowFrame,
+    },
+    /// Wind barbs on a vector field.
+    Barbs {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated field and options.
+        mark: &'a crate::model::BarbsMark,
+        /// The barb color; the theme's text color for a color-mapped mark, for its legend entry.
+        color: Rgba,
+        /// The mapped values of a color-mapped mark; `None` for one barb color.
+        mapped: Option<MappedColors<'a>>,
+        /// The length of a staff, in points.
+        staff: f64,
+    },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
         /// Drawn geometry for inside-legend scoring.
@@ -2071,6 +2099,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { geometry, .. }
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
+            | ResolvedMark::Quiver { geometry, .. }
+            | ResolvedMark::Barbs { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2110,6 +2140,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Band { geometry, .. }
             | ResolvedMark::ErrorBars { geometry, .. }
             | ResolvedMark::Bubbles { geometry, .. }
+            | ResolvedMark::Quiver { geometry, .. }
+            | ResolvedMark::Barbs { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2159,6 +2191,8 @@ impl<'a> ResolvedMark<'a> {
                 return DomainValues::Computed(Box::new(mark.sized(mark.x()).copied()));
             }
             ResolvedMark::Bubbles { mark, .. } => mark.x(),
+            ResolvedMark::Quiver { mark, .. } => mark.field().kept_x().numbers(),
+            ResolvedMark::Barbs { mark, .. } => mark.field().kept_x().numbers(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
             // A heatmap's cells lie at categories, which have no numbers.
             ResolvedMark::Heatmap { .. } => &[],
@@ -2303,6 +2337,8 @@ impl<'a> ResolvedMark<'a> {
                 DomainTimes::Groups(Box::new(mark.sized(mark.x_times()).copied().flatten()))
             }
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.x_times()),
+            ResolvedMark::Quiver { mark, .. } => DomainTimes::gapped(mark.field().kept_x().times()),
+            ResolvedMark::Barbs { mark, .. } => DomainTimes::gapped(mark.field().kept_x().times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
@@ -2359,6 +2395,8 @@ impl<'a> ResolvedMark<'a> {
                 DomainTimes::Groups(Box::new(mark.sized(mark.y_times()).copied().flatten()))
             }
             ResolvedMark::Bubbles { mark, .. } => DomainTimes::gapped(mark.y_times()),
+            ResolvedMark::Quiver { mark, .. } => DomainTimes::gapped(mark.field().kept_y().times()),
+            ResolvedMark::Barbs { mark, .. } => DomainTimes::gapped(mark.field().kept_y().times()),
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
@@ -2388,7 +2426,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. } => &[],
+            | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. } => &[],
             ResolvedMark::Stem { mark, .. } => mark.x().categories(),
             ResolvedMark::Heatmap { mark, .. } => mark.x_categories(),
             ResolvedMark::Area { mark, .. } => mark.x().categories(),
@@ -2495,6 +2535,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. }
             | ResolvedMark::Box { .. }
             | ResolvedMark::Violin { .. }
             | ResolvedMark::Bar { .. }
@@ -2558,6 +2600,8 @@ impl<'a> ResolvedMark<'a> {
                 return DomainValues::Computed(Box::new(mark.sized(mark.y()).copied()));
             }
             ResolvedMark::Bubbles { mark, .. } => mark.y(),
+            ResolvedMark::Quiver { mark, .. } => mark.field().kept_y().numbers(),
+            ResolvedMark::Barbs { mark, .. } => mark.field().kept_y().numbers(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
             ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.y().numbers(),
@@ -2665,7 +2709,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. } => false,
+            | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. } => false,
             ResolvedMark::Stem { mark, .. } => mark.y().numbers().iter().any(|v| v.is_finite()),
             ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::Line { .. }
@@ -2702,7 +2748,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. } => None,
+            | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. } => None,
             ResolvedMark::Stem { .. } => None,
             ResolvedMark::Heatmap { .. } => None,
             ResolvedMark::Line { width, .. }
@@ -2749,7 +2797,9 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
-            | ResolvedMark::Bubbles { .. } => false,
+            | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. } => false,
             ResolvedMark::Stem { .. } => false,
             ResolvedMark::Heatmap { .. } => false,
             ResolvedMark::HLine { .. }
@@ -2831,7 +2881,7 @@ impl<'a> ResolvedMark<'a> {
             | Self::ErrorBars { .. }
             | Self::Ecdf { .. }
             | Self::Kde { .. } => SwatchFill::Series,
-            Self::Events { .. } => SwatchFill::Series,
+            Self::Events { .. } | Self::Quiver { .. } | Self::Barbs { .. } => SwatchFill::Series,
             Self::Points { .. } => SwatchFill::Marker,
         }
     }
@@ -2914,6 +2964,25 @@ impl<'a> ResolvedMark<'a> {
                 Swatch::Dot {
                     diameter: size,
                     marker: mark.options().marker,
+                },
+            ),
+            ResolvedMark::Quiver {
+                mark, color, frame, ..
+            } => one(
+                mark.key_text(),
+                color,
+                Swatch::Arrow {
+                    length: frame.key_length as f32,
+                },
+            ),
+            ResolvedMark::Barbs {
+                mark, color, staff, ..
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: (staff * crate::field::barb::STROKE) as f32,
                 },
             ),
             // A heatmap has no legend entry; the colorbar explains its colors.
@@ -3265,6 +3334,29 @@ impl<'a> ResolvedMark<'a> {
             } => {
                 vec![SeriesKey::of_step(mark, color, width, limits)]
             }
+            // A key has no point to attach a direct label to: it stays in the legend row.
+            &ResolvedMark::Quiver {
+                mark, color, frame, ..
+            } => vec![SeriesKey {
+                label: mark.key_text(),
+                color,
+                kind: SeriesKind::Arrow {
+                    length: frame.key_length as f32,
+                },
+                anchor: None,
+            }],
+            // Barbs are read in the plot: a line swatch in the legend row, under every style.
+            &ResolvedMark::Barbs {
+                mark, color, staff, ..
+            } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Rule {
+                    dash: Dash::Solid,
+                    width: (staff * crate::field::barb::STROKE) as f32,
+                },
+                anchor: None,
+            }],
             // Reference lines and spans have no anchor, and their kinds say that no direct
             // label ever goes to them (see `SeriesKind::takes_direct_label`).
             &ResolvedMark::HLine {
@@ -3343,6 +3435,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. }
             | ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Area { .. }
@@ -3417,6 +3511,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
+            | ResolvedMark::Quiver { .. }
+            | ResolvedMark::Barbs { .. }
             | ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
             | ResolvedMark::Area { .. }
@@ -3445,7 +3541,10 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Mesh { mapped, .. } => Some((&mapped.spec, mapped.values)),
             ResolvedMark::Hist2d { mark, .. } => Some((&mark.colors, &mark.bins.counts)),
             ResolvedMark::Hexbin { mark, bins, .. } => Some((&mark.colors, bins.counts())),
-            ResolvedMark::Scatter { mapped, .. } | ResolvedMark::Bubbles { mapped, .. } => {
+            ResolvedMark::Scatter { mapped, .. }
+            | ResolvedMark::Bubbles { mapped, .. }
+            | ResolvedMark::Quiver { mapped, .. }
+            | ResolvedMark::Barbs { mapped, .. } => {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
             ResolvedMark::Heatmap { mapped, .. } => Some((&mapped.spec, mapped.values)),
@@ -3951,6 +4050,11 @@ pub(crate) enum SeriesKind {
     /// A filled region without an outline: a reference span across the plot, or a band between
     /// two curves.
     Span,
+    /// The key of a quiver: an arrow at the true length of its value.
+    Arrow {
+        /// The length of the arrow, in points.
+        length: f32,
+    },
     /// Error bars, drawn as a short bar with a cap at each end, with the drawn width of their
     /// lines.
     ErrorBar {
@@ -3975,7 +4079,8 @@ impl SeriesKind {
             | SeriesKind::Span
             | SeriesKind::ErrorBar { .. }
             | SeriesKind::Box { .. }
-            | SeriesKind::Violin { .. } => false,
+            | SeriesKind::Violin { .. }
+            | SeriesKind::Arrow { .. } => false,
         }
     }
 }
@@ -4071,6 +4176,8 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::Line(m) => vec![(&m.options().label, m.options().color)],
         Mark::Scatter(m) => uniform(&m.options().label, &m.options().color),
         Mark::Bubbles(m) => uniform(&m.options().label, &m.options().color),
+        Mark::Quiver(m) => uniform(m.key_text(), &m.options().color),
+        Mark::Barbs(m) => uniform(&m.options().label, &m.options().color),
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         // A heatmap takes no palette color.
         Mark::Heatmap(_) => Vec::new(),
@@ -4215,6 +4322,35 @@ fn resolve_panel_marks_from<'a>(
                     radius: theme.bubble_max_radius(),
                     size: theme.drawn_marker_size(crate::SizeSpec::Auto),
                     mapped,
+                }
+            }
+            Mark::Quiver(mark) => {
+                let (color, mapped) = match &mark.options().color {
+                    PointColor::Uniform(spec) => (color_of(*spec, mark.key_text()), None),
+                    PointColor::By(by) => (theme.text_color(), Some(MappedColors::of(by))),
+                };
+                ResolvedMark::Quiver {
+                    mark,
+                    geometry: None,
+                    color,
+                    mapped,
+                    frame: crate::field::arrow::ArrowFrame::of(
+                        mark.options().length,
+                        mark.options().direction,
+                    ),
+                }
+            }
+            Mark::Barbs(mark) => {
+                let (color, mapped) = match &mark.options().color {
+                    PointColor::Uniform(spec) => (color_of(*spec, &mark.options().label), None),
+                    PointColor::By(by) => (theme.text_color(), Some(MappedColors::of(by))),
+                };
+                ResolvedMark::Barbs {
+                    mark,
+                    geometry: None,
+                    color,
+                    mapped,
+                    staff: crate::field::barb::staff_length(theme, mark.options().size),
                 }
             }
             Mark::Heatmap(mark) => ResolvedMark::Heatmap {

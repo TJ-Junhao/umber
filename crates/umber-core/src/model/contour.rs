@@ -534,6 +534,48 @@ fn check_coordinates(name: &'static str, values: &[f64], transform: Transform) -
             "pass at least two coordinates for x and for y.",
         ));
     }
+    check_ordered(
+        CONTEXT,
+        name,
+        values,
+        transform,
+        "sort the coordinates, and the rows or columns of z with them.",
+    )?;
+    let (first, last) = (values[0], values[values.len() - 1]);
+    if ContinuousScale::new(transform, first, last, CONTEXT).is_err() {
+        let required = if log {
+            "the last coordinate must be at least 1 + 1e-9 times the first"
+        } else {
+            "the range must be at least 1e-10 of their magnitude (and at least 1e-290)"
+        };
+        return Err(fault(
+            format!(
+                "{name} spans {} to {}; {required}.",
+                number(first),
+                number(last)
+            ),
+            "rescale the coordinates, or pass a wider grid.",
+        ));
+    }
+    Ok(())
+}
+
+/// Checks that the grid coordinates `values`, the argument `name` of the call `context`, are
+/// finite, at most 1e300 in magnitude, positive and at least 1e-300 on a log axis of `transform`,
+/// and strictly increasing (`Error::Data`); `sort_hint` says what to do with those that are not.
+pub(super) fn check_ordered(
+    context: &'static str,
+    name: &'static str,
+    values: &[f64],
+    transform: Transform,
+    sort_hint: &'static str,
+) -> Result<()> {
+    let log = matches!(transform, Transform::Log(_));
+    let fault = |message: String, hint: &'static str| {
+        Error::data(context, message)
+            .with_parameter(name)
+            .with_hint(hint)
+    };
     let mut previous: Option<f64> = None;
     for (i, &v) in values.iter().enumerate() {
         let required = if !v.is_finite() {
@@ -553,7 +595,7 @@ fn check_coordinates(name: &'static str, values: &[f64], transform: Transform) -
                     i - 1,
                     number(before)
                 ),
-                "sort the coordinates, and the rows or columns of z with them.",
+                sort_hint,
             ));
         } else {
             previous = Some(v);
@@ -567,22 +609,6 @@ fn check_coordinates(name: &'static str, values: &[f64], transform: Transform) -
         return Err(fault(
             format!("{name}[{i}] is {}; {required}.", number(v)),
             hint,
-        ));
-    }
-    let (first, last) = (values[0], values[values.len() - 1]);
-    if ContinuousScale::new(transform, first, last, CONTEXT).is_err() {
-        let required = if log {
-            "the last coordinate must be at least 1 + 1e-9 times the first"
-        } else {
-            "the range must be at least 1e-10 of their magnitude (and at least 1e-290)"
-        };
-        return Err(fault(
-            format!(
-                "{name} spans {} to {}; {required}.",
-                number(first),
-                number(last)
-            ),
-            "rescale the coordinates, or pass a wider grid.",
         ));
     }
     Ok(())

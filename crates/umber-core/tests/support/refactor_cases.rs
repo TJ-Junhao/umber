@@ -57,6 +57,9 @@
 //!   `corpus/in_plot.rs`).
 //! - Equal aspect: a circle on a wide figure, a circle of points with a colorbar on a tall
 //!   figure, and a grid of which one panel has the setting (in `corpus/equal_aspect.rs`).
+//! - Vector fields: a grid quiver with a key, scattered points with `ColorBy` and a colorbar,
+//!   `Direction::Data` on a non-square plot, barbs on a time-height section and a quiver on equal
+//!   aspect (in `corpus/vector_fields.rs`).
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
@@ -152,6 +155,7 @@ mod corpus {
     pub mod time;
     pub mod twin_y;
     pub mod value_column;
+    pub mod vector_fields;
     pub mod violin;
     pub mod x_end_label;
 }
@@ -245,6 +249,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::value_column::cases(&lib, &mut sink);
     corpus::emphasis::cases(&lib, &mut sink);
     corpus::equal_aspect::cases(&lib, &mut sink);
+    corpus::vector_fields::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

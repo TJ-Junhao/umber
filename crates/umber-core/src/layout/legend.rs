@@ -790,7 +790,7 @@ fn entry_extent(
 /// its box onto the label. An area swatch is as long as a line swatch and as tall as a square
 /// swatch, with its edge stroked at the series' width up to half that height. A chips row draws
 /// a dot of `0.6 ×` the label size for series entries. Bubble references keep their true radius
-/// and stroke envelope in either style.
+/// and stroke envelope in either style, and the arrow of a key its true length and head width.
 fn swatch_size(
     theme: &Theme,
     row_style: RowStyle,
@@ -801,6 +801,10 @@ fn swatch_size(
         (_, Swatch::Bubble { radius }) => {
             let diameter = 2.0 * f64::from(radius) + f64::from(crate::draw::MARKER_OUTLINE);
             (swatch, diameter, diameter)
+        }
+        // A key is true to its length in either style, and the row takes that length.
+        (_, Swatch::Arrow { length }) => {
+            (swatch, f64::from(length), crate::field::arrow::HEAD_WIDTH)
         }
         (RowStyle::Chips, _) => {
             let d = CHIP_DOT * size;

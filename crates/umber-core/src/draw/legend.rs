@@ -8,6 +8,7 @@ use super::bar_shape::rounded_rect;
 use super::chrome::{segment, text};
 use super::contrast::readable_text;
 use super::error_bars::{bar_style, push_bar};
+use super::field::key_arrow;
 use super::line::line_style;
 use super::mapping::point;
 use super::marker::{marker_shape, polygon};
@@ -148,6 +149,11 @@ fn swatch(theme: &Theme, entry: &RowEntry) -> Item {
                 cap: LineCap::Butt,
                 join: crate::scene::LineJoin::Miter,
             }),
+        },
+        Swatch::Arrow { length } => Item::Fill {
+            path: key_arrow(f64::from(length), b.x, b.center_y),
+            paint: Paint::Solid(b.color),
+            rule: FillRule::NonZero,
         },
         Swatch::Line { dash, width } => {
             line_swatch(&b, b.center_y, line_style(width, b.color, dash))

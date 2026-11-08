@@ -897,6 +897,35 @@ class Figure:
         dash: int,
         width: _SizeArg,
     ) -> None: ...
+    def quiver(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray | _TimeArray,
+        y: _FloatArray | _TimeArray,
+        u: _FloatArray,
+        v: _FloatArray,
+        grid: bool,
+        color: _ColorArg | ColorBy,
+        pivot: int,
+        direction: int,
+        pt_per_unit: float | None,
+        key: tuple[float, str] | None,
+    ) -> None: ...
+    def barbs(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray | _TimeArray,
+        y: _FloatArray | _TimeArray,
+        u: _FloatArray,
+        v: _FloatArray,
+        grid: bool,
+        label: str,
+        color: _ColorArg | ColorBy,
+        size: _SizeArg,
+        flip: bool,
+    ) -> None: ...
     def contour(
         self,
         row: int | TwinAxes,

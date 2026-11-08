@@ -47,6 +47,7 @@ mod contour;
 mod contrast;
 mod ecdf;
 mod error_bars;
+pub(crate) mod field;
 pub(crate) mod fill;
 mod heatmap;
 mod hexbin;
@@ -399,6 +400,28 @@ pub(crate) fn drawn_marks(
                         (fill, maximum, radius),
                         &mut items,
                     );
+                }
+            }
+            ResolvedMark::Quiver {
+                mark,
+                color,
+                ref mapped,
+                frame,
+                ..
+            } => {
+                if let Some(fill) = field::fill(resolved.color.as_ref(), color, mapped.as_ref()) {
+                    field::quiver_items(&context, resolved, mark, (fill, frame), &mut items);
+                }
+            }
+            ResolvedMark::Barbs {
+                mark,
+                color,
+                ref mapped,
+                staff,
+                ..
+            } => {
+                if let Some(fill) = field::fill(resolved.color.as_ref(), color, mapped.as_ref()) {
+                    field::barb_items(&context, resolved, mark, (fill, staff), &mut items);
                 }
             }
             ResolvedMark::Stem {

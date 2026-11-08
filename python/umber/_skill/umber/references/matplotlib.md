@@ -27,6 +27,12 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.contour(x, y, z)` | `ax.contour(x, y, z)` |
 | `ax.contourf(x, y, z)` | `ax.contour(x, y, z, style=ub.Contour.FILLED)` |
 | `ax.clabel(cs)` | set `annotate=True` on the `contour` call itself |
+| `ax.quiver(X, Y, U, V)` | `ax.quiver(x, y, u, v)`, with one-dimensional `x` and `y`, not the arrays of `np.meshgrid()`; thin with `u[::4, ::4]` |
+| `ax.quiver(..., scale=, scale_units=, units=)` | `pt_per_unit=3` draws a magnitude of 10 as 30 pt; by default the longest arrow is the typical spacing |
+| `ax.quiver(..., angles="xy")` | `direction=ub.Direction.DATA`; the default is the screen direction, as `angles="uv"` |
+| `ax.quiver(..., pivot="mid")` | `pivot=ub.Pivot.MIDDLE` |
+| `ax.quiverkey(q, X, Y, 10, "10 m/s")` | `key=(10, "10 m/s")` on the `quiver` call: a legend entry at true length, placed as the legend is |
+| `ax.barbs(X, Y, U, V)` | `ax.barbs(x, y, u, v)`, with one-dimensional `x` and `y`; `length=` is `size=`, `flip_barb=True` is `flip=True`, and the increments are fixed at 5, 10 and 50 |
 | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` |
 | `ax.pie(values, labels=names, autopct="%1.0f%%")` | `ub.pie(names, values, annotate=True)` |
 | `ax.pie(..., wedgeprops={"width": 0.5})` | `ub.pie(names, values, hole=0.5)` |

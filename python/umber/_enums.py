@@ -444,3 +444,50 @@ class Contour(Enum):
 
     BOTH = 2
     """The filled bands, then thin lines along the levels in the theme's text color."""
+
+
+@unique
+class Pivot(Enum):
+    """The part of an arrow that sits on its sample.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes()
+        >>> ax = ax.quiver([0, 1], [0, 1], [1, 0], [0, 1], pivot=ub.Pivot.MIDDLE)
+    """
+
+    __slots__ = ()
+
+    TAIL = 0
+    """The sample is where the arrow starts."""
+
+    MIDDLE = 1
+    """The sample is at the middle of the arrow."""
+
+    TIP = 2
+    """The sample is where the arrow ends."""
+
+
+@unique
+class Direction(Enum):
+    """What the ``(u, v)`` of an arrow is measured against.
+
+    Only the angle changes; the length follows the magnitude in both.
+
+    Example:
+        >>> import umber as ub
+        >>> ax = ub.Figure().add_axes()
+        >>> ax = ax.quiver([0, 1], [0, 1], [1, 0], [0, 1], direction=ub.Direction.DATA)
+    """
+
+    __slots__ = ()
+
+    SCREEN = 0
+    """The arrow points along ``(u, v)`` on the screen, positive ``u`` right and positive ``v``
+    up, whatever the scales of the axes: ``u == v`` is always 45°. It works on every axis
+    ``quiver()`` accepts."""
+
+    DATA = 1
+    """The arrow points from ``(x, y)`` towards ``(x + u, y + v)`` on the plot, so it is tangent
+    to a streamline of the same field and square to a contour of its potential, on any plot
+    shape. Both axes must be linear: a log or time axis has no single scale for a step."""

@@ -314,6 +314,10 @@ pub enum Mark {
     /// A field on a rectilinear grid, drawn as lines along levels, filled bands between them,
     /// or both; NaN cuts the cells around it out.
     Contour(super::contour::ContourMark),
+    /// Arrows on a vector field; NaN leaves an arrow out.
+    Quiver(super::field::QuiverMark),
+    /// Wind barbs on a vector field; NaN leaves a barb out.
+    Barbs(super::field::BarbsMark),
     /// Short vertical event ticks in category rows.
     Events(super::EventsMark),
     /// Circular samples jittered within their category bands.
@@ -392,6 +396,8 @@ impl Mark {
             Mark::GroupedHist(m) => m.series().map(|s| s.label()).collect(),
             Mark::Ecdf(m) => vec![m.options().label.as_str()],
             Mark::Kde(m) => vec![m.options().label.as_str()],
+            Mark::Quiver(m) => vec![m.key_text()],
+            Mark::Barbs(m) => vec![m.options().label.as_str()],
             Mark::Heatmap(_)
             | Mark::Mesh(_)
             | Mark::Hist2d(_)
@@ -410,6 +416,8 @@ impl Mark {
             Mark::Hexbin(mark) => return Some(mark.colors.clone()),
             Mark::Scatter(mark) => &mark.options.color,
             Mark::Bubbles(mark) => &mark.options().color,
+            Mark::Quiver(mark) => &mark.options().color,
+            Mark::Barbs(mark) => &mark.options().color,
             Mark::Violin(_)
             | Mark::GroupedViolin(_)
             | Mark::Box(_)

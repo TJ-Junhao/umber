@@ -212,6 +212,7 @@ pub(super) fn check_center(
 /// assert_eq!(PointColor::AUTO, PointColor::Uniform(ColorSpec::AUTO));
 /// assert_eq!(PointColor::from(ColorSpec::Fixed(Rgba::RED)), PointColor::Uniform(ColorSpec::Fixed(Rgba::RED)));
 /// assert_ne!(PointColor::By(ColorBy::new(vec![1.0])), PointColor::AUTO);
+/// assert_eq!(PointColor::default(), PointColor::AUTO);
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum PointColor {
@@ -224,6 +225,12 @@ pub enum PointColor {
 impl PointColor {
     /// Every point in the next color of the theme palette.
     pub const AUTO: PointColor = PointColor::Uniform(ColorSpec::AUTO);
+}
+
+impl Default for PointColor {
+    fn default() -> PointColor {
+        PointColor::AUTO
+    }
 }
 
 impl From<ColorSpec> for PointColor {

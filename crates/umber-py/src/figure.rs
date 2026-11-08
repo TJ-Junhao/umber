@@ -33,6 +33,7 @@ use umber_core::{
     HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
     RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
+use umber_core::{ArrowKey, ArrowLength, BarbOptions, Direction, FieldForm, FieldVectors, Pivot};
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
 use umber_core::{
     Bandwidth, Bins, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistStat, HistStyle,
@@ -41,7 +42,7 @@ use umber_core::{
 use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
-use umber_core::{ContourLevels, ContourOptions, ContourStyle};
+use umber_core::{ContourLevels, ContourOptions, ContourStyle, QuiverOptions};
 use umber_core::{ErrorRange, ScatterGroup};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
@@ -137,6 +138,19 @@ fn xy_groups(
             ))
         })
         .collect()
+}
+
+/// The vectors of a field from its flat `u` and `v`, a grid when `grid` says so.
+fn field_vectors(u: &Bound<'_, PyAny>, v: &Bound<'_, PyAny>, grid: bool) -> PyResult<FieldVectors> {
+    Ok(FieldVectors {
+        form: if grid {
+            FieldForm::Grid
+        } else {
+            FieldForm::Points
+        },
+        u: shared_floats(u)?,
+        v: shared_floats(v)?,
+    })
 }
 
 /// The `kind` of a grid index argument that is `AUTO`.
@@ -1649,6 +1663,68 @@ impl Figure {
         let (x, y, z) = (floats(x)?, floats(y)?, floats(z)?);
         self.axes(row, col)?
             .contour(&x, &y, &z, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds arrows on a vector field, of points or of a grid.
+    fn quiver(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        grid: bool,
+        color: &Bound<'_, PyAny>,
+        pivot: i64,
+        direction: i64,
+        pt_per_unit: Option<f64>,
+        key: Option<(f64, String)>,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.quiver()";
+        let options = QuiverOptions {
+            color: point_color(color)?,
+            pivot: enum_value::<Pivot>(pivot)?,
+            direction: enum_value::<Direction>(direction)?,
+            length: pt_per_unit.map_or(ArrowLength::Auto, ArrowLength::PtPerUnit),
+            key: key.map(|(value, text)| ArrowKey::new(value, text)),
+        };
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
+        let vectors = field_vectors(u, v, grid)?;
+        self.axes(row, col)?
+            .quiver(x, y, vectors, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds wind barbs on a vector field, of points or of a grid.
+    fn barbs(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        grid: bool,
+        label: String,
+        color: &Bound<'_, PyAny>,
+        size: SizeArg,
+        flip: bool,
+    ) -> PyResult<()> {
+        const CONTEXT: &str = "Axes.barbs()";
+        let options = BarbOptions {
+            label,
+            color: point_color(color)?,
+            size: size_spec(size)?,
+            flip,
+        };
+        let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
+        let vectors = field_vectors(u, v, grid)?;
+        self.axes(row, col)?
+            .barbs(x, y, vectors, options)
             .map(drop)
             .map_err(core_error)
     }

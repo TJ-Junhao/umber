@@ -73,6 +73,9 @@
 //!   or as one image;
 //! - contours: [`ContourOptions`] with its [`ContourLevels`], [`ContourStyle`] and level limit
 //!   [`MAX_LEVELS`], and the read-only [`ContourMark`] payload of [`Mark`];
+//! - vector fields: [`FieldVectors`] with its [`FieldForm`], [`QuiverOptions`] with its
+//!   [`Pivot`], [`Direction`], [`ArrowLength`] and [`ArrowKey`], [`BarbOptions`], and the
+//!   read-only [`QuiverMark`], [`BarbsMark`] and [`VectorField`] payloads of [`Mark`];
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -137,6 +140,7 @@ pub mod downsample;
 mod draw;
 mod error;
 mod exact;
+mod field;
 pub mod figure;
 pub mod fonts;
 pub mod geometry;
@@ -165,6 +169,8 @@ pub mod ticks;
 mod time;
 #[cfg(test)]
 mod time_axes_tests;
+#[cfg(test)]
+mod vector_field_tests;
 
 pub use binning::MAX_BINS;
 pub use cmap::Cmap;
@@ -182,6 +188,10 @@ pub use figure::{
     CellRange, ExplicitTicks, Figure, Grid, GridIndex, HistMark, HistOptions, LegendMode, LineMark,
     LineOptions, MAX_GRID, Mark, Placement, ScatterGroup, ScatterMark, ScatterOptions, Series,
     SeriesView, Share, Step, StepMark, StepOptions, TickHighlight,
+};
+pub use figure::{
+    ArrowKey, ArrowLength, BarbOptions, BarbsMark, Direction, FieldForm, FieldVectors, Pivot,
+    QuiverMark, QuiverOptions, VectorField,
 };
 pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub use figure::{BandMark, BandOptions};

@@ -144,7 +144,7 @@ pub(super) fn check_series(
 /// Checks the values `data` of a series along `axis` against that axis, of scale kind `kind`:
 /// names need a category axis, times a time axis, and numbers a linear or log axis, where they
 /// are checked by [`check_numbers`]. Times are valid by construction; `None` marks a gap.
-fn check_axis_data(
+pub(super) fn check_axis_data(
     context: &'static str,
     axis: SharedAxis,
     kind: ScaleKind,
@@ -570,7 +570,7 @@ pub(super) fn check_time_bubbles(
 
 /// The shared values of `data`, which holds numbers or times: a category axis, the only
 /// place for names, is refused before.
-fn shared_of(data: AxisData) -> SharedValues {
+pub(super) fn shared_of(data: AxisData) -> SharedValues {
     match data {
         AxisData::Numbers(values) => SharedValues::Numbers(values.into()),
         AxisData::Times(times) => SharedValues::Times(times.into()),

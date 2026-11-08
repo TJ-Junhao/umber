@@ -2,7 +2,7 @@
 
 [![Coverage](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
 
-umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, ECDF, KDE, box, violin, strip, swarm, event, bubble, error bar, band, stem, reference-line, heatmap, mesh, contour, 2-D histogram, hexbin and pie charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes, with a second y axis where needed. It has text and arrow annotations, colormaps and colorbars, careful typography with bundled or your own fonts, three built-in themes, and PNG, SVG or PDF output.
+umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, ECDF, KDE, box, violin, strip, swarm, event, bubble, error bar, band, stem, reference-line, heatmap, mesh, contour, 2-D histogram, hexbin, vector field and pie charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes, with a second y axis where needed. It has text and arrow annotations, colormaps and colorbars, careful typography with bundled or your own fonts, three built-in themes, and PNG, SVG or PDF output.
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
@@ -84,6 +84,7 @@ Data can be a list, a tuple, a NumPy array, or a pandas or polars Series. Missin
 | Heatmap | `ax.heatmap(x_categories, y_categories, values, annotate=True)` |
 | Mesh | `ax.mesh(x_edges, y_edges, values)` |
 | Contour | `ax.contour(x, y, z, style=ub.Contour.FILLED)`; `Contour.LINES` (default) or `Contour.BOTH` |
+| Vector field | `ax.quiver(x, y, u, v, key=(10, "10 m/s"))` for arrows, with a key at true length; `ax.barbs(x, y, u, v)` for wind barbs |
 | 2-D histogram, hexbin | `ax.hist2d(x, y, bins=40)`, `ax.hexbin(x, y, gridsize=30)` |
 | Color-mapped points | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 | Pie, donut | `ub.pie(categories, values, hole=0.5, annotate=True)` or `fig.add_pie_axes().pie(...)` |

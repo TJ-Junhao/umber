@@ -17,6 +17,8 @@ names = ["a", "b"]
 # Positive: every accepted spelling, and ``color=ColorBy(...)`` on scatter and bubbles.
 by = ub.ColorBy(t)
 assert_type(by, ub.ColorBy)
+assert_type(ub.ColorBy([[1.0, 2.0], [3.0, 4.0]]), ub.ColorBy)
+assert_type(ub.ColorBy([np.arange(2.0), np.arange(2.0)]), ub.ColorBy)
 ub.ColorBy(np.arange(2.0), ub.Cmap.MAGMA, scale=ub.Scale.log(2), center=ub.AUTO)
 ub.ColorBy(t, ub.AUTO, center=0)
 ub.ColorBy(t, cmap=ub.Cmap.BLUE_RED.reversed(), center=0.5)

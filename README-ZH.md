@@ -2,7 +2,7 @@
 
 [![测试覆盖率](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
 
-umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、ECDF、KDE、箱线图、小提琴图、带状散点图（strip）、蜂群图（swarm）、事件图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、等值线图（contour）、二维直方图、六边形分箱图（hexbin）和饼图，支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格，需要时还能加第二条 y 轴。它提供文字和箭头标注、colormap 和 colorbar，排版考究，可用内置字体或你自己的字体，内置三套主题，输出 PNG、SVG 或 PDF。
+umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、ECDF、KDE、箱线图、小提琴图、带状散点图（strip）、蜂群图（swarm）、事件图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、等值线图（contour）、二维直方图、六边形分箱图（hexbin）、向量场图和饼图，支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格，需要时还能加第二条 y 轴。它提供文字和箭头标注、colormap 和 colorbar，排版考究，可用内置字体或你自己的字体，内置三套主题，输出 PNG、SVG 或 PDF。
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
@@ -84,6 +84,7 @@ fig.save_pdf("temperature.pdf")
 | 热力图 | `ax.heatmap(x_categories, y_categories, values, annotate=True)` |
 | 网格色块图 | `ax.mesh(x_edges, y_edges, values)` |
 | 等值线图 | `ax.contour(x, y, z, style=ub.Contour.FILLED)`；也可用 `Contour.LINES`（默认）或 `Contour.BOTH` |
+| 向量场图 | 箭头用 `ax.quiver(x, y, u, v, key=(10, "10 m/s"))`，图例中的 key 按真实长度绘制；风羽用 `ax.barbs(x, y, u, v)` |
 | 二维直方图、六边形分箱图 | `ax.hist2d(x, y, bins=40)`、`ax.hexbin(x, y, gridsize=30)` |
 | 按值着色的散点 | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 | 饼图、环形图 | `ub.pie(categories, values, hole=0.5, annotate=True)` 或 `fig.add_pie_axes().pie(...)` |
