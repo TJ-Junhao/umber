@@ -4047,8 +4047,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         and 4 pt wide, neither of which grows with it, so a page of long arrows looks even. A
         shorter arrow shrinks as a whole by its length over 15 pt, head and shaft together, so its
         head is at most a third of it and its length stays true; the shaft is never narrower than
-        0.5 pt, nor the head than 1 pt. A zero vector draws a dot 1 pt wide: the sample exists, and nothing
-        moves there.
+        0.5 pt, nor the head than 1 pt. A zero vector draws a dot 1 pt wide: the sample exists,
+        and nothing moves there.
 
         Automatic limits hold whole arrows, as they hold whole bubbles, in log space on a log
         axis and in seconds on a time axis. Explicit limits are kept, and the plot clips the
