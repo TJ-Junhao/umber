@@ -260,6 +260,7 @@ fn check_contour_levels(
                     | Mark::Bubbles(_)
                     | Mark::Quiver(_)
                     | Mark::Barbs(_)
+                    | Mark::Streamplot(_)
                     | Mark::Stem(_)
                     | Mark::Heatmap(_)
                     | Mark::Area(_)

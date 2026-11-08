@@ -926,6 +926,20 @@ class Figure:
         size: _SizeArg,
         flip: bool,
     ) -> None: ...
+    def streamplot(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        u: _FloatArray,
+        v: _FloatArray,
+        label: str,
+        density: float,
+        color: _ColorArg | ColorBy,
+        starts: tuple[_FloatArray, _FloatArray] | None,
+        arrows: bool,
+    ) -> None: ...
     def contour(
         self,
         row: int | TwinAxes,

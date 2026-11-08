@@ -1,8 +1,9 @@
-//! Vector fields: the geometry that arrows and wind barbs share, independent of any axes.
+//! Vector fields: the geometry that arrows and wind barbs share, independent of any axes, and
+//! the streamlines traced through a grid ([`stream`]).
 //!
-//! Everything here works in points, with y pointing up, relative to the sample a shape is drawn
+//! Arrows and barbs work in points, with y pointing up, relative to the sample a shape is drawn
 //! for; [`crate::draw`] places the shapes on the plot and [`crate::bubble_fit`] reads how far
-//! they reach.
+//! they reach. Streamlines work in data coordinates and in steps of the grid.
 //!
 //! Nothing here calls `sin`, `cos`, `atan2` or `hypot`. Those come from the platform's math
 //! library, whose results differ in the last bits from one platform to the next, and a shape
@@ -13,6 +14,7 @@
 pub(crate) mod arrow;
 pub(crate) mod barb;
 pub(crate) mod spacing;
+pub(crate) mod stream;
 
 /// The size of the components beyond which their squares would overflow or underflow: `2^500`.
 const SAFE_SQUARE: f64 = f64::from_bits((1023 + 500) << 52);
@@ -67,30 +69,201 @@ fn power_of_two(exponent: i32) -> f64 {
     }
 }
 
+/// A finite number as a mantissa and a power of two, `mantissa × 2^power`, whose power is an
+/// integer of any size: products and quotients of such numbers never overflow or underflow, and
+/// each rounds its mantissa once. Zero has a zero mantissa and the lowest power, so that it never
+/// sets the scale of a sum.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Wide {
+    /// The mantissa: 0, or from 1 to 4 in magnitude, with the sign of the number.
+    mantissa: f64,
+    /// The power of two.
+    power: i32,
+}
+
+impl Wide {
+    /// Zero.
+    pub(crate) const ZERO: Wide = Wide {
+        mantissa: 0.0,
+        power: i32::MIN,
+    };
+
+    /// The finite `x`, exactly.
+    pub(crate) fn of(x: f64) -> Wide {
+        if x == 0.0 {
+            return Wide::ZERO;
+        }
+        let (mantissa, power) = split(x);
+        Wide { mantissa, power }
+    }
+
+    /// Whether this is zero.
+    pub(crate) fn is_zero(self) -> bool {
+        self.mantissa == 0.0
+    }
+
+    /// This number times `other`.
+    pub(crate) fn times(self, other: Wide) -> Wide {
+        if self.is_zero() || other.is_zero() {
+            return Wide::ZERO;
+        }
+        Wide {
+            mantissa: self.mantissa * other.mantissa,
+            power: self.power.saturating_add(other.power),
+        }
+        .normal()
+    }
+
+    /// This number over the nonzero `other`.
+    pub(crate) fn over(self, other: Wide) -> Wide {
+        if self.is_zero() {
+            return Wide::ZERO;
+        }
+        Wide {
+            mantissa: self.mantissa / other.mantissa,
+            power: self.power.saturating_sub(other.power),
+        }
+        .normal()
+    }
+
+    /// The nonzero number `mantissa × 2^power`, exactly.
+    pub(crate) fn from_parts(mantissa: f64, power: i32) -> Wide {
+        Wide { mantissa, power }.normal()
+    }
+
+    /// `mantissa × 2^power` for a finite `mantissa`, exactly.
+    pub(crate) fn scaled(mantissa: f64, power: i32) -> Wide {
+        if mantissa == 0.0 {
+            return Wide::ZERO;
+        }
+        let (mantissa, shift) = split(mantissa);
+        Wide {
+            mantissa,
+            power: power.saturating_add(shift),
+        }
+    }
+
+    /// The power of two; the lowest for zero.
+    pub(crate) fn power(self) -> i32 {
+        self.power
+    }
+
+    /// The number over `2^top`, for a `top` at or above its power: 0 where that is past the
+    /// range of `f64`.
+    pub(crate) fn at_power(self, top: i32) -> f64 {
+        self.mantissa * power_of_two(self.power.saturating_sub(top))
+    }
+
+    /// Whether the number is finite: its mantissa is.
+    pub(crate) fn is_finite(self) -> bool {
+        self.mantissa.is_finite()
+    }
+
+    /// The mantissa, from 1 to 2 in magnitude, and the power of two of this nonzero number.
+    pub(crate) fn parts(self) -> (f64, i32) {
+        let Wide { mantissa, power } = self.normal();
+        (mantissa, power)
+    }
+
+    /// The same number with a mantissa from 1 to 2 in magnitude, exactly.
+    fn normal(self) -> Wide {
+        let (mantissa, shift) = split(self.mantissa);
+        Wide {
+            mantissa,
+            power: self.power.saturating_add(shift),
+        }
+    }
+
+    /// The number as an `f64`: 0 below the smallest subnormal, infinite above the largest
+    /// number.
+    pub(crate) fn value(self) -> f64 {
+        if self.is_zero() {
+            return 0.0;
+        }
+        // Two exact powers of two, so that only the last product rounds.
+        let power = self.power.clamp(-2200, 2200);
+        let half = power / 2;
+        self.mantissa * any_power_of_two(half) * any_power_of_two(power - half)
+    }
+
+    /// Whether this number, not negative, is at most `other`, not negative.
+    pub(crate) fn at_most(self, other: Wide) -> bool {
+        match (self.is_zero(), other.is_zero()) {
+            (true, _) => true,
+            (false, true) => false,
+            (false, false) => {
+                let (a, b) = (self.normal(), other.normal());
+                (a.power, a.mantissa) <= (b.power, b.mantissa)
+            }
+        }
+    }
+}
+
+/// `2^exponent` for an exponent from -1100 to 1100: 0 or infinite where `f64` holds no such
+/// power, exact otherwise.
+fn any_power_of_two(exponent: i32) -> f64 {
+    if exponent > 1023 {
+        f64::INFINITY
+    } else if exponent >= -1022 {
+        f64::from_bits(((exponent + 1023) as u64) << 52)
+    } else if exponent >= -1074 {
+        f64::from_bits(1 << (exponent + 1074))
+    } else {
+        0.0
+    }
+}
+
+/// The components `p` and `q` brought to one power of two, that of the larger, as `f64`s, with
+/// that power: a component more than 2^1022 times smaller than the other becomes 0, past
+/// anything a direction or a length can show.
+fn common(p: Wide, q: Wide) -> (f64, f64, i32) {
+    let top = p.power.max(q.power);
+    (
+        p.mantissa * power_of_two(p.power.saturating_sub(top)),
+        q.mantissa * power_of_two(q.power.saturating_sub(top)),
+        top,
+    )
+}
+
+/// The unit vector of the vector `(p, q)`, not zero, however large or small its components.
+pub(crate) fn unit(p: Wide, q: Wide) -> [f64; 2] {
+    let (p, q, _) = common(p, q);
+    let length = (p * p + q * q).sqrt();
+    [p / length, q / length]
+}
+
+/// The length of the vector `(p, q)`, however large or small its components.
+pub(crate) fn length(p: Wide, q: Wide) -> Wide {
+    if p.is_zero() && q.is_zero() {
+        return Wide::ZERO;
+    }
+    let (p, q, top) = common(p, q);
+    Wide {
+        mantissa: (p * p + q * q).sqrt(),
+        power: top,
+    }
+}
+
 /// The unit vector on the plot of a nonzero `(u, v)`, with one data unit along x and along y
 /// `scales` points long, of which only the ratio counts.
 ///
-/// Each component is multiplied by its scale as a mantissa and a power of two, and the two
-/// products are brought together by exact powers of two, so that nothing overflows or underflows
-/// on the way: `u` of 1e200 on a scale of 1e-198 and `v` of 1e-200 on a scale of 1e202 make a
-/// vector of ordinary size, whatever the sizes of the parts. A product that underflows at the
-/// end is below 2^-1022 of the other, past anything a direction can show.
+/// Each component is multiplied by its scale as a mantissa and a power of two ([`Wide`]), and
+/// the two products are brought together by exact powers of two, so that nothing overflows or
+/// underflows on the way: `u` of 1e200 on a scale of 1e-198 and `v` of 1e-200 on a scale of
+/// 1e202 make a vector of ordinary size, whatever the sizes of the parts. A product that
+/// underflows at the end is below 2^-1022 of the other, past anything a direction can show.
 pub(crate) fn direction(u: f64, v: f64, [x_scale, y_scale]: [f64; 2]) -> [f64; 2] {
     let product = |component: f64, scale: f64| {
         if component == 0.0 || scale == 0.0 {
-            return (0.0, i32::MIN);
+            return Wide::ZERO;
         }
         let ((a, a_power), (b, b_power)) = (split(component), split(scale));
-        (a * b, a_power + b_power)
+        Wide {
+            mantissa: a * b,
+            power: a_power + b_power,
+        }
     };
-    let ((p, p_power), (q, q_power)) = (product(u, x_scale), product(v, y_scale));
-    let top = p_power.max(q_power);
-    let (p, q) = (
-        p * power_of_two(p_power.saturating_sub(top)),
-        q * power_of_two(q_power.saturating_sub(top)),
-    );
-    let length = (p * p + q * q).sqrt();
-    [p / length, q / length]
+    unit(product(u, x_scale), product(v, y_scale))
 }
 
 /// How far a shape reaches from its sample towards each side of the plot, in points; each at
@@ -181,6 +354,31 @@ mod tests {
         let [x, y] = direction(3e-320, 4e-320, [1e300, 1e300]);
         assert!((x - 0.6).abs() < 1e-3 && (y - 0.8).abs() < 1e-3, "{x} {y}");
         assert_eq!(direction(1e300, 1e-300, [1e300, 1e-300]), [1.0, 0.0]);
+    }
+
+    #[test]
+    fn wide_numbers_keep_any_size() {
+        let huge = Wide::of(1e300).times(Wide::of(1e300));
+        let tiny = Wide::of(1e-300).times(Wide::of(1e-300));
+        assert_eq!(huge.over(Wide::of(1e300)).value(), 1e300);
+        assert_eq!(tiny.over(Wide::of(1e-300)).value(), 1e-300);
+        assert!((huge.times(tiny).value() - 1.0).abs() < 1e-15);
+        assert_eq!(huge.value(), f64::INFINITY);
+        assert_eq!(tiny.value(), 0.0);
+        assert_eq!(
+            Wide::of(3.0).over(Wide::of(f64::MAX)).value(),
+            3.0 / f64::MAX
+        );
+        assert_eq!(
+            Wide::of(1.5).times(Wide::of(2f64.powi(-1060))).value(),
+            1.5 * 2f64.powi(-1060)
+        );
+        assert!(tiny.at_most(huge) && !huge.at_most(tiny) && Wide::ZERO.at_most(tiny));
+        assert!(Wide::of(3.0).at_most(Wide::of(3.0)) && !Wide::of(3.5).at_most(Wide::of(3.0)));
+        let big = Wide::of(2f64.powi(1000)).times(Wide::of(2f64.powi(1000)));
+        let long = length(Wide::of(3.0).times(big), Wide::of(4.0).times(big));
+        assert_eq!(long.over(big).value(), 5.0);
+        assert_eq!(unit(huge, Wide::ZERO), [1.0, 0.0]);
     }
 
     #[test]

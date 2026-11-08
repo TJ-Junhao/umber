@@ -153,7 +153,7 @@ impl VectorField {
     ///    are finite and strictly increase (`Error::Data`);
     /// 4. every value of `u`, then of `v`, is NaN or finite and at most 1e300 in magnitude
     ///    (`Error::Data`, naming the value, by row and column on a grid).
-    fn new(
+    pub(super) fn new(
         context: &'static str,
         kinds: (ScaleKind, ScaleKind),
         (x, y): (AxisData, AxisData),

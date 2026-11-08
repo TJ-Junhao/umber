@@ -68,6 +68,7 @@ mod events;
 mod stacked_area;
 mod stem;
 mod step;
+mod streamlines;
 mod strip;
 mod stroke;
 #[cfg(test)]
@@ -422,6 +423,16 @@ pub(crate) fn drawn_marks(
             } => {
                 if let Some(fill) = field::fill(resolved.color.as_ref(), color, mapped.as_ref()) {
                     field::barb_items(&context, resolved, mark, (fill, staff), &mut items);
+                }
+            }
+            ResolvedMark::Streamplot {
+                mark,
+                color,
+                ref mapped,
+                ..
+            } => {
+                if let Some(fill) = field::fill(resolved.color.as_ref(), color, mapped.as_ref()) {
+                    streamlines::streamline_items(&context, resolved, mark, fill, &mut items);
                 }
             }
             ResolvedMark::Stem {

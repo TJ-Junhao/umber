@@ -318,6 +318,8 @@ pub enum Mark {
     Quiver(super::field::QuiverMark),
     /// Wind barbs on a vector field; NaN leaves a barb out.
     Barbs(super::field::BarbsMark),
+    /// Streamlines through a vector field on a grid; NaN cuts the cells around it out.
+    Streamplot(super::streamlines::StreamplotMark),
     /// Short vertical event ticks in category rows.
     Events(super::EventsMark),
     /// Circular samples jittered within their category bands.
@@ -398,6 +400,7 @@ impl Mark {
             Mark::Kde(m) => vec![m.options().label.as_str()],
             Mark::Quiver(m) => vec![m.key_text()],
             Mark::Barbs(m) => vec![m.options().label.as_str()],
+            Mark::Streamplot(m) => vec![m.options().label.as_str()],
             Mark::Heatmap(_)
             | Mark::Mesh(_)
             | Mark::Hist2d(_)
@@ -418,6 +421,7 @@ impl Mark {
             Mark::Bubbles(mark) => &mark.options().color,
             Mark::Quiver(mark) => &mark.options().color,
             Mark::Barbs(mark) => &mark.options().color,
+            Mark::Streamplot(mark) => &mark.options().color,
             Mark::Violin(_)
             | Mark::GroupedViolin(_)
             | Mark::Box(_)

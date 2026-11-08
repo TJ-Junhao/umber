@@ -708,8 +708,8 @@ pub(crate) fn add_obstacles(
 }
 
 /// Whether the drawn items of `mark` are obstacles of automatic labels: every data mark, but
-/// not the cells and contours of fields nor reference lines and spans, which cover or cross
-/// the whole plot.
+/// not the cells, contours and streamlines of fields nor reference lines and spans, which cover
+/// or cross the whole plot.
 fn obstacle_marks(mark: &ResolvedMark<'_>) -> bool {
     match mark {
         ResolvedMark::Line { .. }
@@ -738,6 +738,7 @@ fn obstacle_marks(mark: &ResolvedMark<'_>) -> bool {
         | ResolvedMark::Hexbin { .. }
         | ResolvedMark::Heatmap { .. }
         | ResolvedMark::Contour { .. }
+        | ResolvedMark::Streamplot { .. }
         | ResolvedMark::HLine { .. }
         | ResolvedMark::VLine { .. }
         | ResolvedMark::HSpan { .. }

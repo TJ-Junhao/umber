@@ -83,7 +83,7 @@ pub(super) fn fill<'a, 'm: 'a>(
 }
 
 /// The paths of one mark, one set per color, in the order the colors first appear.
-struct Batches {
+pub(super) struct Batches {
     /// The colors of the mapped colors, moved away from the background.
     drawn: HashMap<Rgba, Rgba>,
     /// The index in `paths` of each color, as drawn.
@@ -96,7 +96,7 @@ struct Batches {
 
 impl Batches {
     /// The batches of a mark filled as `fill` under `theme`.
-    fn new(theme: &Theme, fill: FieldFill<'_>) -> Batches {
+    pub(super) fn new(theme: &Theme, fill: FieldFill<'_>) -> Batches {
         Batches {
             drawn: HashMap::new(),
             index: HashMap::new(),
@@ -109,7 +109,7 @@ impl Batches {
     }
 
     /// The stroked and the filled path of `color`.
-    fn of(&mut self, color: Rgba) -> (&mut Path, &mut Path) {
+    pub(super) fn of(&mut self, color: Rgba) -> (&mut Path, &mut Path) {
         let drawn = match self.background {
             Some(background) => *self
                 .drawn
@@ -128,7 +128,7 @@ impl Batches {
 
     /// Appends the items of the batches: each color's stroke, then its fill, with the stroke
     /// made by `style` from the color.
-    fn append(self, style: impl Fn(Rgba) -> StrokeStyle, items: &mut Vec<Item>) {
+    pub(super) fn append(self, style: impl Fn(Rgba) -> StrokeStyle, items: &mut Vec<Item>) {
         for (color, stroked, filled) in self.paths {
             if !stroked.is_empty() {
                 items.push(Item::Stroke {
@@ -148,7 +148,7 @@ impl Batches {
 }
 
 /// The axis-space box around the plot in which a shape reaching `reach` pt can still touch it.
-fn culling_bounds(context: &MarkContext<'_>, reach: f64) -> Bounds {
+pub(super) fn culling_bounds(context: &MarkContext<'_>, reach: f64) -> Bounds {
     let (left, right) = context.maps.x.expanded(reach + 1.0);
     let (top, bottom) = context.maps.y.expanded(reach + 1.0);
     Bounds {
@@ -165,7 +165,7 @@ fn offset(at: PlotPoint, [x, y]: [f64; 2]) -> crate::geometry::Point {
 }
 
 /// Appends the closed polygon of `corners` around `at` to `path`.
-fn push_polygon(path: &mut Path, at: PlotPoint, corners: &[[f64; 2]]) {
+pub(super) fn push_polygon(path: &mut Path, at: PlotPoint, corners: &[[f64; 2]]) {
     let mut points = corners.iter().map(|&corner| offset(at, corner));
     if let Some(first) = points.next() {
         path.move_to(first);

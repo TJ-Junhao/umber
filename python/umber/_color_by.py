@@ -26,7 +26,7 @@ _ROWS_HINT: Final = "pass one row of values per y coordinate, all of the same le
 _FIELD_SHAPE_HINT: Final = "pass one color value per vector, shaped as u."
 _POINT_SHAPE_HINT: Final = (
     "pass one value per point; two-dimensional values are for the grid form of quiver() and "
-    "barbs()."
+    "barbs(), and for streamplot()."
 )
 
 
@@ -34,8 +34,10 @@ _POINT_SHAPE_HINT: Final = (
 class ColorBy:
     """Values mapped through a colormap: pass it as the ``color`` of a mark of points.
 
-    Scatters, bubbles, arrows and wind barbs take it. Each point takes the color its value maps
-    to; a NaN value leaves its point undrawn, and its position still counts in the axis limits.
+    Scatters, bubbles, arrows, wind barbs and streamlines take it. Each point takes the color its
+    value maps to; a NaN value leaves its point undrawn, and its position still counts in the
+    axis limits; on streamlines the values are interpolated along each line, and a NaN makes a
+    hole that lines end at.
     All color-mapped marks of an axes share one color scale: the same ``cmap``, ``scale`` and
     ``center``, and one color range, from the smallest to the largest finite value unless
     ``Axes.clim()`` sets it. Values outside the range take the colormap's end colors.
@@ -54,8 +56,8 @@ class ColorBy:
 
     Args:
         values: One number per point: finite, or NaN to leave the point undrawn. On the grid
-            form of ``quiver()`` and ``barbs()`` it has the shape of ``u``, so it is
-            two-dimensional, as an array or a list of rows.
+            form of ``quiver()`` and ``barbs()``, and for ``streamplot()``, it has the shape of
+            ``u``, so it is two-dimensional, as an array or a list of rows.
         cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center`` is
             given and its sequential colormap otherwise.
         scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.

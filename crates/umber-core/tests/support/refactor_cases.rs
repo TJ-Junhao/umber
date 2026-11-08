@@ -60,6 +60,9 @@
 //! - Vector fields: a grid quiver with a key, scattered points with `ColorBy` and a colorbar,
 //!   `Direction::Data` on a non-square plot, barbs on a time-height section and a quiver on equal
 //!   aspect (in `corpus/vector_fields.rs`).
+//! - Streamlines: flow around a cylinder with a hole on equal aspect, the same colored by speed
+//!   with a colorbar, lines through given starts in a rotation, and an unevenly spaced grid on a
+//!   log x axis with a label (in `corpus/streamlines.rs`).
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
@@ -149,6 +152,7 @@ mod corpus {
     pub mod stacked_area;
     pub mod stem;
     pub mod step;
+    pub mod streamlines;
     pub mod strip;
     pub mod text_size;
     pub mod ticks;
@@ -250,6 +254,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::emphasis::cases(&lib, &mut sink);
     corpus::equal_aspect::cases(&lib, &mut sink);
     corpus::vector_fields::cases(&lib, &mut sink);
+    corpus::streamlines::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

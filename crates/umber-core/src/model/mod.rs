@@ -43,6 +43,7 @@ mod share;
 mod stacked_area;
 mod stem;
 mod step;
+mod streamlines;
 mod strip;
 mod ticks;
 mod validation;
@@ -52,6 +53,7 @@ pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 #[cfg(test)]
 mod share_tests;
 
+pub use crate::field::stream::Streamline;
 pub use annotation::{
     AnnotateOptions, Annotation, AnnotationPlacement, InPlot, TextOptions, TextPosition,
 };
@@ -93,6 +95,7 @@ pub use stacked_area::StackedAreaMark;
 pub use stem::{StemMark, StemOptions};
 pub(crate) use step::{Edge, holds};
 pub use step::{Step, StepMark, StepOptions};
+pub use streamlines::{StreamStarts, StreamplotMark, StreamplotOptions};
 pub use strip::{StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub(crate) use ticks::AxisTicks;
 pub use ticks::{ExplicitTicks, TickHighlight};

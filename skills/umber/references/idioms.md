@@ -96,6 +96,28 @@ svg = ax.figure.to_svg()
 
 For wind, use `ax.barbs(x, y, u, v)` with the same inputs. `(u, v)` is where the wind blows to, and the staff runs against it from the sample. The speed is rounded to the nearest 5: a flag is 50, a full line 10, a half line 5, and a calm a small circle. umber converts no units, so pass knots if that is what the barbs should read. `flip=True` puts lines and flags on the left, for the southern hemisphere, and `size=` sets the staff length. Barbs take an ordinary `label=`. A time-height section is `ax.barbs(times, heights, u, v)` on `x=ub.Scale.time()`.
 
+### Streamlines
+
+For lines that follow a field on a grid use `ax.streamplot(x, y, u, v)`, with `u` and `v` shaped `(len(y), len(x))` as for `contour()`. It takes the grid form only, on linear or log axes. A NaN in `u` or `v` makes the four cells around it a hole that lines end at, so mask an obstacle with NaN rather than drawing over it.
+
+```python
+x, y = np.linspace(-3, 3, 121), np.linspace(-2, 2, 81)
+gx, gy = np.meshgrid(x, y)
+r2 = gx**2 + gy**2
+with np.errstate(divide="ignore", invalid="ignore"):
+    u = np.where(r2 < 1, np.nan, 1 - (gx**2 - gy**2) / r2**2)
+    v = np.where(r2 < 1, np.nan, -2 * gx * gy / r2**2)
+ax = ub.Figure().add_axes().streamplot(x, y, u, v, color=ub.ColorBy(np.hypot(u, v)))
+ax.colorbar("Speed").equal_aspect()
+svg = ax.figure.to_svg()
+```
+
+- **Density.** `density=1` keeps automatic lines about a thirtieth of the grid apart along each axis, measured on the axis scale; `density=2` draws them twice as close. The lines depend on the data alone, never on the figure size, and the same input draws the same lines everywhere.
+- **Starts.** `starts=(xs, ys)` draws exactly one line through each point instead of the automatic lines, ignoring their spacing. A point outside the grid, in a hole or where the field is zero raises `ub.DataError` naming it.
+- **Color.** `color=ub.ColorBy(np.hypot(u, v))` colors lines by speed, or by any value with the shape of `u`, interpolated along each line; mapped lines take no `label=`. One color takes a `label=` with a line swatch.
+- **Arrows.** Each line carries one head at its middle, pointing downstream; `arrows=False` leaves them out.
+- **quiver or streamplot.** Use `quiver()` when the magnitude at each sample matters, since arrow lengths are exact, and for scattered points; use `streamplot()` to show the paths of the flow, its eddies and where it parts.
+
 ## Values next to points
 
 Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color (darkened or lightened just enough to read at 4.5:1 against the background), and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
@@ -155,7 +177,7 @@ svg = ax.figure.to_svg()
 
 ## Colors, colormaps and color scales
 
-`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver` and `barbs` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver` and `barbs` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
+`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
 
 ```python
 values = np.arange(12.0).reshape(3, 4) - 5.0

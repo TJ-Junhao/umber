@@ -123,6 +123,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/stacked_area.rs
   crates/umber-core/tests/support/corpus/stem.rs
   crates/umber-core/tests/support/corpus/step.rs
+  crates/umber-core/tests/support/corpus/streamlines.rs
   crates/umber-core/tests/support/corpus/strip.rs
   crates/umber-core/tests/support/corpus/text_size.rs
   crates/umber-core/tests/support/corpus/ticks.rs

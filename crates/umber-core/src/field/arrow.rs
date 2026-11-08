@@ -245,6 +245,21 @@ impl Outline {
         }
     }
 
+    /// The head of an arrow alone, [`HEAD_LENGTH`] long and [`HEAD_WIDTH`] wide, centred on the
+    /// point it is drawn for and pointing along the unit vector `direction`: the head a
+    /// streamline carries.
+    pub(crate) fn head([dx, dy]: [f64; 2]) -> Outline {
+        let at = |along: f64, across: f64| [along * dx - across * dy, along * dy + across * dx];
+        let (back, half) = (-HEAD_LENGTH / 2.0, HEAD_WIDTH / 2.0);
+        let mut corners = [[0.0; 2]; 7];
+        corners[..3].copy_from_slice(&[
+            at(back, half),
+            at(back + HEAD_LENGTH, 0.0),
+            at(back, -half),
+        ]);
+        Outline { corners, count: 3 }
+    }
+
     /// The corners, in order around the arrow.
     pub(crate) fn corners(&self) -> &[[f64; 2]] {
         &self.corners[..self.count]
@@ -402,6 +417,12 @@ mod tests {
     fn an_arrow_shorter_than_its_head_shrinks_and_keeps_its_length() {
         let outline = Outline::new(2.5, [1.0, 0.0], Pivot::Tail);
         assert_eq!(outline.corners(), [[0.0, 1.0], [2.5, 0.0], [0.0, -1.0]]);
+    }
+
+    #[test]
+    fn a_head_alone_is_centred_on_its_point() {
+        let head = Outline::head([0.0, 1.0]);
+        assert_eq!(head.corners(), [[-2.0, -2.5], [0.0, 2.5], [2.0, -2.5]]);
     }
 
     #[test]

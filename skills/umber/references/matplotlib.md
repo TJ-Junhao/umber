@@ -33,6 +33,13 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.quiver(..., pivot="mid")` | `pivot=ub.Pivot.MIDDLE` |
 | `ax.quiverkey(q, X, Y, 10, "10 m/s")` | `key=(10, "10 m/s")` on the `quiver` call: a legend entry at true length, placed as the legend is |
 | `ax.barbs(X, Y, U, V)` | `ax.barbs(x, y, u, v)`, with one-dimensional `x` and `y`; `length=` is `size=`, `flip_barb=True` is `flip=True`, and the increments are fixed at 5, 10 and 50 |
+| `ax.streamplot(X, Y, U, V, density=1)` | `ax.streamplot(x, y, u, v, density=1)`, with one-dimensional `x` and `y` |
+| `ax.streamplot(..., color=speed, cmap=...)` | `color=ub.ColorBy(speed, cmap=...)`, values shaped as `u`; a colorbar follows |
+| `ax.streamplot(..., start_points=points)` | `starts=(xs, ys)`: one line through each point, both ways |
+| `ax.streamplot(..., linewidth=array)` | not offered: lines have one width; show a value with `color=ub.ColorBy(values)` |
+| `ax.streamplot(..., broken_streamlines=False)` | not offered: a line ends where it would come too close to another; use `starts=` for lines that must run on |
+| `ax.streamplot(..., maxlength=, integration_direction=)` | not offered: lines run both ways until an edge, a hole, zero speed or another line, and a closed orbit ends after one turn |
+| `ax.streamplot(..., arrowsize=, arrowstyle=)` | `arrows=False` leaves the heads out; their shape and size are those of `quiver()` |
 | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` |
 | `ax.pie(values, labels=names, autopct="%1.0f%%")` | `ub.pie(names, values, annotate=True)` |
 | `ax.pie(..., wedgeprops={"width": 0.5})` | `ub.pie(names, values, hole=0.5)` |

@@ -518,22 +518,7 @@ fn paired(values: Vec<f64>, labels: Vec<String>) -> Vec<Tick> {
 /// `transform`: at least two, finite, at most 1e300 in magnitude, positive and at least 1e-300
 /// on a log axis, strictly increasing, and spanning a range the axis can show (`Error::Data`).
 fn check_coordinates(name: &'static str, values: &[f64], transform: Transform) -> Result<()> {
-    let log = matches!(transform, Transform::Log(_));
-    let fault = |message: String, hint: &'static str| {
-        Error::data(CONTEXT, message)
-            .with_parameter(name)
-            .with_hint(hint)
-    };
-    if values.len() < 2 {
-        let count = match values.len() {
-            1 => "1 coordinate".to_owned(),
-            n => format!("{n} coordinates"),
-        };
-        return Err(fault(
-            format!("{name} has {count}; a contour grid needs at least two along each axis."),
-            "pass at least two coordinates for x and for y.",
-        ));
-    }
+    check_count(CONTEXT, name, values, "a contour grid")?;
     check_ordered(
         CONTEXT,
         name,
@@ -541,23 +526,59 @@ fn check_coordinates(name: &'static str, values: &[f64], transform: Transform) -
         transform,
         "sort the coordinates, and the rows or columns of z with them.",
     )?;
-    let (first, last) = (values[0], values[values.len() - 1]);
-    if ContinuousScale::new(transform, first, last, CONTEXT).is_err() {
-        let required = if log {
-            "the last coordinate must be at least 1 + 1e-9 times the first"
-        } else {
-            "the range must be at least 1e-10 of their magnitude (and at least 1e-290)"
-        };
-        return Err(fault(
-            format!(
-                "{name} spans {} to {}; {required}.",
-                number(first),
-                number(last)
-            ),
-            "rescale the coordinates, or pass a wider grid.",
-        ));
+    check_span(CONTEXT, name, values, transform)
+}
+
+/// Checks that the grid coordinates `values`, the argument `name` of the call `context`, are at
+/// least two, which `grid` (such as `"a contour grid"`) needs along each axis (`Error::Data`).
+pub(super) fn check_count(
+    context: &'static str,
+    name: &'static str,
+    values: &[f64],
+    grid: &str,
+) -> Result<()> {
+    if values.len() >= 2 {
+        return Ok(());
     }
-    Ok(())
+    let count = match values.len() {
+        1 => "1 coordinate".to_owned(),
+        n => format!("{n} coordinates"),
+    };
+    Err(Error::data(
+        context,
+        format!("{name} has {count}; {grid} needs at least two along each axis."),
+    )
+    .with_parameter(name)
+    .with_hint("pass at least two coordinates for x and for y."))
+}
+
+/// Checks that the finite, strictly increasing grid coordinates `values`, the argument `name` of
+/// the call `context`, span a range an axis of `transform` can show (`Error::Data`).
+pub(super) fn check_span(
+    context: &'static str,
+    name: &'static str,
+    values: &[f64],
+    transform: Transform,
+) -> Result<()> {
+    let (first, last) = (values[0], values[values.len() - 1]);
+    if ContinuousScale::new(transform, first, last, context).is_ok() {
+        return Ok(());
+    }
+    let required = if matches!(transform, Transform::Log(_)) {
+        "the last coordinate must be at least 1 + 1e-9 times the first"
+    } else {
+        "the range must be at least 1e-10 of their magnitude (and at least 1e-290)"
+    };
+    Err(Error::data(
+        context,
+        format!(
+            "{name} spans {} to {}; {required}.",
+            number(first),
+            number(last)
+        ),
+    )
+    .with_parameter(name)
+    .with_hint("rescale the coordinates, or pass a wider grid."))
 }
 
 /// Checks that the grid coordinates `values`, the argument `name` of the call `context`, are
