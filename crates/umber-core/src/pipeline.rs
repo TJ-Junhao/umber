@@ -230,7 +230,8 @@ fn check_equal_aspect(figure: &Figure, context: &'static str) -> Result<()> {
 /// Checks that the color-mapped contours of each color group, which share one colorbar, all
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
 /// naming the panels of the first two whose levels differ. It reads the levels the model
-/// resolved, before any contour geometry is built.
+/// resolved, before any contour geometry is built. A contour on a mesh that draws no triangle
+/// takes no part, as it takes no part in the bar.
 fn check_contour_levels(
     figure: &Figure,
     groups: &ShareGroups,
@@ -255,7 +256,9 @@ fn check_contour_levels(
                 use crate::model::Mark;
                 let spec = match mark {
                     Mark::Contour(contour) => contour.spec(),
-                    Mark::Tricontour(contour) => contour.spec(),
+                    // A mesh contour that draws no triangle explains nothing on the bar.
+                    Mark::Tricontour(contour) if contour.draws() => contour.spec(),
+                    Mark::Tricontour(_) => return None,
                     Mark::Line(_)
                     | Mark::Scatter(_)
                     | Mark::Bubbles(_)

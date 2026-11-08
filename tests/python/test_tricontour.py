@@ -286,3 +286,30 @@ def test_no_triangle_left_draws_nothing_and_no_colorbar() -> None:
         assert "linearGradient" not in svg and "evenodd" not in svg, style
     empty = axes().contour([0, 1], [0, 1], [[np.nan, np.nan], [np.nan, np.nan]])
     assert "linearGradient" not in empty.figure.to_svg()
+
+
+EMPTY = ([0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 1.0, np.nan, 2.0])
+
+
+def test_a_mesh_contour_that_draws_nothing_takes_no_part_in_the_colorbar() -> None:
+    x, y, z = EMPTY
+    alone = axes().tricontour([0, 1, 0], [0, 0, 1], [0, 1, 2]).figure.to_svg()
+    ax = axes().tricontour([0, 1, 0], [0, 0, 1], [0, 1, 2])
+    ax.tricontour(x, y, z, triangles=[[0, 1, 2]])
+    assert ax.figure.to_svg().startswith("<svg")
+    given = axes().tricontour([0, 1, 0], [0, 0, 1], [0, 1, 2])
+    given.tricontour(x, y, z, triangles=[[0, 1, 2]], levels=[5.0], style=ub.Contour.BOTH)
+    assert given.figure.to_svg().startswith("<svg")
+    assert "linearGradient" in alone
+
+
+@pytest.mark.parametrize("under", ["mesh", "tripcolor"])
+def test_an_empty_filled_mesh_contour_keeps_the_gradient_colorbar(under: str) -> None:
+    x, y, z = EMPTY
+    ax = axes()
+    if under == "mesh":
+        ax.mesh([0, 1, 2], [0, 1], [[1.0, 3.0]])
+    else:
+        ax.tripcolor(x, y, [1.0, 3.0, 2.0, 2.0])
+    ax.tricontour(x, y, z, triangles=[[0, 1, 2]], style=ub.Contour.FILLED).colorbar()
+    assert "linearGradient" in ax.figure.to_svg()

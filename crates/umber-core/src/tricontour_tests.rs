@@ -695,3 +695,101 @@ fn either_winding_and_any_row_order_draw_the_same() {
     };
     assert_eq!(drawn(&given), drawn(&flipped));
 }
+
+/// The colorbar levels of the only panel of `figure`, if it marks any.
+fn bar_levels(figure: &Figure) -> Option<Vec<f64>> {
+    let (resolved, _) = planned(figure);
+    let levels = resolved.color?.levels?;
+    Some(levels.ticks.iter().map(|tick| tick.value).collect())
+}
+
+/// A triangle whose one corner is NaN, so it draws nothing, with a point beyond it.
+const EMPTY_X: [f64; 4] = [0.0, 1.0, 0.0, 2.0];
+const EMPTY_Y: [f64; 4] = [0.0, 0.0, 1.0, 2.0];
+const EMPTY_Z: [f64; 4] = [0.0, 1.0, f64::NAN, 2.0];
+
+#[test]
+fn a_mesh_contour_that_draws_nothing_takes_no_part_in_the_colorbar() {
+    let empty = Triangles::Given(&[[0, 1, 2]]);
+    // Beside a contour that draws: its automatic levels, none, are not compared.
+    let mut f = figure_of(LINEAR);
+    f.single_axes_mut()
+        .tricontour(
+            &[0.0, 1.0, 0.0],
+            &[0.0, 0.0, 1.0],
+            Triangles::Auto,
+            &[0.0, 1.0, 2.0],
+            lines(),
+        )
+        .unwrap()
+        .tricontour(&EMPTY_X, &EMPTY_Y, empty, &EMPTY_Z, lines())
+        .unwrap();
+    let [Mark::Tricontour(drawn), Mark::Tricontour(nothing)] = f.single_axes().marks() else {
+        unreachable!()
+    };
+    assert!(nothing.levels().is_empty() && !drawn.levels().is_empty());
+    let expected = drawn.levels();
+    scene(&f);
+    assert_eq!(bar_levels(&f), Some(expected.clone()));
+    // It still counts in the limits.
+    let (resolved, _) = planned(&f);
+    assert_eq!(resolved.x.continuous().unwrap().domain(), (0.0, 2.0));
+    // With levels of its own, which differ, too.
+    let mut f = figure_of(LINEAR);
+    let given = ContourOptions {
+        levels: ContourLevels::Values(vec![5.0]),
+        ..styled(ContourStyle::Both)
+    };
+    f.single_axes_mut()
+        .tricontour(
+            &[0.0, 1.0, 0.0],
+            &[0.0, 0.0, 1.0],
+            Triangles::Auto,
+            &[0.0, 1.0, 2.0],
+            lines(),
+        )
+        .unwrap()
+        .tricontour(&EMPTY_X, &EMPTY_Y, empty, &EMPTY_Z, given)
+        .unwrap();
+    scene(&f);
+    assert_eq!(bar_levels(&f), Some(expected));
+    // Filled over a mesh or a tripcolor: the bar stays the gradient of their values.
+    for under in ["mesh", "tripcolor"] {
+        let mut f = figure_of(LINEAR);
+        let mut axes = f.single_axes_mut();
+        if under == "mesh" {
+            axes.mesh(
+                &[0.0, 1.0, 2.0],
+                &[0.0, 1.0],
+                &[1.0, 3.0],
+                MeshOptions::default(),
+            )
+            .unwrap();
+        } else {
+            axes.tripcolor(
+                &EMPTY_X,
+                &EMPTY_Y,
+                Triangles::Auto,
+                &[1.0, 3.0, 2.0, 2.0],
+                TripcolorOptions::default(),
+            )
+            .unwrap();
+        }
+        axes.tricontour(
+            &EMPTY_X,
+            &EMPTY_Y,
+            empty,
+            &EMPTY_Z,
+            styled(ContourStyle::Filled),
+        )
+        .unwrap()
+        .colorbar(ColorbarOptions::default())
+        .unwrap();
+        let (resolved, layout) = planned(&f);
+        assert!(layout.colorbar.is_some(), "{under}");
+        let scale = resolved.color.unwrap();
+        assert!(scale.levels.is_none(), "{under}: the bar marks levels");
+        assert!(scale.ticks.len() >= 2, "{under}");
+        scene(&f);
+    }
+}

@@ -4609,7 +4609,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         ``tripcolor()`` takes its range from the triangles it draws. A point that no drawn
         triangle uses still has its value checked and still counts in the automatic limits.
         When no triangle is left, nothing is drawn and no colorbar appears, as for
-        ``contour()`` on a grid of NaN.
+        ``contour()`` on a grid of NaN; such a contour takes no part in a colorbar that other
+        marks draw, neither in its levels and bands nor in the rule that contours sharing it
+        need the same levels.
 
         A point is above a level when its value is at or above it, so integer data often puts
         a level exactly on points. Each band above a level is the area where the field is at or

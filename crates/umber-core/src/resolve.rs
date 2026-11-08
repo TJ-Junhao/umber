@@ -3740,7 +3740,8 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The levels that a colorbar marks for this mark: those of a color-mapped contour, on a
-    /// grid or a mesh, drawn as bands when it is filled; `None` for every other mark.
+    /// grid or a mesh, drawn as bands when it is filled; `None` for every other mark, and for a
+    /// contour on a mesh that draws no triangle, which leaves the bar to the other marks.
     pub(crate) fn color_levels(&self) -> Option<ColorLevels> {
         let spec = match self {
             ResolvedMark::Contour {
@@ -3752,7 +3753,7 @@ impl<'a> ResolvedMark<'a> {
                 mark,
                 mapped: Some(_),
                 ..
-            } => mark.spec(),
+            } if mark.draws() => mark.spec(),
             _ => return None,
         };
         let (ticks, values) = spec.level_ticks();

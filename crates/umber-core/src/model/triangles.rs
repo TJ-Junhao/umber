@@ -305,7 +305,8 @@ impl TripcolorMark {
 /// three values are finite, as [`TripcolorMark`] takes its range from the triangles it draws; a
 /// point no such triangle uses is still checked, and still counts in the automatic limits.
 /// When no triangle is left, the contour draws nothing and maps no color, as a contour on a
-/// grid of NaN does.
+/// grid of NaN does, and it takes no part in the colorbar: the bar's levels and bands, and the
+/// check that contours sharing it have the same levels, come from the other marks.
 ///
 /// Each band above a level is the region where the values are at or above it, made of the
 /// parts of triangles that have an area: a triangle whose corners all lie on a level (a flat
@@ -410,6 +411,14 @@ impl TricontourMark {
     /// levels and the color mapping come from them.
     pub(crate) fn drawn(&self) -> &[f64] {
         &self.drawn
+    }
+
+    /// Whether the contour draws any triangle: whether any of its values is drawn
+    /// ([`drawn`](Self::drawn)). One that draws none still counts in the automatic limits, but
+    /// takes no part in the colorbar: neither its levels nor its bands, nor the check that
+    /// contours sharing the bar have the same levels.
+    pub(crate) fn draws(&self) -> bool {
+        self.drawn.iter().any(|value| value.is_finite())
     }
 
     /// The levels, increasing: those given, or the round values chosen for the values the
