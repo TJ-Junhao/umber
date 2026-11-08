@@ -2,16 +2,20 @@
 //! as given ([`Triangles`]), and validated into a [`TriMesh`] that the triangle marks draw.
 //!
 //! **Delaunay.** [`delaunay`] triangulates the raw coordinates with the `delaunator` crate,
-//! whose orientation tests are Shewchuk's exact predicates. Its comparisons of near-duplicate
-//! points use a fixed absolute tolerance, so the coordinates are first multiplied by one power
-//! of two that brings the largest magnitude to between 0.5 and 1: that changes no comparison
-//! between coordinates, and every product only by an exact power of two, so the triangulation
-//! is that of the raw coordinates, at any scale. Exact duplicates are refused before
-//! triangulating, naming the first point that repeats an earlier one. Points so close that the
-//! triangulation leaves one out (within about 1e-15 of the largest coordinate along both
-//! axes) are refused after it, naming both. When the library finds all points on one line it
-//! returns no triangle, which is refused; a triangle without area in its result, which only
-//! an exactly straight set of points can give, is refused in the same words.
+//! whose orientation tests are Shewchuk's exact predicates. Exact duplicates are refused
+//! first, naming the first point that repeats an earlier one, and then points all on one line,
+//! decided exactly on the raw coordinates. The library compares near-duplicate points with a
+//! fixed absolute tolerance, so the coordinates are multiplied by one power of two that brings
+//! the largest magnitude to between 0.5 and 1: that changes no comparison between coordinates,
+//! and every product only by an exact power of two, so the triangulation is that of the raw
+//! coordinates, at any scale, as long as no coordinate becomes subnormal, which would lose
+//! bits; such coordinates span too wide a range of scales and are refused. The result is then
+//! checked: every point used, every triangle turning the same way with an area, decided
+//! exactly, and as many triangles as a triangulation of the points has (`2n - 2 - h` for `n`
+//! points, `h` of them on the hull). Points so close that the library leaves one out (within
+//! about 1e-15 of the largest coordinate along both axes) are refused naming both; any other
+//! failure, which only coordinates whose squares or cubes leave the range of `f64` can cause,
+//! is refused as a range too wide to triangulate, with a hint to rescale.
 //!
 //! **Order.** Rows of [`delaunay`] are counter-clockwise in data coordinates with y up, each
 //! starting at its smallest index, and sorted. A [`TriMesh`] stores each triangle with its
@@ -22,7 +26,16 @@
 //! **Validation.** Given triangles are checked in one pass over the rows (indices in range,
 //! three different corners, an area) and then, on the sorted triangles and their sorted edges,
 //! for a triangle given twice and an edge that borders more than two triangles: `O(n log n)`
-//! for `n` triangles. Whether three corners lie on one line is decided exactly.
+//! for `n` triangles.
+//!
+//! **Exact turns.** Whether three points lie on one line, and which way they turn, is decided
+//! exactly on the raw coordinates, so the answer never depends on the order of the corners.
+//! Shewchuk's `orient2d` is exact unless an intermediate value overflows or underflows. Where
+//! every coordinate of the three points is 0 or an integer multiple of 2^-400 below 2^400 in
+//! magnitude ([`Exact`]), every value it computes, the differences of coordinates, their
+//! products and the sums and errors of those, is a multiple of 2^-800 below 2^810: none
+//! underflows or overflows, so its sign is exact. Any other triple is decided in exact binary
+//! fractions ([`Dyadic`]).
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -76,8 +89,10 @@ pub enum Triangles<'a> {
 ///
 /// `Error::Data` under the context `"delaunay()"`, in this order: `x` and `y` of different
 /// lengths; fewer than three points; a coordinate that is not finite (naming it); a point that
-/// repeats an earlier one (naming both); all points on one line; two points too close to tell
-/// apart, within about 1e-15 of the largest coordinate along both axes (naming both).
+/// repeats an earlier one (naming both); all points on one line, decided exactly; coordinates
+/// over so wide a range of scales that they cannot be triangulated in double precision (naming
+/// the axis of the smaller span, with a hint to rescale); two points too close to tell apart,
+/// within about 1e-15 of the largest coordinate along both axes (naming both).
 ///
 /// # Examples
 ///
@@ -154,12 +169,12 @@ fn check_count(context: &'static str, count: usize) -> Result<()> {
 /// returns them, with the errors of the call `context`.
 pub(crate) fn triangulate(context: &'static str, x: &[f64], y: &[f64]) -> Result<Vec<[usize; 3]>> {
     check_duplicates(context, x, y)?;
-    let points = Scaled::new(x, y);
-    let input: Vec<delaunator::Point> = (0..points.len())
-        .map(|i| {
-            let [x, y] = points.at(i);
-            delaunator::Point { x, y }
-        })
+    let points = Exact::new(x, y);
+    check_not_one_line(context, &points)?;
+    let scaled = scaled(context, x, y)?;
+    let input: Vec<delaunator::Point> = scaled
+        .iter()
+        .map(|&[x, y]| delaunator::Point { x, y })
         .collect();
     let found = delaunator::triangulate(&input);
     let mut rows: Vec<[usize; 3]> = found
@@ -167,21 +182,17 @@ pub(crate) fn triangulate(context: &'static str, x: &[f64], y: &[f64]) -> Result
         .chunks_exact(3)
         .map(|t| [t[0], t[1], t[2]])
         .collect();
-    let flat = rows
-        .iter()
-        .any(|&[a, b, c]| points.turn(a, b, c) == Ordering::Equal);
-    if rows.is_empty() || flat {
-        return Err(Error::data(
-            context,
-            format!(
-                "all {} points lie on one line; a triangle needs three points that do not.",
-                x.len()
-            ),
-        )
-        .with_parameter("x")
-        .with_hint("add a point off the line, or draw the points with line() or scatter()."));
+    check_all_used(context, (x, y), &scaled, &rows)?;
+    // A triangulation of n points, h of them on its hull, has 2n - 2 - h triangles, all turning
+    // the same way; anything else is a numerical failure of the library.
+    let expected = (2 * x.len()).checked_sub(2 + found.hull.len());
+    let turns = rows.first().map(|&[a, b, c]| points.turn(a, b, c));
+    let consistent = turns.is_some_and(|first| {
+        first != Ordering::Equal && rows.iter().all(|&[a, b, c]| points.turn(a, b, c) == first)
+    });
+    if !consistent || expected != Some(rows.len()) {
+        return Err(too_wide(context, x, y));
     }
-    check_all_used(context, &points, &rows)?;
     for row in &mut rows {
         if points.turn(row[0], row[1], row[2]) == Ordering::Less {
             row.swap(1, 2);
@@ -191,6 +202,57 @@ pub(crate) fn triangulate(context: &'static str, x: &[f64], y: &[f64]) -> Result
     }
     rows.sort_unstable();
     Ok(rows)
+}
+
+/// Refuses points that all lie on one line, decided exactly (`Error::Data` about `x`). The
+/// points are different, so a second point other than the first exists.
+fn check_not_one_line(context: &'static str, points: &Exact<'_>) -> Result<()> {
+    let n = points.x.len();
+    let second = (1..n)
+        .find(|&i| points.raw(i) != points.raw(0))
+        .unwrap_or(1);
+    if (1..n).any(|i| points.turn(0, second, i) != Ordering::Equal) {
+        return Ok(());
+    }
+    Err(Error::data(
+        context,
+        format!("all {n} points lie on one line; a triangle needs three points that do not."),
+    )
+    .with_parameter("x")
+    .with_hint("add a point off the line, or draw the points with line() or scatter()."))
+}
+
+/// The error for points the library cannot triangulate in the range of `f64`, though they do
+/// not lie on one line: their coordinates span too wide a range of scales (`Error::Data` about
+/// the axis of the smaller span).
+fn too_wide(context: &'static str, x: &[f64], y: &[f64]) -> Error {
+    let span = |values: &[f64]| {
+        let low = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let high = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        (low, high)
+    };
+    let ((x_low, x_high), (y_low, y_high)) = (span(x), span(y));
+    let parameter = if y_high - y_low < x_high - x_low {
+        "y"
+    } else {
+        "x"
+    };
+    Error::data(
+        context,
+        format!(
+            "x spans {} to {} and y spans {} to {}; coordinates spread over so wide a range of \
+             scales cannot be triangulated in double precision.",
+            number(x_low),
+            number(x_high),
+            number(y_low),
+            number(y_high)
+        ),
+    )
+    .with_parameter(parameter)
+    .with_hint(
+        "rescale x and y to similar spans, such as delaunay(x / np.ptp(x), y / np.ptp(y)), and \
+         pass the result as triangles=.",
+    )
 }
 
 /// Refuses a point that repeats an earlier one (`Error::Data` about `x`): of all repeats, the
@@ -233,9 +295,15 @@ fn check_duplicates(context: &'static str, x: &[f64], y: &[f64]) -> Result<()> {
 
 /// Refuses a triangulation that leaves a point out: the triangulation joins every point of a
 /// set not all on one line, unless it found two points too close to tell apart and kept one
-/// (`Error::Data` about `x`, naming both).
-fn check_all_used(context: &'static str, points: &Scaled, rows: &[[usize; 3]]) -> Result<()> {
-    let mut used = vec![false; points.len()];
+/// (`Error::Data` about `x`, naming both), or failed in the range of `f64` ([`too_wide`]).
+/// `scaled` holds the coordinates as the library got them.
+fn check_all_used(
+    context: &'static str,
+    (x, y): (&[f64], &[f64]),
+    scaled: &[[f64; 2]],
+    rows: &[[usize; 3]],
+) -> Result<()> {
+    let mut used = vec![false; scaled.len()];
     for &i in rows.iter().flatten() {
         if let Some(slot) = used.get_mut(i) {
             *slot = true;
@@ -244,78 +312,70 @@ fn check_all_used(context: &'static str, points: &Scaled, rows: &[[usize; 3]]) -
     let Some(left) = used.iter().position(|&used| !used) else {
         return Ok(());
     };
-    let [lx, ly] = points.at(left);
-    let close = (0..points.len()).find(|&j| {
-        let [x, y] = points.at(j);
-        j != left && (x - lx).abs() <= NEAR && (y - ly).abs() <= NEAR
+    let [lx, ly] = scaled[left];
+    let close = (0..scaled.len()).find(|&j| {
+        let [sx, sy] = scaled[j];
+        j != left && (sx - lx).abs() <= NEAR && (sy - ly).abs() <= NEAR
     });
-    let [x, y] = points.raw(left);
-    let message = match close {
-        Some(other) => {
-            let [ox, oy] = points.raw(other);
-            let (first, later) = (other.min(left), other.max(left));
-            let [(fx, fy), (sx, sy)] = if other < left {
-                [(ox, oy), (x, y)]
-            } else {
-                [(x, y), (ox, oy)]
-            };
-            format!(
-                "points {first} and {later}, at ({}, {}) and ({}, {}), are too close to tell \
-                 apart; points must differ by more than about 1e-15 of the largest coordinate \
-                 along x or y.",
-                number(fx),
-                number(fy),
-                number(sx),
-                number(sy)
-            )
-        }
-        None => format!(
-            "point {left} at ({}, {}) could not be joined to the others; it lies too close to \
-             another point or to a line between two.",
-            number(x),
-            number(y)
-        ),
+    let Some(other) = close else {
+        return Err(too_wide(context, x, y));
     };
-    Err(Error::data(context, message)
-        .with_parameter("x")
-        .with_hint("merge points that are this close, or rescale the coordinates."))
+    let (first, later) = (other.min(left), other.max(left));
+    Err(Error::data(
+        context,
+        format!(
+            "points {first} and {later}, at ({}, {}) and ({}, {}), are too close to tell apart; \
+             points must differ by more than about 1e-15 of the largest coordinate along x or y.",
+            number(x[first]),
+            number(y[first]),
+            number(x[later]),
+            number(y[later])
+        ),
+    )
+    .with_parameter("x")
+    .with_hint("merge points that are this close, or rescale the coordinates."))
 }
 
-/// Points with their coordinates multiplied by one power of two, which brings the largest
-/// magnitude to between 0.5 and 1 (see the module documentation).
-pub(crate) struct Scaled<'a> {
+/// The coordinates multiplied by one power of two that brings the largest magnitude to between
+/// 0.5 and 1 (see the module documentation), `[x, y]` per point. Refuses coordinates that would
+/// become subnormal and lose bits ([`too_wide`]); no coordinate can overflow.
+fn scaled(context: &'static str, x: &[f64], y: &[f64]) -> Result<Vec<[f64; 2]>> {
+    let largest = x.iter().chain(y).fold(0.0_f64, |m, v| m.max(v.abs()));
+    let exponent = binary_exponent(largest);
+    let mut points = Vec::with_capacity(x.len());
+    for (&x0, &y0) in x.iter().zip(y) {
+        let point = [x0, y0].map(|v| times_power_of_two(v, -exponent));
+        let lost = [x0, y0]
+            .iter()
+            .zip(&point)
+            .any(|(&raw, &v)| raw != 0.0 && !v.is_normal());
+        if lost {
+            return Err(too_wide(context, x, y));
+        }
+        points.push(point);
+    }
+    Ok(points)
+}
+
+/// Points with what decides exactly which way three of them turn (see the module
+/// documentation).
+pub(crate) struct Exact<'a> {
     x: &'a [f64],
     y: &'a [f64],
-    /// The scaled coordinates, `[x, y]` per point.
-    scaled: Vec<[f64; 2]>,
+    /// Whether both coordinates of each point are 0 or integer multiples of 2^-400 below 2^400
+    /// in magnitude, so that `orient2d` decides any three such points exactly.
+    fast: Vec<bool>,
 }
 
-impl<'a> Scaled<'a> {
-    /// The finite points `(x[i], y[i])`, scaled.
-    pub(crate) fn new(x: &'a [f64], y: &'a [f64]) -> Scaled<'a> {
-        let largest = x.iter().chain(y).fold(0.0_f64, |m, v| m.max(v.abs()));
-        let exponent = binary_exponent(largest);
-        let scaled = x
+impl<'a> Exact<'a> {
+    /// The finite points `(x[i], y[i])`.
+    pub(crate) fn new(x: &'a [f64], y: &'a [f64]) -> Exact<'a> {
+        let fast = x
             .iter()
             .zip(y)
-            .map(|(&x, &y)| {
-                [
-                    times_power_of_two(x, -exponent),
-                    times_power_of_two(y, -exponent),
-                ]
-            })
+            .map(|(&x, &y)| on_grid(x) && on_grid(y))
             .collect();
-        Scaled { x, y, scaled }
-    }
-
-    /// The number of points.
-    pub(crate) fn len(&self) -> usize {
-        self.scaled.len()
-    }
-
-    /// The scaled point `i`.
-    fn at(&self, i: usize) -> [f64; 2] {
-        self.scaled[i]
+        Exact { x, y, fast }
     }
 
     /// The point `i` as given.
@@ -324,20 +384,23 @@ impl<'a> Scaled<'a> {
     }
 
     /// Which way the points `a`, `b` and `c` turn, decided exactly: `Greater` counter-clockwise
-    /// with y up, `Less` clockwise, `Equal` on one line.
+    /// with y up, `Less` clockwise, `Equal` on one line. The answer for a reordering of the
+    /// three points follows from this one by the parity of the reordering.
     pub(crate) fn turn(&self, a: usize, b: usize, c: usize) -> Ordering {
-        let coord = |i: usize| {
-            let [x, y] = self.at(i);
-            Coord { x, y }
-        };
-        let fast = orient2d(coord(a), coord(b), coord(c));
-        if fast > 0.0 {
-            return Ordering::Greater;
+        if self.fast[a] && self.fast[b] && self.fast[c] {
+            let coord = |i: usize| {
+                let [x, y] = self.raw(i);
+                Coord { x, y }
+            };
+            let turn = orient2d(coord(a), coord(b), coord(c));
+            return if turn > 0.0 {
+                Ordering::Greater
+            } else if turn < 0.0 {
+                Ordering::Less
+            } else {
+                Ordering::Equal
+            };
         }
-        if fast < 0.0 {
-            return Ordering::Less;
-        }
-        // Zero: confirm it in exact binary fractions, which no product can underflow.
         let d = |i: usize| self.raw(i).map(Dyadic::from_f64);
         let ([ax, ay], [bx, by], [cx, cy]) = (d(a), d(b), d(c));
         let cross = bx
@@ -346,6 +409,25 @@ impl<'a> Scaled<'a> {
             .sub(&by.sub(&ay).mul(&cx.sub(&ax)));
         cross.sign()
     }
+}
+
+/// Whether `v` is 0, or an integer multiple of 2^-400 below 2^400 in magnitude.
+fn on_grid(v: f64) -> bool {
+    if v == 0.0 {
+        return true;
+    }
+    let bits = v.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1_u64 << 52) - 1);
+    // `v = m * 2^(e - 1075)` with the integer `m`; its lowest set bit says how fine it is.
+    let (m, e) = if biased == 0 {
+        (fraction, 1)
+    } else {
+        (fraction | (1_u64 << 52), biased)
+    };
+    let lowest = e - 1075 + m.trailing_zeros() as i32;
+    let highest = e - 1075 + 52;
+    lowest >= -400 && highest < 400
 }
 
 /// The exponent `e` with `v = f * 2^e` and `f` from 0.5 to below 1, for a finite `v > 0`; 0 for
@@ -610,7 +692,7 @@ fn check_given(
         ));
     }
     let count = x.len();
-    let points = Scaled::new(x, y);
+    let points = Exact::new(x, y);
     let mut rows = Vec::with_capacity(given.len());
     for (row, corners) in given.iter().enumerate() {
         let mut checked = [0_usize; 3];

@@ -182,9 +182,10 @@ impl Default for TripcolorOptions {
 ///
 /// Each triangle is filled and stroked with a hairline 0.75 pt wide in its own color, with
 /// round joins, so that neighbours meet without a seam; the outer boundary of the mesh, and the
-/// edge of a blank triangle, grow by half the hairline, 0.375 pt. Triangles of one
-/// color are one filled and one stroked path, the colors in the order they first appear among
-/// the sorted triangles: two scene items per color. The mesh is always drawn as vector shapes.
+/// edge of a blank triangle, grow by half the hairline, 0.375 pt. Triangles are drawn by value,
+/// lowest first, so where triangles overlap the higher value is on top, whatever else the mesh
+/// holds; triangles of one color drawn one after another are one filled and one stroked path,
+/// two scene items per color. The mesh is always drawn as vector shapes.
 /// Automatic limits are the extent of the points, without padding.
 ///
 /// # Examples

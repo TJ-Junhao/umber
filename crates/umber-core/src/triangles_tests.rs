@@ -235,6 +235,60 @@ fn delaunay_refuses_too_few_points_one_line_duplicates_and_missing_coordinates()
     }
 }
 
+#[test]
+fn delaunay_tells_a_range_too_wide_for_double_precision_from_one_line() {
+    // Not on one line, but the library's circumradius overflows.
+    let (message, parameter) = delaunay_error(&[0.0, 1.0, 2.0], &[0.0, 0.0, 1e-200]);
+    assert_eq!(
+        message,
+        "delaunay(): x spans 0 to 2 and y spans 0 to 1e-200; coordinates spread over so wide a \
+         range of scales cannot be triangulated in double precision."
+    );
+    assert_eq!(parameter, Some("y"));
+    // Scaled to a largest magnitude near 1, y would become subnormal and lose bits.
+    let (message, parameter) =
+        delaunay_error(&[0.0, 1e200, 0.0, 1e200], &[0.0, 0.0, 1e-200, 1e-200]);
+    assert!(message.contains("so wide a range of scales"), "{message}");
+    assert_eq!(parameter, Some("y"));
+    // Points exactly on one line at the same scales are on one line.
+    let (big, small) = (2_f64.powi(900), 2_f64.powi(-900));
+    let (message, _) = delaunay_error(&[0.0, big, 2.0 * big], &[0.0, small, 2.0 * small]);
+    assert_eq!(
+        message,
+        "delaunay(): all 3 points lie on one line; a triangle needs three points that do not."
+    );
+    // A grid, with points on the edges of its hull, triangulates.
+    let grid: Vec<f64> = (0..9).map(|i| f64::from(i % 3)).collect();
+    let rows: Vec<f64> = (0..9).map(|i| f64::from(i / 3)).collect();
+    assert_eq!(delaunay(&grid, &rows).unwrap().len(), 8);
+}
+
+#[test]
+fn the_zero_area_test_is_exact_whatever_the_order_of_the_corners() {
+    // Points 0, 1 and 2 lie exactly on one line, at scales where products underflow and a
+    // scaled copy loses bits.
+    let (big, small) = (2_f64.powi(900), 2_f64.powi(-177));
+    let x = [0.0, 3.0 * big / 8.0, big, big];
+    let y = [0.0, 9.0 * small, 24.0 * small, 1.0];
+    for row in [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ] {
+        let mut f = figure_of(LINEAR);
+        let error = triplot_error(&mut f, (&x, &y), Triangles::Given(&[row]));
+        assert!(
+            error.to_string().contains("so it has no area"),
+            "{row:?}: {error}"
+        );
+    }
+    let mut f = figure_of(LINEAR);
+    triplot(&mut f, (&x, &y), Triangles::Given(&[[0, 1, 3]]));
+}
+
 /// Adds the edges of a mesh and returns the mark.
 fn triplot(figure: &mut Figure, (x, y): (&[f64], &[f64]), triangles: Triangles<'_>) -> TriplotMark {
     let mut axes = axes(figure);
@@ -648,8 +702,7 @@ fn tripcolor_on_points_takes_the_mean_of_the_corners_and_a_nan_corner_blanks_its
     );
     // The triangles [0, 1, 4], [0, 3, 4], [1, 2, 4] and [2, 3, 4].
     assert_eq!(mark.values(), [5.0, 7.0, 7.0, 9.0]);
-    // Three colors: three fills, in the order the colors first appear, the second of two
-    // triangles.
+    // Three colors: three fills, in the order of their values, the second of two triangles.
     let drawn = fills(&f);
     assert_eq!(drawn.len(), 3);
     assert_eq!(drawn[1].1.len(), 2);
@@ -983,6 +1036,40 @@ fn every_triangle_winds_one_way_on_the_page() {
                 assert!(twice_area(&triangle) > 0.0, "{triangle:?}");
             }
         }
+    }
+}
+
+#[test]
+fn overlapping_triangles_draw_the_higher_value_on_top_whatever_else_the_mesh_holds() {
+    // Triangles 1 and 2 overlap; triangle 0, far from them, comes first in the mesh.
+    let x = [10.0, 11.0, 10.0, 0.0, 2.0, 0.0, 0.5, 2.5, 0.5];
+    let y = [0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.5, 0.5, 2.5];
+    let low = [[3, 4, 5]];
+    let high = [[6, 7, 8]];
+    for with_far in [false, true] {
+        let mut given: Vec<[i64; 3]> = Vec::new();
+        let mut values = Vec::new();
+        if with_far {
+            given.push([0, 1, 2]);
+            values.push(2.0);
+        }
+        given.extend(low);
+        values.push(1.0);
+        given.extend(high);
+        values.push(2.0);
+        let mut f = figure_of(LINEAR);
+        tripcolor(
+            &mut f,
+            (&x, &y),
+            Triangles::Given(&given),
+            &values,
+            per_triangle(),
+        );
+        let drawn = fills(&f);
+        assert_eq!(drawn.len(), 2, "{with_far}");
+        // The low triangle first, then the high ones, with the far one if it is there.
+        assert_eq!(drawn[0].1.len(), 1);
+        assert_eq!(drawn[1].1.len(), 1 + usize::from(with_far));
     }
 }
 

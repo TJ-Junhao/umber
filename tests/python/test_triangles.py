@@ -58,6 +58,102 @@ def test_delaunay_returns_int64_rows_counter_clockwise_from_their_smallest_index
     assert square[0, 0] == 3
 
 
+def pinned_points() -> tuple[list[float], list[float]]:
+    """The 30 points whose triangulation is pinned, as in the Rust tests: a 4 by 4 grid of unit
+    squares, twelve points on one circle around it at exact coordinates, and two inside."""
+    points = [(float(i), float(j)) for j in range(4) for i in range(4)]
+    points += [
+        (4.0, 1.5),
+        (1.5, 4.0),
+        (-1.0, 1.5),
+        (1.5, -1.0),
+        (3.0, 3.5),
+        (0.0, 3.5),
+        (0.0, -0.5),
+        (3.0, -0.5),
+        (3.5, 3.0),
+        (-0.5, 3.0),
+        (-0.5, 0.0),
+        (3.5, 0.0),
+    ]
+    points += [(0.5, 2.25), (2.25, 0.75)]
+    return [p[0] for p in points], [p[1] for p in points]
+
+
+PINNED = [
+    [0, 1, 5],
+    [0, 4, 26],
+    [0, 5, 4],
+    [0, 22, 1],
+    [0, 26, 22],
+    [1, 2, 5],
+    [1, 19, 2],
+    [1, 22, 19],
+    [2, 3, 29],
+    [2, 6, 5],
+    [2, 19, 23],
+    [2, 23, 3],
+    [2, 29, 6],
+    [3, 7, 29],
+    [3, 23, 27],
+    [3, 27, 7],
+    [4, 5, 8],
+    [4, 8, 18],
+    [4, 18, 26],
+    [5, 6, 9],
+    [5, 9, 8],
+    [6, 7, 10],
+    [6, 10, 9],
+    [6, 29, 7],
+    [7, 11, 10],
+    [7, 16, 11],
+    [7, 27, 16],
+    [8, 9, 28],
+    [8, 12, 25],
+    [8, 25, 18],
+    [8, 28, 12],
+    [9, 10, 13],
+    [9, 13, 28],
+    [10, 11, 14],
+    [10, 14, 13],
+    [11, 15, 14],
+    [11, 16, 24],
+    [11, 24, 15],
+    [12, 13, 21],
+    [12, 21, 25],
+    [12, 28, 13],
+    [13, 14, 17],
+    [13, 17, 21],
+    [14, 15, 20],
+    [14, 20, 17],
+    [15, 24, 20],
+]
+
+
+def test_the_triangulation_of_a_fixed_point_set_is_the_same_on_every_platform() -> None:
+    x, y = pinned_points()
+    assert ub.delaunay(x, y).tolist() == PINNED
+
+
+def test_a_range_too_wide_for_double_precision_is_not_one_line() -> None:
+    with pytest.raises(ub.DataError, match="so wide a range of scales") as raised:
+        ub.delaunay([0.0, 1.0, 2.0], [0.0, 0.0, 1e-200])
+    assert parameter_of(raised.value) == "y"
+    with pytest.raises(ub.DataError, match="so wide a range of scales"):
+        ub.delaunay([0.0, 1e200, 0.0, 1e200], [0.0, 0.0, 1e-200, 1e-200])
+    with pytest.raises(ub.DataError, match="lie on one line"):
+        ub.delaunay([0.0, 2.0**900, 2.0**901], [0.0, 2.0**-900, 2.0**-899])
+
+
+def test_no_area_is_decided_exactly_in_every_corner_order() -> None:
+    big, small = 2.0**900, 2.0**-177
+    x, y = [0.0, 3 * big / 8, big, big], [0.0, 9 * small, 24 * small, 1.0]
+    for row in ([0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]):
+        with pytest.raises(ub.DataError, match="so it has no area"):
+            axes().triplot(x, y, triangles=[row])
+    axes().triplot(x, y, triangles=[[0, 1, 3]])
+
+
 def test_delaunay_takes_lists_series_and_integer_arrays_alike() -> None:
     x, y = [0.0, 2.0, 1.0, 1.0, 0.0], [0.0, 0.0, 2.0, 0.5, 1.5]
     expected = ub.delaunay(np.array(x), np.array(y)).tolist()
@@ -173,6 +269,8 @@ def test_wrong_triangles_are_data_errors(triangles: object, message: str) -> Non
         ([[0, 1, 4.0]], "triangles holds float"),
         ([[0, 1, True]], "triangles holds bool"),
         (np.array([[True, False, True]]), "triangles is an array of bool"),
+        (np.array([[0, 1, 2]], dtype=object), "triangles is an array of object"),
+        (pd.DataFrame([[0.0, 1.0, 2.0]]), "triangles is an array of float64"),
         ("012", "triangles is str"),
         (3, "triangles is int"),
     ],

@@ -17,10 +17,14 @@
 //! them. A triangle wholly inside the plot, expanded by a margin, is drawn as given; any other
 //! is clipped to that box in axis space first ([`clip_ring`]). Each polygon is wound one way
 //! on the page, decided from its corners as drawn, so the triangles of one color are one
-//! filled path under the nonzero rule, and one stroked path: two scene items per color, in the
-//! order the colors first appear among the sorted triangles of the mesh.
-
-use std::collections::HashMap;
+//! filled path under the nonzero rule, and one stroked path: two scene items per color.
+//!
+//! **Order.** The triangles are drawn by value, lowest first, ties in the order of the mesh,
+//! and the colors in the order of their values on the color scale: where triangles overlap,
+//! as given triangles may and a mesh may on a log axis, the higher value is on top, whatever
+//! else the mesh holds. Consecutive triangles of one color share their two items. A colormap
+//! that takes the same color at two places apart along it, with other colors between, draws
+//! that color as one pair of items at each place.
 
 use super::MarkContext;
 use super::clip::{clip_ring, clip_segment};
@@ -98,12 +102,17 @@ pub(super) fn tripcolor_items(
     let mesh = mark.mesh();
     let points = axis_points(resolved, mesh);
     let bounds = culling_bounds(context, f64::from(HAIRLINE));
-    let mut index: HashMap<Rgba, usize> = HashMap::new();
+    let values = mark.values();
+    // The triangles that map to a color, by value, ties in the order of the mesh.
+    let mut order: Vec<(usize, Rgba)> = values
+        .iter()
+        .enumerate()
+        .filter_map(|(k, &value)| Some((k, scale.color(value)?)))
+        .collect();
+    order.sort_by(|&(a, _), &(b, _)| values[a].total_cmp(&values[b]).then(a.cmp(&b)));
     let mut paths: Vec<(Rgba, Path)> = Vec::new();
-    for (&[a, b, c], &value) in mesh.triangles().iter().zip(mark.values()) {
-        let Some(color) = scale.color(value) else {
-            continue;
-        };
+    for (k, color) in order {
+        let [a, b, c] = mesh.triangles()[k];
         let corners = [points[a], points[b], points[c]];
         let ring = if corners.iter().all(|&p| bounds.contains(p)) {
             corners.to_vec()
@@ -123,11 +132,12 @@ pub(super) fn tripcolor_items(
         if twice_area(&polygon) < 0.0 {
             polygon.reverse();
         }
-        let at = *index.entry(color).or_insert_with(|| {
+        if paths.last().is_none_or(|(last, _)| *last != color) {
             paths.push((color, Path::new()));
-            paths.len() - 1
-        });
-        let path = &mut paths[at].1;
+        }
+        let Some((_, path)) = paths.last_mut() else {
+            continue;
+        };
         path.move_to(polygon[0]);
         for &p in &polygon[1..] {
             path.line_to(p);

@@ -116,11 +116,12 @@ def native_triangles(context: str, triangles: object) -> IndexArray | None:
 
 
 def _integers(context: str, array: npt.NDArray[Any]) -> npt.NDArray[Any]:
-    """The array itself when it holds integers; otherwise raise ``TypeError``."""
+    """The array itself when its dtype is an integer dtype; otherwise raise ``TypeError``.
+
+    An ``object`` array is refused too, whatever it holds.
+    """
     if array.dtype.kind in "iu":
         return array
-    if array.dtype == object and array.ndim > 0:
-        return _rows(context, cast(Sequence[object], array.tolist()))
     hint = _FLOAT_HINT if array.dtype.kind == "f" else _TYPE_HINT
     message = f"triangles is an array of {array.dtype}; triangle indices must be integers."
     raise new_error(TypeError, context, message, parameter="triangles", hint=hint)

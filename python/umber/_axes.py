@@ -4497,9 +4497,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         the colors drawn. Triangles are straight on the plot between their corners, on a log
         axis too. Each is filled flat and stroked with a 0.75 pt hairline in its own color, so
         neighbours meet without a seam; the outer edge of the mesh, and the edge of a blank
-        triangle, grow by 0.375 pt. The triangles of one color are drawn as one shape, and the
-        same triangles in any order draw the same output. The mesh is always drawn flat, as
-        vector shapes. Automatic limits are the extent of the points, without padding.
+        triangle, grow by 0.375 pt. Triangles are drawn by value, lowest first, so where
+        triangles overlap (given triangles may, and a mesh may on a log axis) the higher value
+        is on top, whatever else the mesh holds. The triangles of one color are drawn as one
+        shape, and the same triangles in any order draw the same output. The mesh is always
+        drawn flat, as vector shapes. Automatic limits are the extent of the points, without
+        padding.
 
         Args:
             x: The x coordinate of each point: finite, positive on a log axis.
