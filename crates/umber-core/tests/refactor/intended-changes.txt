@@ -1,1 +1,13 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change: the quiver figures, whose arrows now shrink with their length.
+vector-fields-data-direction-graphite
+vector-fields-data-direction-midnight
+vector-fields-data-direction-pigment
+vector-fields-equal-graphite
+vector-fields-equal-midnight
+vector-fields-equal-pigment
+vector-fields-grid-graphite
+vector-fields-grid-midnight
+vector-fields-grid-pigment
+vector-fields-stations-graphite
+vector-fields-stations-midnight
+vector-fields-stations-pigment
