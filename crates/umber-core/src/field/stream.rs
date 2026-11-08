@@ -68,8 +68,8 @@
 //! - it is [`max_length`] steps long either way, a bound that a line meeting the rules above
 //!   does not reach in practice;
 //! - it has taken [`MAX_TRIES`] steps that way, accepted or rejected, or the mark holds
-//!   [`MAX_POINTS`] points, after which no further line is traced. These bound the work of any
-//!   field: a line across a grid takes a few thousand steps, and the automatic lines of a
+//!   [`MAX_POINTS`] points, or has taken [`MAX_WORK`] steps over all its lines, dropped ones
+//!   included, after which no further line is traced. These bound the work of any field: a line across a grid takes a few thousand steps, and the automatic lines of a
 //!   300 by 300 grid at the largest density about half a million points.
 //!
 //! The length along a line is summed with its rounding carried ([`Length`]), so steps far
@@ -153,6 +153,12 @@ pub(crate) const MAX_TRIES: usize = 100_000;
 /// last point. The automatic lines of a 300 by 300 grid at the largest density hold about half
 /// a million; at this bound a mark holds about 80 MB.
 pub(crate) const MAX_POINTS: usize = 1_000_000;
+/// The most steps, accepted or rejected, that tracing all the lines of one mark may take,
+/// automatic or through given starts, including the lines that are then dropped as too short;
+/// tracing stops there, and the lines kept so far stand. The automatic lines of a 300 by 300
+/// grid take about 400,000 at the largest density and 40,000 at a density of 3, fifty and five
+/// hundred times fewer.
+pub(crate) const MAX_WORK: usize = 20_000_000;
 
 /// The longest a line may grow either way from its seed, in steps, on a grid of `steps` steps
 /// along each axis: eight times the area of the grid in square steps, and at least 64.
@@ -893,6 +899,9 @@ struct Tracer<'a> {
     max_tries: usize,
     /// How many more points the mark may hold: [`MAX_POINTS`] less those traced.
     points_left: usize,
+    /// How many more steps, accepted or rejected, the mark may take: [`MAX_WORK`] less those
+    /// taken, never given back.
+    work_left: usize,
 }
 
 impl Tracer<'_> {
@@ -916,8 +925,9 @@ impl Tracer<'_> {
         let mut tries = 0;
         let along =
             |p: [f64; 2], slope: [f64; 2], by: f64| [p[0] + by * slope[0], p[1] + by * slope[1]];
-        while tries < self.max_tries && self.points_left > 0 {
+        while tries < self.max_tries && self.points_left > 0 && self.work_left > 0 {
             tries += 1;
+            self.work_left -= 1;
             let euler = along(point, probe.slope, sign * step);
             let next = field
                 .clear(point, euler)
@@ -1060,6 +1070,7 @@ impl<'a> Tracer<'a> {
             max_length: max_length(field.steps),
             max_tries: MAX_TRIES,
             points_left: MAX_POINTS,
+            work_left: MAX_WORK,
             field,
         }
     }
@@ -1091,16 +1102,16 @@ fn seed_order(side: usize) -> Vec<(usize, usize)> {
 /// The automatic streamlines of `grid`, in the order their seeds were tried (see the module
 /// documentation).
 pub(crate) fn automatic(grid: Grid<'_>) -> Vec<Streamline> {
-    automatic_with(Tracer::new(grid))
+    automatic_with(&mut Tracer::new(grid))
 }
 
 /// The automatic streamlines of the field of `tracer`, within its bounds.
-fn automatic_with(mut tracer: Tracer<'_>) -> Vec<Streamline> {
+fn automatic_with(tracer: &mut Tracer<'_>) -> Vec<Streamline> {
     let side = tracer.occupancy.side;
     let pitch = tracer.field.steps / side as f64;
     let mut lines = Vec::new();
     for (column, row) in seed_order(side) {
-        if tracer.points_left == 0 {
+        if tracer.points_left == 0 || tracer.work_left == 0 {
             break;
         }
         let at = [(column as f64 + 0.5) * pitch, (row as f64 + 0.5) * pitch];
@@ -1146,7 +1157,7 @@ pub(crate) fn through(
         .map(|(i, (&start, probe))| {
             tracer.occupancy.truncate(0);
             let line = tracer.line(start, probe, 0, Company::Alone);
-            if line.points().len() < 2 && tracer.points_left > 0 {
+            if line.points().len() < 2 && tracer.points_left > 0 && tracer.work_left > 0 {
                 return Err((i, Blocked::Stuck));
             }
             Ok(line)
@@ -1227,12 +1238,78 @@ mod tests {
         // A mark holds at most `points_left` points.
         let mut tracer = Tracer::new(grid);
         tracer.points_left = 500;
-        let lines = automatic_with(tracer);
+        let lines = automatic_with(&mut tracer);
         let points: usize = lines.iter().map(|line| line.points().len()).sum();
         assert!(points <= 500 && points > 400, "{points}");
         // The bounds themselves.
         assert_eq!(Tracer::new(grid).max_tries, MAX_TRIES);
         assert_eq!(Tracer::new(grid).points_left, MAX_POINTS);
+        assert_eq!(Tracer::new(grid).work_left, MAX_WORK);
+    }
+
+    #[test]
+    fn the_work_of_a_mark_is_bounded_even_when_every_line_is_dropped() {
+        // Every third column NaN: the open cells, a third of a step wide, each holding a seed,
+        // short to keep, each of which is traced and dropped.
+        let columns = 91;
+        let x: Vec<f64> = (0..columns).map(|i| i as f64).collect();
+        let u: Vec<f64> = (0..2 * columns)
+            .map(|i| if i % columns % 3 == 0 { f64::NAN } else { 1.0 })
+            .collect();
+        let v = vec![0.0; 2 * columns];
+        let grid = Grid {
+            x: &x,
+            y: &[0.0, 1.0],
+            u: &u,
+            v: &v,
+            values: None,
+            log: [false, false],
+            density: 1.0,
+        };
+        let mut free = Tracer::new(grid);
+        assert!(automatic_with(&mut free).is_empty());
+        let taken = MAX_WORK - free.work_left;
+        assert!(taken > 200, "{taken}");
+        // With a bound of 200 steps, tracing stops after exactly 200, all dropped.
+        let mut bounded = Tracer::new(grid);
+        bounded.work_left = 200;
+        assert!(automatic_with(&mut bounded).is_empty());
+        assert_eq!(bounded.work_left, 0);
+        // Starts share the bound.
+        let mut bounded = Tracer::new(grid);
+        bounded.work_left = 10;
+        let start = bounded.field.probe([1.5, 0.5]).unwrap();
+        let line = bounded.line([1.5, 0.5], start, 0, Company::Alone);
+        assert!(line.points().len() <= 11 && bounded.work_left == 0);
+    }
+
+    #[test]
+    fn the_work_of_large_grids_stays_far_below_the_bound() {
+        let count = 300;
+        let x: Vec<f64> = (0..count).map(|i| -3.0 + 6.0 * i as f64 / 299.0).collect();
+        let y: Vec<f64> = (0..count).map(|i| -2.0 + 4.0 * i as f64 / 299.0).collect();
+        let (mut u, mut v) = (Vec::new(), Vec::new());
+        for &y in &y {
+            for &x in &x {
+                u.push(-y + 0.4 * x * (1.0 - x * x / 9.0));
+                v.push(x - 0.3 * y);
+            }
+        }
+        for density in [3.0, 10.0] {
+            let grid = Grid {
+                x: &x,
+                y: &y,
+                u: &u,
+                v: &v,
+                values: None,
+                log: [false, false],
+                density,
+            };
+            let mut tracer = Tracer::new(grid);
+            automatic_with(&mut tracer);
+            let taken = MAX_WORK - tracer.work_left;
+            assert!(taken < MAX_WORK / 10, "density {density}: {taken}");
+        }
     }
 
     #[test]
