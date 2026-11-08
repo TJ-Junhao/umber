@@ -155,6 +155,18 @@ fn field_vectors(u: &Bound<'_, PyAny>, v: &Bound<'_, PyAny>, grid: bool) -> PyRe
     })
 }
 
+/// The levels of a contour from its `levels` argument: `None` for `AUTO`, an `int` for a count
+/// of round levels, or a float64 buffer of the levels.
+fn contour_levels(levels: Option<&Bound<'_, PyAny>>) -> PyResult<ContourLevels> {
+    Ok(match levels {
+        None => ContourLevels::Auto,
+        Some(count) if count.is_instance_of::<PyInt>() => {
+            ContourLevels::Count(count.extract::<usize>()?)
+        }
+        Some(values) => ContourLevels::Values(floats(values)?),
+    })
+}
+
 /// The `kind` of a grid index argument that is `AUTO`.
 const AUTO_INDEX: i64 = 0;
 /// The `kind` of a grid index argument that is the index given.
@@ -1645,15 +1657,8 @@ impl Figure {
         annotate: bool,
         format: Option<TickFormatArg>,
     ) -> PyResult<()> {
-        let levels = match levels {
-            None => ContourLevels::Auto,
-            Some(count) if count.is_instance_of::<PyInt>() => {
-                ContourLevels::Count(count.extract::<usize>()?)
-            }
-            Some(values) => ContourLevels::Values(floats(values)?),
-        };
         let options = ContourOptions {
-            levels,
+            levels: contour_levels(levels)?,
             style: enum_value::<ContourStyle>(style)?,
             cmap: cmap_choice(cmap),
             scale: color_transform(scale, base)?,
@@ -1823,6 +1828,47 @@ impl Figure {
         let (x, y, values) = (floats(x)?, floats(y)?, floats(values)?);
         self.axes(row, col)?
             .tripcolor(&x, &y, triangles, &values, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the contours of values at the points of a triangle mesh: `triangles` as for
+    /// `triplot`, `z` one value per point, and the levels, style, colors and labels as for
+    /// `contour`.
+    #[pyo3(signature = (row, col, x, y, triangles, z, levels, style, cmap, scale, base, center, color, annotate, format))]
+    fn tricontour(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        triangles: Option<&Bound<'_, PyAny>>,
+        z: &Bound<'_, PyAny>,
+        levels: Option<&Bound<'_, PyAny>>,
+        style: i64,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+        color: ColorArg,
+        annotate: bool,
+        format: Option<TickFormatArg>,
+    ) -> PyResult<()> {
+        let given = triangles.map(index_triples).transpose()?;
+        let triangles = given.as_deref().map_or(Triangles::Auto, Triangles::Given);
+        let options = ContourOptions {
+            levels: contour_levels(levels)?,
+            style: enum_value::<ContourStyle>(style)?,
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
+            center,
+            color: color_spec(color)?,
+            annotate,
+            format: format.map(tick_format).transpose()?,
+        };
+        let (x, y, z) = (floats(x)?, floats(y)?, floats(z)?);
+        self.axes(row, col)?
+            .tricontour(&x, &y, triangles, &z, options)
             .map(drop)
             .map_err(core_error)
     }

@@ -970,6 +970,24 @@ class Figure:
         base: float,
         center: float | None,
     ) -> None: ...
+    def tricontour(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        triangles: _IndexArray | None,
+        z: _FloatArray,
+        levels: int | _FloatArray | None,
+        style: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
+        color: _ColorArg,
+        annotate: bool,
+        format: _TickFormatArg | None,
+    ) -> None: ...
     def contour(
         self,
         row: int | TwinAxes,

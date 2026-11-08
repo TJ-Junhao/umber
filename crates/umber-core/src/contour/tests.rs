@@ -4,6 +4,17 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::ContourStyle;
+
+/// The lines of `grid` along `level`.
+fn iso_lines(grid: &Grid<'_>, level: f64) -> Vec<Polyline<GridPoint>> {
+    grid.trace(level, ContourStyle::Lines).lines
+}
+
+/// The bands of `grid` between the increasing `levels`.
+fn bands(grid: &Grid<'_>, levels: &[f64]) -> Vec<BandPolygons<GridPoint>> {
+    ContourShapes::of(grid, levels, ContourStyle::Filled).bands
+}
 
 /// The field along the grid line through `p` (one of its coordinates whole), interpolated
 /// linearly between the two grid points around it; `None` off the grid lines or the grid.
@@ -45,7 +56,7 @@ fn signed_area(ring: &[GridPoint]) -> f64 {
 }
 
 /// The area of a band's region: the sum of the signed areas of its rings.
-fn region_area(band: &BandPolygons) -> f64 {
+fn region_area(band: &BandPolygons<GridPoint>) -> f64 {
     band.rings.iter().map(|ring| signed_area(ring)).sum()
 }
 
@@ -96,7 +107,7 @@ fn cell_high_area(corners: [f64; 4], level: f64) -> f64 {
 }
 
 /// Whether `p` lies inside `band` under the even-odd rule.
-fn inside(band: &BandPolygons, p: GridPoint) -> bool {
+fn inside(band: &BandPolygons<GridPoint>, p: GridPoint) -> bool {
     let mut odd = false;
     for ring in &band.rings {
         for i in 0..ring.len() {

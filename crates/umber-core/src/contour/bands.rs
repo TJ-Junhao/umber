@@ -1,5 +1,5 @@
-//! The filled regions of a contour: for each band, the boundary of the finite cells where the
-//! field is at or above the band's lower level.
+//! The filled regions of a contour on a grid: for each band, the boundary of the finite cells
+//! where the field is at or above the band's lower level ([`super::BandPolygons`]).
 //!
 //! A region's boundary is made of the iso segments of its level inside the finite cells and of
 //! the parts of their sides that face no finite cell (the edge of the grid or of a hole) and
@@ -7,37 +7,8 @@
 //! closed rings: counter-clockwise around the region and clockwise around its holes, in index
 //! space with `y` up. A side shared by two finite cells is never part of a boundary.
 
-use std::collections::HashMap;
-
-use super::march::{Segment, segments};
-use super::{Grid, GridPoint, Side, grid_point};
-
-/// One band of a filled contour: the region of the finite cells where the field is at or above
-/// the band's lower level, or every finite cell for the first band, the one below the first
-/// level. It is given by its boundary rings in index space, each listed once without repeating
-/// its first point, to be filled with the even-odd rule.
-///
-/// The bands are filled in order, each over the ones before it, so band `j` shows where the
-/// field lies between its lower level and the next one. Each band lies under the next, so
-/// neighbouring bands meet without a seam.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BandPolygons {
-    /// The boundary rings, each of at least three points.
-    pub rings: Vec<Vec<GridPoint>>,
-}
-
-/// The `levels.len() + 1` bands of `grid` between the increasing `levels`: every finite cell,
-/// then for each level the finite cells where the field is at or above it (see
-/// [`BandPolygons`]).
-pub(crate) fn bands(grid: &Grid<'_>, levels: &[f64]) -> Vec<BandPolygons> {
-    std::iter::once(BandPolygons {
-        rings: region(grid, None),
-    })
-    .chain(levels.iter().map(|&level| BandPolygons {
-        rings: region(grid, Some((level, &segments(grid, level)))),
-    }))
-    .collect()
-}
+use super::join;
+use super::march::{Grid, GridPoint, Segment, Side, grid_point};
 
 /// A corner of a region's boundary: a grid point, or the crossing of the level on a side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,8 +31,8 @@ struct Edge {
 }
 
 /// The boundary rings of the finite cells of `grid` where the field is at or above a level,
-/// given with the oriented segments of the finite cells there ([`segments`]), or of every
-/// finite cell for `None`.
+/// given with the oriented segments of the finite cells there ([`super::march::segments`]),
+/// or of every finite cell for `None`.
 pub(super) fn region(grid: &Grid<'_>, level: Option<(f64, &[Segment])>) -> Vec<Vec<GridPoint>> {
     let (level, segments) = match level {
         Some((level, segments)) => (Some(level), segments),
@@ -112,51 +83,22 @@ pub(super) fn region(grid: &Grid<'_>, level: Option<(f64, &[Segment])>) -> Vec<V
 }
 
 /// The closed rings that `edges` form, each vertex having as many pieces leaving it as
-/// reaching it: each ring starts at the first unused piece in order and, at a vertex where two
-/// rings touch, follows the first unused piece leaving it.
+/// reaching it ([`join::rings`]), each simplified ([`simplified`]); those left with fewer than
+/// three points are dropped.
 fn rings(edges: &[Edge]) -> Vec<Vec<GridPoint>> {
-    // The pieces leaving each vertex, in order, as a list: the first one, and after each the
-    // next one leaving the same vertex.
-    let mut leaving: HashMap<Vertex, usize> = HashMap::with_capacity(edges.len());
-    let mut after: Vec<Option<usize>> = vec![None; edges.len()];
-    for (index, edge) in edges.iter().enumerate().rev() {
-        if let (Some(slot), Some(first)) = (after.get_mut(index), leaving.insert(edge.from, index))
-        {
-            *slot = Some(first);
-        }
-    }
-    let mut used = vec![false; edges.len()];
-    let mut rings = Vec::new();
-    for first in 0..edges.len() {
-        let Some(start) = edges.get(first).filter(|_| used.get(first) == Some(&false)) else {
-            continue;
-        };
-        let mut ring = Vec::new();
-        let mut current = first;
-        while let Some(edge) = edges.get(current) {
-            if let Some(flag) = used.get_mut(current) {
-                *flag = true;
-            }
-            ring.push(edge.at);
-            if edge.to == start.from {
-                break;
-            }
-            let mut next = leaving.get(&edge.to).copied();
-            while let Some(index) = next.filter(|&index| used.get(index) != Some(&false)) {
-                next = after.get(index).copied().flatten();
-            }
-            match next {
-                Some(next) => current = next,
-                // Every vertex is balanced, so a ring always returns to its start.
-                None => break,
-            }
-        }
-        let ring = simplified(ring);
-        if ring.len() >= 3 {
-            rings.push(ring);
-        }
-    }
-    rings
+    let pieces: Vec<(Vertex, Vertex)> = edges.iter().map(|edge| (edge.from, edge.to)).collect();
+    join::rings(&pieces)
+        .into_iter()
+        .map(|ring| {
+            simplified(
+                ring.iter()
+                    .filter_map(|&index| edges.get(index))
+                    .map(|edge| edge.at)
+                    .collect(),
+            )
+        })
+        .filter(|ring| ring.len() >= 3)
+        .collect()
 }
 
 /// `ring` simplified without changing the region it bounds: first without repeated points

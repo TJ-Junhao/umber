@@ -67,6 +67,7 @@ pub use bar::{BarGroupMark, BarMark, BarOptions, Series, SeriesView, ValueLabels
 pub use box_plot::{BoxGroupMark, BoxMark, BoxOptions, Distribution, DistributionView};
 pub use bubbles::{BubbleMark, BubbleOptions};
 pub use color_by::{CmapChoice, ColorBy, PointColor};
+pub(crate) use contour::ContourSpec;
 pub use contour::{ContourLevels, ContourMark, ContourOptions, ContourStyle, MAX_LEVELS};
 pub use ecdf::{EcdfMark, EcdfOptions};
 pub use error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange};
@@ -100,7 +101,9 @@ pub use streamlines::{StreamStarts, StreamplotMark, StreamplotOptions};
 pub use strip::{StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub(crate) use ticks::AxisTicks;
 pub use ticks::{ExplicitTicks, TickHighlight};
-pub use triangles::{TriValues, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions};
+pub use triangles::{
+    TriValues, TricontourMark, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
+};
 pub(crate) use validation::{MAX_FIGURE_IN, check_text};
 
 #[cfg(test)]

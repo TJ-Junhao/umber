@@ -361,6 +361,7 @@ impl Resolved {
                 | Mark::Streamplot(_)
                 | Mark::Triplot(_)
                 | Mark::Tripcolor(_)
+                | Mark::Tricontour(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
                 | Mark::Heatmap(_)
@@ -981,7 +982,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
         Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) | Mark::Streamplot(_) => &[],
-        Mark::Triplot(_) | Mark::Tripcolor(_) => &[],
+        Mark::Triplot(_) | Mark::Tripcolor(_) | Mark::Tricontour(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
             ErrorBarOrientation::Vertical => mark.positions().categories(),
@@ -1033,6 +1034,7 @@ fn is_cell(mark: &ResolvedMark<'_>) -> bool {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
     )
 }
 
@@ -1700,7 +1702,7 @@ pub(crate) enum ResolvedMark<'a> {
         /// The labels of its levels, as `annotate` writes them.
         labels: Vec<String>,
         /// Its lines along each level and its bands, computed once per render.
-        shapes: std::sync::Arc<crate::contour::ContourShapes>,
+        shapes: std::sync::Arc<crate::contour::ContourShapes<crate::contour::GridPoint>>,
     },
     /// Arrows on a vector field.
     Quiver {
@@ -1758,6 +1760,22 @@ pub(crate) enum ResolvedMark<'a> {
         mark: &'a crate::model::TripcolorMark,
         /// The color mapping.
         mapped: MappedColors<'a>,
+    },
+    /// A contour of values at the points of a triangle mesh: its lines and bands, in points and
+    /// edges of the mesh, and the color of its values.
+    Tricontour {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated mesh, values and levels.
+        mark: &'a crate::model::TricontourMark,
+        /// The color mapping of its values; `None` for a contour whose lines take one color.
+        mapped: Option<MappedColors<'a>>,
+        /// The color of its lines when they take one color.
+        color: Rgba,
+        /// The labels of its levels, as `annotate` writes them.
+        labels: Vec<String>,
+        /// Its lines along each level and its bands, computed once per render.
+        shapes: std::sync::Arc<crate::contour::ContourShapes<crate::contour::MeshPoint>>,
     },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
@@ -2143,6 +2161,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { geometry, .. }
             | ResolvedMark::Triplot { geometry, .. }
             | ResolvedMark::Tripcolor { geometry, .. }
+            | ResolvedMark::Tricontour { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2187,6 +2206,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { geometry, .. }
             | ResolvedMark::Triplot { geometry, .. }
             | ResolvedMark::Tripcolor { geometry, .. }
+            | ResolvedMark::Tricontour { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2243,6 +2263,7 @@ impl<'a> ResolvedMark<'a> {
             // Every point, whether a triangle uses it or not.
             ResolvedMark::Triplot { mark, .. } => mark.mesh().x(),
             ResolvedMark::Tripcolor { mark, .. } => mark.mesh().x(),
+            ResolvedMark::Tricontour { mark, .. } => mark.mesh().x(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
             // A heatmap's cells lie at categories, which have no numbers.
             ResolvedMark::Heatmap { .. } => &[],
@@ -2395,6 +2416,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -2456,6 +2478,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -2482,6 +2505,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2593,6 +2617,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2667,6 +2692,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Streamplot { mark, .. } => mark.field().y(),
             ResolvedMark::Triplot { mark, .. } => mark.mesh().y(),
             ResolvedMark::Tripcolor { mark, .. } => mark.mesh().y(),
+            ResolvedMark::Tricontour { mark, .. } => mark.mesh().y(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
             ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.y().numbers(),
@@ -2774,6 +2800,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2813,6 +2840,9 @@ impl<'a> ResolvedMark<'a> {
         match *self {
             // A contour's lines, drawn with lines or with both.
             ResolvedMark::Contour { mark, .. } => crate::contour::line_width(mark.options().style),
+            ResolvedMark::Tricontour { mark, .. } => {
+                crate::contour::line_width(mark.options().style)
+            }
             // Streamlines are as wide as the lines of a contour.
             ResolvedMark::Streamplot { .. } => Some(crate::contour::LINE_WIDTH),
             ResolvedMark::Triplot { width, .. } => Some(width),
@@ -2869,6 +2899,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2940,7 +2971,7 @@ impl<'a> ResolvedMark<'a> {
             Self::Mesh { .. } | Self::Hist2d { .. } | Self::Hexbin { .. } => SwatchFill::Solid,
             Self::Tripcolor { .. } => SwatchFill::Solid,
             // A contour has no legend entry; the colorbar explains its colors.
-            Self::Contour { .. } => SwatchFill::Solid,
+            Self::Contour { .. } | Self::Tricontour { .. } => SwatchFill::Solid,
             Self::Hist {
                 style: HistStyle::Step,
                 ..
@@ -3129,6 +3160,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Contour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
             ResolvedMark::Triplot {
@@ -3398,6 +3430,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Contour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
             // The edges of a mesh are read in the plot, as streamlines are.
@@ -3554,6 +3587,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3633,6 +3667,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3677,7 +3712,7 @@ impl<'a> ResolvedMark<'a> {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
             ResolvedMark::Heatmap { mapped, .. } => Some((&mapped.spec, mapped.values)),
-            ResolvedMark::Contour { mapped, .. } => {
+            ResolvedMark::Contour { mapped, .. } | ResolvedMark::Tricontour { mapped, .. } => {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
             ResolvedMark::Line { .. }
@@ -3704,23 +3739,28 @@ impl<'a> ResolvedMark<'a> {
         }
     }
 
-    /// The levels that a colorbar marks for this mark: those of a color-mapped contour, drawn
-    /// as bands when it is filled; `None` for every other mark.
+    /// The levels that a colorbar marks for this mark: those of a color-mapped contour, on a
+    /// grid or a mesh, drawn as bands when it is filled; `None` for every other mark.
     pub(crate) fn color_levels(&self) -> Option<ColorLevels> {
-        let ResolvedMark::Contour {
-            mark,
-            mapped: Some(_),
-            ..
-        } = self
-        else {
-            return None;
+        let spec = match self {
+            ResolvedMark::Contour {
+                mark,
+                mapped: Some(_),
+                ..
+            } => mark.spec(),
+            ResolvedMark::Tricontour {
+                mark,
+                mapped: Some(_),
+                ..
+            } => mark.spec(),
+            _ => return None,
         };
-        let (ticks, values) = mark.level_ticks();
+        let (ticks, values) = spec.level_ticks();
         Some(ColorLevels {
             labels: ticks.iter().map(|tick| tick.label.clone()).collect(),
             ticks: ticks.to_vec(),
             values,
-            banded: mark.options().style != crate::ContourStyle::Lines,
+            banded: spec.options().style != crate::ContourStyle::Lines,
         })
     }
 }
@@ -4327,6 +4367,7 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::StackedArea(m) => m.series().map(|s| (s.label(), s.color())).collect(),
         // A contour takes no palette color: it is color-mapped, or in a color of its own.
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => Vec::new(),
+        Mark::Tricontour(_) => Vec::new(),
         Mark::Hist(m) => vec![(m.label(), m.color())],
         Mark::Step(m) => vec![(&m.options().label, m.options().color)],
         Mark::HLine(m) => vec![(&m.options().label, m.options().color)],
@@ -4638,21 +4679,53 @@ fn resolve_panel_marks_from<'a>(
                 mark,
                 bins: crate::bin2d::HexBins::Uncounted,
             },
-            Mark::Contour(mark) => ResolvedMark::Contour {
-                geometry: None,
-                mark,
-                mapped: mark.color_scale().map(|spec| MappedColors {
-                    spec,
-                    values: mark.z(),
-                }),
-                // A color-mapped contour takes no palette slot.
-                color: match mark.options().color {
-                    ColorSpec::Auto(_) => theme.text_color(),
-                    spec => color_of(spec, ""),
-                },
-                labels: mark.labels_in(colorbar_format),
-                shapes: std::sync::Arc::new(crate::contour::ContourShapes::of(mark)),
-            },
+            Mark::Contour(mark) => {
+                let shapes =
+                    match crate::contour::Grid::new(mark.z(), mark.x().len(), mark.y().len()) {
+                        Some(grid) => crate::contour::ContourShapes::of(
+                            &grid,
+                            &mark.levels(),
+                            mark.options().style,
+                        ),
+                        // The model checked the shape of the grid.
+                        None => crate::contour::ContourShapes::empty(),
+                    };
+                ResolvedMark::Contour {
+                    geometry: None,
+                    mark,
+                    mapped: mark.spec().color_scale().map(|spec| MappedColors {
+                        spec,
+                        values: mark.z(),
+                    }),
+                    // A color-mapped contour takes no palette slot.
+                    color: match mark.options().color {
+                        ColorSpec::Auto(_) => theme.text_color(),
+                        spec => color_of(spec, ""),
+                    },
+                    labels: mark.spec().labels_in(colorbar_format),
+                    shapes: std::sync::Arc::new(shapes),
+                }
+            }
+            Mark::Tricontour(mark) => {
+                let field = crate::contour::TriField::new(mark.mesh(), mark.z());
+                let shapes =
+                    crate::contour::ContourShapes::of(&field, &mark.levels(), mark.options().style);
+                ResolvedMark::Tricontour {
+                    geometry: None,
+                    mark,
+                    mapped: mark.spec().color_scale().map(|spec| MappedColors {
+                        spec,
+                        values: mark.z(),
+                    }),
+                    // A color-mapped contour takes no palette slot.
+                    color: match mark.options().color {
+                        ColorSpec::Auto(_) => theme.text_color(),
+                        spec => color_of(spec, ""),
+                    },
+                    labels: mark.spec().labels_in(colorbar_format),
+                    shapes: std::sync::Arc::new(shapes),
+                }
+            }
             Mark::Hist(mark) => ResolvedMark::Hist {
                 geometry: None,
                 bins: HistBins::new(mark.binning(), &[mark.values()]),

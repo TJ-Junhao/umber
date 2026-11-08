@@ -253,8 +253,9 @@ fn check_contour_levels(
             };
             let contours = axes.marks().iter().filter_map(|mark| {
                 use crate::model::Mark;
-                match mark {
-                    Mark::Contour(contour) => contour.color_scale().map(|_| contour),
+                let spec = match mark {
+                    Mark::Contour(contour) => contour.spec(),
+                    Mark::Tricontour(contour) => contour.spec(),
                     Mark::Line(_)
                     | Mark::Scatter(_)
                     | Mark::Bubbles(_)
@@ -290,8 +291,9 @@ fn check_contour_levels(
                     | Mark::Swarm(_)
                     | Mark::GroupedHist(_)
                     | Mark::Ecdf(_)
-                    | Mark::Kde(_) => None,
-                }
+                    | Mark::Kde(_) => return None,
+                };
+                spec.color_scale().map(|_| spec)
             });
             for contour in contours {
                 let values = contour.levels();

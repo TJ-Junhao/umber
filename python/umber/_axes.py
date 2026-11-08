@@ -4574,6 +4574,150 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
             return self
 
+    def tricontour(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        z: Values[float],
+        *,
+        triangles: TriangleIndices | Auto = AUTO,
+        levels: int | Values[float] | Auto = AUTO,
+        style: Contour = Contour.LINES,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),
+        center: float | Auto = AUTO,
+        color: Color = Color.AUTO,
+        annotate: bool = False,
+        format: TickFormat | Auto = AUTO,
+    ) -> "Axes[float, float]":
+        """Add a contour of values at scattered points: lines, filled bands, or both.
+
+        The points and ``triangles`` are those of ``triplot()``, and ``z`` holds one value per
+        point. Within each triangle the field is linear between its corners, so a level crosses
+        a triangle in at most one straight piece, and lines run on from triangle to triangle,
+        close into loops, and end on the edge of the mesh and of its holes. On a log axis the
+        field is linear along each edge as drawn, so every line meets the edges where
+        ``triplot()`` draws them. A NaN at a point removes every triangle around it, which
+        leaves a hole. The output depends on the triangles, not on their order or winding.
+
+        ``levels``, ``style``, ``cmap``, ``scale``, ``center``, ``color``, ``annotate`` and
+        ``format`` mean what they mean for ``contour()``: the same automatic levels from the
+        finite values of every point, the same colors, colorbar and level labels, and the same
+        darker or lighter lines where a level's color comes close to the background. Contours
+        that share a colorbar, on a grid or on a mesh, need the same levels.
+
+        A point is above a level when its value is at or above it, so integer data often puts
+        a level exactly on points. Each band above a level is the area where the field is at or
+        above it: a triangle whose corners all lie on the level is in the band above it, and a
+        line runs along an edge on the level only where it separates two bands. An edge or a
+        point on the level with lower values all around it bounds no area and draws no line.
+        No line has a piece of zero length, and no piece is drawn twice.
+
+        ``Contour.FILLED`` is the smooth alternative to ``tripcolor()``, which fills each
+        triangle with one color. For values on a rectangular grid, ``contour()`` is the
+        direct call. Automatic limits are the extent of the points, without padding, as for
+        ``triplot()``.
+
+        Args:
+            x: The x coordinate of each point: finite, positive on a log axis.
+            y: The y coordinate of each point, one per x coordinate.
+            z: One value per point: finite, at most 1e300 in magnitude, positive on a log
+                ``scale``, or NaN to leave the triangles around the point out.
+            triangles: ``AUTO`` for the Delaunay triangulation of the points, or an integer
+                array shaped ``(n, 3)`` of point indices, as for ``triplot()``.
+            levels: ``AUTO``, a count from 1 to 64, or the levels themselves, strictly
+                increasing, as for ``contour()``.
+            style: ``Contour.LINES``, ``Contour.FILLED`` or ``Contour.BOTH``.
+            cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+                is given and its sequential colormap otherwise.
+            scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+            center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+                ``AUTO`` for a sequential mapping.
+            color: ``Color.AUTO`` colors each line by its level. Any other color draws every
+                line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
+                no colorbar.
+            annotate: Whether each line at least three times as long as its label carries its
+                level's value at its middle, as for ``contour()``.
+            format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
+                the colorbar writes its ticks.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, such as a float array for
+                ``triangles``, or ``scale`` is not linear or log.
+            DataError: If the points or ``triangles`` are invalid, as ``triplot()`` says, ``z``
+                does not hold one value per point, or a value is infinite, beyond 1e300 in
+                magnitude, or not positive on a log scale.
+            StyleError: If a count of levels is not from 1 to 64, given levels are not finite
+                and strictly increasing, ``center`` is not finite or comes with a log scale,
+                ``format`` is ``TickFormat.iso()``, or the color range set by ``clim()`` does
+                not suit ``scale`` or ``center``.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes),
+                ``color`` is given with filled bands or with ``cmap`` or ``center``,
+                ``annotate`` is ``True`` with ``Contour.FILLED``, ``format`` is given without
+                ``annotate``, or ``cmap``, ``scale`` or ``center`` differs from those of the
+                other color-mapped marks of these axes.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> rng = np.random.default_rng(3)
+            >>> x, y = rng.uniform(-2, 2, 300), rng.uniform(-2, 2, 300)
+            >>> z = np.exp(-(x**2) - y**2)
+            >>> ax = ub.Figure().add_axes().tricontour(x, y, z, annotate=True)
+            >>> tri = ub.delaunay(x, y)
+            >>> keep = np.hypot(x[tri].mean(axis=1), y[tri].mean(axis=1)) > 0.5
+            >>> holed = ub.Figure().add_axes().equal_aspect()
+            >>> holed = holed.tricontour(x, y, z, triangles=tri[keep], style=ub.Contour.FILLED)
+            >>> holed = holed.colorbar()
+        """
+        with api_call():
+            context = "Axes.tricontour()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            check_floats_type(context, "z", z)
+            given = native_triangles(context, triangles)
+            counted = _is_count(levels)
+            if not counted and levels is not AUTO:
+                check_floats_type(context, "levels", levels)
+            drawn = instance(context, "style", style, Contour, _CONTOUR_HINT)
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            spec = _color_argument(context, color)
+            shows = _args.boolean(context, "annotate", annotate)
+            checked = (
+                None
+                if format is AUTO
+                else _ticks.native(instance(context, "format", format, TickFormat, _FORMAT_HINT))
+            )
+            count = _level_count(context, levels) if counted else None
+            _numeric_cells(context, self, time=False)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            values = floats(context, "z", z)
+            given_levels: int | FloatArray | None = count
+            if count is None and levels is not AUTO:
+                given_levels = floats(context, "levels", levels)
+            flat = None if given is None else given.reshape(-1)
+            self._native.tricontour(
+                self._target,
+                self._col,
+                xs,
+                ys,
+                flat,
+                values,
+                given_levels,
+                drawn.value,
+                native_cmap,
+                kind,
+                base,
+                middle,
+                spec,
+                shows,
+                checked,
+            )
+            return self
+
 
 class _Field(NamedTuple):
     """The arrays of a vector field, ready for the native call."""

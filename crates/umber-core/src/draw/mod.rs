@@ -506,13 +506,42 @@ pub(crate) fn drawn_marks(
                 ..
             } => {
                 let contour = contour::Contour {
-                    mark,
+                    spec: mark.spec(),
                     mapped: mapped.is_some(),
                     color,
                     labels,
                     shapes,
                 };
-                contour::contour_items(&context, fonts, resolved, contour, &mut items)?;
+                contour::grid_contour_items(
+                    &context,
+                    fonts,
+                    resolved,
+                    (mark, contour),
+                    &mut items,
+                )?;
+            }
+            ResolvedMark::Tricontour {
+                mark,
+                ref mapped,
+                color,
+                ref labels,
+                ref shapes,
+                ..
+            } => {
+                let contour = contour::Contour {
+                    spec: mark.spec(),
+                    mapped: mapped.is_some(),
+                    color,
+                    labels,
+                    shapes,
+                };
+                contour::mesh_contour_items(
+                    &context,
+                    fonts,
+                    resolved,
+                    (mark, contour),
+                    &mut items,
+                )?;
             }
             // Drawn in the layers below and above the data marks.
             ResolvedMark::HLine { .. }

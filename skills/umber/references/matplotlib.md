@@ -46,7 +46,12 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.triplot(tri)` / `ax.triplot(x, y, "k-")` | `ax.triplot(x, y, triangles=tri, color=ub.Color.BLACK)`: each edge once; add `ax.scatter(x, y)` for the points |
 | `ax.tripcolor(x, y, z)` | `ax.tripcolor(x, y, z)`: one value per point, a triangle takes the mean of its corners |
 | `ax.tripcolor(x, y, facecolors=v)` | `ax.tripcolor(x, y, v, on=ub.TriValues.TRIANGLES)`: one value per triangle |
-| `ax.tripcolor(..., shading="gouraud")` | not offered: triangles are flat; for a smooth field on a grid use `contour(style=ub.Contour.FILLED)` |
+| `ax.tripcolor(..., shading="gouraud")` | not offered: triangles are flat; for a smooth look use `ax.tricontour(x, y, z, style=ub.Contour.FILLED)` |
+| `ax.tricontour(x, y, z)` / `ax.tricontour(tri, z)` | `ax.tricontour(x, y, z)`, or `triangles=tri` with `tri` an integer array: the points always come first |
+| `ax.tricontourf(x, y, z)` | `ax.tricontour(x, y, z, style=ub.Contour.FILLED)`; `ub.Contour.BOTH` adds the lines |
+| `Triangulation(x, y, triangles, mask=mask)` | `triangles=triangles[~mask]`: keep the rows with NumPy |
+| `ax.tricontour(x, y, z, levels=10)` / `levels=[...]` | `levels=10` asks for about ten round levels; `levels=[...]` gives them, strictly increasing |
+| `ax.clabel(ax.tricontour(...))` | set `annotate=True` on the `tricontour` call itself |
 | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` |
 | `ax.pie(values, labels=names, autopct="%1.0f%%")` | `ub.pie(names, values, annotate=True)` |
 | `ax.pie(..., wedgeprops={"width": 0.5})` | `ub.pie(names, values, hole=0.5)` |

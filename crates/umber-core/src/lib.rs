@@ -79,8 +79,9 @@
 //!   streamlines: [`StreamplotOptions`] with its [`StreamStarts`], and the read-only
 //!   [`StreamplotMark`] payload of [`Mark`] with its [`Streamline`]s;
 //! - triangle meshes: [`delaunay`], the [`Triangles`] that join the points, [`TriplotOptions`],
-//!   [`TripcolorOptions`] with its [`TriValues`], and the read-only [`TriplotMark`] and
-//!   [`TripcolorMark`] payloads of [`Mark`] with their [`TriMesh`];
+//!   [`TripcolorOptions`] with its [`TriValues`], contours of values at the points with
+//!   [`ContourOptions`], and the read-only [`TriplotMark`], [`TripcolorMark`] and
+//!   [`TricontourMark`] payloads of [`Mark`] with their [`TriMesh`];
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -180,6 +181,8 @@ mod tri;
 #[cfg(test)]
 mod triangles_tests;
 #[cfg(test)]
+mod tricontour_tests;
+#[cfg(test)]
 mod vector_field_tests;
 
 pub use binning::MAX_BINS;
@@ -222,7 +225,9 @@ pub use figure::{
 pub use figure::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{StreamStarts, Streamline, StreamplotMark, StreamplotOptions};
-pub use figure::{TriValues, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions};
+pub use figure::{
+    TriValues, TricontourMark, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
+};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

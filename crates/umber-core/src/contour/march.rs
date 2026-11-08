@@ -1,20 +1,184 @@
-//! Iso lines by marching squares: the segments of each finite cell, joined across shared sides
-//! into polylines.
+//! Contours on a rectilinear grid of values: the grid in index space, its iso lines by marching
+//! squares, and the oriented segments that its bands ([`super::bands`]) are made from.
+//! Everything here is specific to the grid.
+//!
+//! A grid holds `columns × rows` values, row by row: the value of row `j`, column `i` sits at
+//! the point `(i, j)` of index space. A cell is the unit square between four neighbouring
+//! points. Only a cell whose four values are finite takes part, so a NaN value cuts the cells
+//! around it out of every line and region: a hole.
+//!
+//! Along each side of a cell the field is linear between the values at its ends, and a point
+//! is *high* when its value is at or above the level. A level crosses a side whose ends differ
+//! (one high, one not), at the linearly interpolated point. The crossing is computed from the
+//! side alone, its ends taken in index order, so the two cells that share a side agree on it
+//! bit for bit. Inside a cell the line runs straight from crossing to crossing, with the high
+//! corners on its left. A cell whose corners alternate high and low around it (a saddle) has
+//! four crossings; the mean of its four values decides how they pair: at or above the level the
+//! high corners are joined across the centre, below it they are cut apart. So every result is a
+//! function of the values alone, and the same input always gives the same geometry, point for
+//! point and in the same order.
 
-use std::collections::HashMap;
+use super::join;
+use super::{ContourField, Polyline, Traced, bands};
+use crate::ContourStyle;
 
-use super::{Grid, GridPoint, Side};
+/// A point of grid index space: `x` counts columns and `y` rows from the grid's first value, so
+/// the value of column `i`, row `j` sits at `(i, j)` and a cell spans one unit along each.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct GridPoint {
+    /// The column position.
+    pub x: f64,
+    /// The row position.
+    pub y: f64,
+}
 
-/// One line where the field crosses a level: crossings in order along the line, which keeps the
-/// high side of the field on its left (counter-clockwise around the high regions, in index
-/// space with `y` up). A closed line, one that returns to where it starts, repeats its first
-/// point at the end; an open line ends on the edge of the grid or of a hole.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Polyline {
-    /// The points, at least two.
-    pub points: Vec<GridPoint>,
-    /// Whether the line returns to its first point.
-    pub closed: bool,
+/// The values of a rectilinear grid, row by row, with at least two rows and two columns.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Grid<'a> {
+    /// The values, `columns` per row.
+    values: &'a [f64],
+    /// The number of values in each row.
+    columns: usize,
+    /// The number of rows.
+    rows: usize,
+}
+
+/// A side of a cell, between two neighbouring grid points: `Horizontal(i, j)` joins `(i, j)` to
+/// `(i + 1, j)`, `Vertical(i, j)` joins `(i, j)` to `(i, j + 1)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Side {
+    /// From `(i, j)` to `(i + 1, j)`.
+    Horizontal(usize, usize),
+    /// From `(i, j)` to `(i, j + 1)`.
+    Vertical(usize, usize),
+}
+
+impl<'a> Grid<'a> {
+    /// The grid of `values`, `columns` per row: `None` unless there are at least two columns
+    /// and two rows and `values` holds exactly `columns * rows` of them.
+    pub(crate) fn new(values: &'a [f64], columns: usize, rows: usize) -> Option<Grid<'a>> {
+        (columns >= 2 && rows >= 2 && columns.checked_mul(rows) == Some(values.len())).then_some(
+            Grid {
+                values,
+                columns,
+                rows,
+            },
+        )
+    }
+
+    /// The value at the point `(i, j)`; NaN outside the grid.
+    pub(super) fn value(&self, i: usize, j: usize) -> f64 {
+        if i >= self.columns {
+            return f64::NAN;
+        }
+        j.checked_mul(self.columns)
+            .and_then(|start| self.values.get(start + i))
+            .copied()
+            .unwrap_or(f64::NAN)
+    }
+
+    /// The cells in row-major order: `(i, j)` for the cell whose lower left corner is `(i, j)`.
+    pub(super) fn cells(&self) -> impl Iterator<Item = (usize, usize)> + use<> {
+        let (columns, rows) = (self.columns - 1, self.rows - 1);
+        (0..rows).flat_map(move |j| (0..columns).map(move |i| (i, j)))
+    }
+
+    /// The corners of the cell `(i, j)` counter-clockwise from its lower left one: `(i, j)`,
+    /// `(i + 1, j)`, `(i + 1, j + 1)`, `(i, j + 1)`.
+    pub(super) fn corners(i: usize, j: usize) -> [(usize, usize); 4] {
+        [(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]
+    }
+
+    /// The values at the corners of the cell `(i, j)`, in the order of [`Grid::corners`].
+    pub(super) fn corner_values(&self, i: usize, j: usize) -> [f64; 4] {
+        Self::corners(i, j).map(|(x, y)| self.value(x, y))
+    }
+
+    /// Whether the cell `(i, j)` lies in the grid and its four values are finite.
+    pub(super) fn is_finite_cell(&self, i: usize, j: usize) -> bool {
+        i + 1 < self.columns
+            && j + 1 < self.rows
+            && self.corner_values(i, j).iter().all(|v| v.is_finite())
+    }
+
+    /// The side `k` of the cell `(i, j)`, from its corner `k` to its corner `k + 1` (counting as
+    /// [`Grid::corners`] does): the bottom, right, top and left side for `k` = 0, 1, 2, 3.
+    pub(super) fn side(i: usize, j: usize, k: usize) -> Side {
+        match k % 4 {
+            0 => Side::Horizontal(i, j),
+            1 => Side::Vertical(i + 1, j),
+            2 => Side::Horizontal(i, j + 1),
+            _ => Side::Vertical(i, j),
+        }
+    }
+
+    /// The cell across the side `k` of the cell `(i, j)`, when it is a finite cell.
+    pub(super) fn finite_neighbour(&self, i: usize, j: usize, k: usize) -> bool {
+        let across = match k % 4 {
+            0 => j.checked_sub(1).map(|below| (i, below)),
+            1 => Some((i + 1, j)),
+            2 => Some((i, j + 1)),
+            _ => i.checked_sub(1).map(|left| (left, j)),
+        };
+        across.is_some_and(|(x, y)| self.is_finite_cell(x, y))
+    }
+
+    /// Where `level` crosses `side`, whose ends are one high and one not: interpolated linearly
+    /// from the end with the lower index, so both cells that share the side get the same point.
+    pub(super) fn crossing(&self, side: Side, level: f64) -> GridPoint {
+        let ((i, j), (x, y)) = match side {
+            Side::Horizontal(i, j) => ((i, j), (i + 1, j)),
+            Side::Vertical(i, j) => ((i, j), (i, j + 1)),
+        };
+        let (from, to) = (self.value(i, j), self.value(x, y));
+        // The ends differ, one at or above the level and one below it, so `to - from` is not
+        // zero; both are at most 1e300 in magnitude, so it is finite.
+        let t = ((level - from) / (to - from)).clamp(0.0, 1.0);
+        match side {
+            Side::Horizontal(..) => GridPoint {
+                x: i as f64 + t,
+                y: j as f64,
+            },
+            Side::Vertical(..) => GridPoint {
+                x: i as f64,
+                y: j as f64 + t,
+            },
+        }
+    }
+}
+
+/// The grid traced as [`ContourField`] says, each level marched once for its lines and its
+/// region alike.
+impl ContourField for Grid<'_> {
+    type Point = GridPoint;
+
+    fn whole(&self) -> Vec<Vec<GridPoint>> {
+        bands::region(self, None)
+    }
+
+    fn trace(&self, level: f64, style: ContourStyle) -> Traced<GridPoint> {
+        let segments = segments(self, level);
+        Traced {
+            lines: match style {
+                ContourStyle::Lines | ContourStyle::Both => lines_of(self, level, &segments),
+                ContourStyle::Filled => Vec::new(),
+            },
+            rings: match style {
+                ContourStyle::Filled | ContourStyle::Both => {
+                    bands::region(self, Some((level, &segments)))
+                }
+                ContourStyle::Lines => Vec::new(),
+            },
+        }
+    }
+}
+
+/// The point `(i, j)` of index space.
+pub(super) fn grid_point((i, j): (usize, usize)) -> GridPoint {
+    GridPoint {
+        x: i as f64,
+        y: j as f64,
+    }
 }
 
 /// The oriented segments of one cell at a level, each from the side where the line leaves the
@@ -108,67 +272,34 @@ pub(super) fn segments(grid: &Grid<'_>, level: f64) -> Vec<Segment> {
     found
 }
 
-/// The lines where the field of `grid` crosses `level`, through its finite cells: the segments
-/// of the cells joined where they share a side, each line oriented with the high side on its
-/// left. Open lines come first, in the order of their first segment (row-major by cell), then
-/// closed ones in the same order, each starting at its first segment in that order.
-pub(crate) fn iso_lines(grid: &Grid<'_>, level: f64) -> Vec<Polyline> {
-    lines_of(grid, level, &segments(grid, level))
-}
-
-/// The lines of `grid` at `level`, as [`iso_lines`] gives them, from its `segments`.
-pub(super) fn lines_of(grid: &Grid<'_>, level: f64, segments: &[Segment]) -> Vec<Polyline> {
-    // The segment that starts on each side, and whether one ends there. Each crossing is the
-    // exit of at most one cell and the entry of at most one other.
-    let starting: HashMap<Side, usize> = segments
+/// The lines where the field of `grid` crosses `level`, through its finite cells, from the
+/// level's `segments`: the segments joined where they share a side ([`join::lines`]), each line
+/// oriented with the high side on its left. Each crossing is the exit of at most one cell and
+/// the entry of at most one other, so open lines come first, in the order of their first
+/// segment (row-major by cell), then closed ones in the same order, each starting at its first
+/// segment in that order.
+fn lines_of(grid: &Grid<'_>, level: f64, segments: &[Segment]) -> Vec<Polyline<GridPoint>> {
+    let pieces: Vec<(Side, Side)> = segments
         .iter()
-        .enumerate()
-        .map(|(index, segment)| (segment.from, index))
+        .map(|segment| (segment.from, segment.to))
         .collect();
-    let ending: HashMap<Side, usize> = segments
-        .iter()
-        .enumerate()
-        .map(|(index, segment)| (segment.to, index))
-        .collect();
-    let mut used = vec![false; segments.len()];
-    let mut lines = Vec::new();
-    let follow = |first: usize, used: &mut [bool]| {
-        let mut points = Vec::new();
-        let mut current = first;
-        if let Some(segment) = segments.get(first) {
-            points.push(grid.crossing(segment.from, level));
-        }
-        while let Some(&Segment { to, .. }) = segments.get(current) {
-            if let Some(flag) = used.get_mut(current) {
-                *flag = true;
+    join::lines(&pieces)
+        .into_iter()
+        .map(|chain| {
+            let start = chain
+                .pieces
+                .first()
+                .and_then(|&first| pieces.get(first))
+                .map(|&(from, _)| grid.crossing(from, level));
+            let ends = chain
+                .pieces
+                .iter()
+                .filter_map(|&index| pieces.get(index))
+                .map(|&(_, to)| grid.crossing(to, level));
+            Polyline {
+                points: start.into_iter().chain(ends).collect(),
+                closed: chain.closed,
             }
-            points.push(grid.crossing(to, level));
-            match starting.get(&to) {
-                Some(&next) if !used.get(next).copied().unwrap_or(true) => current = next,
-                Some(&next) => return (points, next == first),
-                None => return (points, false),
-            }
-        }
-        (points, false)
-    };
-    // Open lines start at a segment that no other segment leads into.
-    for first in 0..segments.len() {
-        let opens = segments
-            .get(first)
-            .is_some_and(|segment| !ending.contains_key(&segment.from));
-        if opens && used.get(first) == Some(&false) {
-            let (points, _) = follow(first, &mut used);
-            lines.push(Polyline {
-                points,
-                closed: false,
-            });
-        }
-    }
-    for first in 0..segments.len() {
-        if used.get(first) == Some(&false) {
-            let (points, closed) = follow(first, &mut used);
-            lines.push(Polyline { points, closed });
-        }
-    }
-    lines
+        })
+        .collect()
 }

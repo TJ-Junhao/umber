@@ -151,14 +151,13 @@ impl Default for ContourOptions {
 /// A contour cannot be built outside [`Axes`](super::Axes):
 ///
 /// ```compile_fail,E0451
-/// use umber_core::{ContourMark, ContourOptions};
+/// use umber_core::ContourMark;
 ///
 /// let mark = ContourMark {
 ///     x: unreachable!(),
 ///     y: unreachable!(),
 ///     z: unreachable!(),
-///     levels: unreachable!(),
-///     options: ContourOptions::default(),
+///     spec: unreachable!(),
 /// };
 /// ```
 #[derive(Clone, PartialEq)]
@@ -166,6 +165,15 @@ pub struct ContourMark {
     x: Arc<[f64]>,
     y: Arc<[f64]>,
     z: Arc<[f64]>,
+    spec: ContourSpec,
+}
+
+/// The levels and options of a contour, validated together: what a contour on a grid
+/// ([`ContourMark`]) and one on a triangle mesh ([`TricontourMark`](super::TricontourMark))
+/// share, from the checks of their values, levels and drawing options to the labels of the
+/// levels and the color scale.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ContourSpec {
     levels: Levels,
     options: ContourOptions,
 }
@@ -225,34 +233,18 @@ impl ContourMark {
                 "pass one row of z per y coordinate, each with one value per x coordinate.",
             ));
         }
-        check_mapped_values(
-            CONTEXT,
-            z,
-            options.scale,
-            |i| format!("z[{}][{}]", i / columns, i % columns),
-            "use NaN to leave a hole in the contour.",
-        )
-        .map_err(|error| error.with_parameter("z"))?;
-        check_levels(&options.levels)?;
-        check_drawing(&options)?;
-        check_center(CONTEXT, options.center, options.scale)?;
         let z: Arc<[f64]> = Arc::from(z);
-        if is_mapped(options.color) {
-            let colors = ColorBy {
-                values: Arc::clone(&z),
-                cmap: options.cmap.clone(),
-                scale: options.scale,
-                center: options.center,
-            };
-            check_mapping(CONTEXT, figure, index, &colors)?;
-        }
-        let levels = Levels::of(&options, &z);
+        let spec = ContourSpec::new(
+            (CONTEXT, figure, index),
+            &z,
+            |i| format!("z[{}][{}]", i / columns, i % columns),
+            options,
+        )?;
         Ok(ContourMark {
             x: Arc::from(x),
             y: Arc::from(y),
             z,
-            levels,
-            options,
+            spec,
         })
     }
 
@@ -333,7 +325,7 @@ impl ContourMark {
     /// ```
     #[must_use]
     pub fn levels(&self) -> Vec<f64> {
-        self.levels.ticks.iter().map(|tick| tick.value).collect()
+        self.spec.levels()
     }
 
     /// The style, colormap, scale, center, color, annotation and format, and the levels as
@@ -354,6 +346,69 @@ impl ContourMark {
     /// ```
     #[must_use]
     pub fn options(&self) -> &ContourOptions {
+        &self.spec.options
+    }
+
+    /// The levels and options, as every contour has them.
+    pub(crate) fn spec(&self) -> &ContourSpec {
+        &self.spec
+    }
+}
+
+impl ContourSpec {
+    /// Validates the values `z` and the `options` of a contour, the call `context` on the axes
+    /// at `index` of `figure`, and resolves its levels. `name` names the value at an index in
+    /// messages. The checks run in this order, and the first failure is the error:
+    ///
+    /// 1. every value is NaN or finite, at most 1e300 in magnitude, and positive and at least
+    ///    1e-300 on a log color scale (`Error::Data` about `z`);
+    /// 2. a level count is from 1 to [`MAX_LEVELS`], and given levels are finite, at most 1e300
+    ///    in magnitude and strictly increasing (`Error::Style`);
+    /// 3. a color other than [`ColorSpec::AUTO`] comes with [`ContourStyle::Lines`] and
+    ///    without a colormap or a center; `annotate` comes with lines; a format comes with
+    ///    `annotate` (all `Error::Usage`) and is a number format (`Error::Style`);
+    /// 4. the center is finite, at most 1e300 in magnitude, and not combined with a log scale
+    ///    (`Error::Style`);
+    /// 5. a color-mapped contour maps colors as the axes' other color-mapped marks do, within
+    ///    their color limits and their color-sharing group (`Error::Usage` and
+    ///    `Error::Style`).
+    pub(super) fn new(
+        (context, figure, index): (&'static str, &Figure, usize),
+        z: &Arc<[f64]>,
+        name: impl Fn(usize) -> String,
+        options: ContourOptions,
+    ) -> Result<ContourSpec> {
+        check_mapped_values(
+            context,
+            z,
+            options.scale,
+            name,
+            "use NaN to leave a hole in the contour.",
+        )
+        .map_err(|error| error.with_parameter("z"))?;
+        check_levels(context, &options.levels)?;
+        check_drawing(context, &options)?;
+        check_center(context, options.center, options.scale)?;
+        if is_mapped(options.color) {
+            let colors = ColorBy {
+                values: Arc::clone(z),
+                cmap: options.cmap.clone(),
+                scale: options.scale,
+                center: options.center,
+            };
+            check_mapping(context, figure, index, &colors)?;
+        }
+        let levels = Levels::of(&options, z);
+        Ok(ContourSpec { levels, options })
+    }
+
+    /// The levels, increasing.
+    pub(crate) fn levels(&self) -> Vec<f64> {
+        self.levels.ticks.iter().map(|tick| tick.value).collect()
+    }
+
+    /// The options.
+    pub(crate) fn options(&self) -> &ContourOptions {
         &self.options
     }
 
@@ -393,7 +448,7 @@ impl fmt::Debug for ContourMark {
             .field("y", &self.y)
             .field("z", &self.z)
             .field("levels", &self.levels())
-            .field("options", &self.options)
+            .field("options", &self.spec.options)
             .finish()
     }
 }
@@ -637,9 +692,9 @@ pub(super) fn check_ordered(
 
 /// Checks the levels as given: a count from 1 to [`MAX_LEVELS`], or at least one finite level,
 /// at most 1e300 in magnitude, strictly increasing (`Error::Style` about `levels`).
-fn check_levels(levels: &ContourLevels) -> Result<()> {
+fn check_levels(context: &'static str, levels: &ContourLevels) -> Result<()> {
     let fault = |message: String, hint: &'static str| {
-        Error::style(CONTEXT, message)
+        Error::style(context, message)
             .with_parameter("levels")
             .with_hint(hint)
     };
@@ -700,14 +755,14 @@ fn style_name(style: ContourStyle) -> &'static str {
     }
 }
 
-/// Checks that the drawing options agree: one color only for lines and without a colormap or
-/// a center; level labels only on lines; a format only with level labels (`Error::Usage`), and
-/// a number format (`Error::Style`).
-fn check_drawing(options: &ContourOptions) -> Result<()> {
+/// Checks that the drawing options agree, for the call `context`: one color only for lines and
+/// without a colormap or a center; level labels only on lines; a format only with level labels
+/// (`Error::Usage`), and a number format (`Error::Style`).
+fn check_drawing(context: &'static str, options: &ContourOptions) -> Result<()> {
     let style = options.style;
     if options.color != ColorSpec::AUTO && style != ContourStyle::Lines {
         return Err(Error::usage(
-            CONTEXT,
+            context,
             format!(
                 "color is given with style={}; filled bands take their colors from the colormap.",
                 style_name(style)
@@ -726,7 +781,7 @@ fn check_drawing(options: &ContourOptions) -> Result<()> {
         };
         if let Some(parameter) = given {
             return Err(Error::usage(
-                CONTEXT,
+                context,
                 format!(
                     "{parameter} is given but color draws every line in one color; the lines are \
                      colored by level only with color=Color.AUTO."
@@ -740,7 +795,7 @@ fn check_drawing(options: &ContourOptions) -> Result<()> {
     }
     if options.annotate && style == ContourStyle::Filled {
         return Err(Error::usage(
-            CONTEXT,
+            context,
             "annotate is True with style=Contour.FILLED; level labels need lines.",
         )
         .with_parameter("annotate")
@@ -751,7 +806,7 @@ fn check_drawing(options: &ContourOptions) -> Result<()> {
     };
     if !options.annotate {
         return Err(Error::usage(
-            CONTEXT,
+            context,
             "format is given but annotate is false; only annotated contours show level labels.",
         )
         .with_parameter("format")
@@ -759,7 +814,7 @@ fn check_drawing(options: &ContourOptions) -> Result<()> {
     }
     if format.style() == NumberStyle::Iso {
         return Err(Error::style(
-            CONTEXT,
+            context,
             "format is TickFormat.iso(), which writes times; contour levels are numbers.",
         )
         .with_parameter("format")
@@ -1050,7 +1105,7 @@ mod tests {
         };
         assert_eq!(given.levels(), [-1.0, 0.25, 1.5, 9.0]);
         assert_eq!(
-            given.labels_in(&TickFormat::default()),
+            given.spec().labels_in(&TickFormat::default()),
             ["\u{2212}1.00", "0.25", "1.50", "9.00"]
         );
     }
