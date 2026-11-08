@@ -17,8 +17,10 @@
 //! bilinear field and `J` the scale of a data unit in steps along each axis. Each step is
 //! Heun's method (the explicit trapezoidal rule, second order). A step is accepted when the
 //! distance in steps between its end and the end of the Euler step it starts with is at most
-//! [`TOLERANCE`], 0.01 of a step, and the unit direction of the line changes over it by at most
-//! [`MAX_TURN`], about 0.05 radians. The second bound holds the accuracy to the curvature of the
+//! [`TOLERANCE`], 0.01 of a step, and at most [`RELATIVE_TOLERANCE`], 4%, of the step's length,
+//! and the unit direction of the line changes over it by at most [`MAX_TURN`], about 0.05
+//! radians. The relative bound holds the accuracy where the flow grows exponentially along the
+//! data, as on a log axis spanning many decades in a step. The turn bound holds the accuracy to the curvature of the
 //! line, however small its radius: Heun's error over a step that turns by `θ` is of the order of
 //! `θ³` of the radius, so through a rotation, whose bilinear field is exact, every point of an
 //! orbit stays within 0.1% of its radius, from orbits a hundredth of a step across to orbits
@@ -34,13 +36,11 @@
 //! too inaccurate for the curve is halved further, down to [`MIN_CURVE_STEP`], so an orbit far
 //! smaller than a step is still traced to the same accuracy.
 //!
-//! The components are scaled once, each by the power of two that brings its largest magnitude
-//! to between 1/2 and 1, which is exact and is taken back in every speed, so that a field of
-//! subnormal numbers does not underflow when it is interpolated.
-//!
 //! Speeds are the components times the steps per data unit, either of which can lie far beyond
 //! the range of `f64`; they are kept as mantissas and powers of two ([`Wide`]), as the
-//! direction of an arrow is, so a direction holds at any range of the data.
+//! direction of an arrow is, so a direction holds at any range of the data. The components are
+//! interpolated in that form too, cell by cell ([`Field::wide_bilinear`]), so a tiny value
+//! beside a huge one in another cell, or a field of subnormal numbers, keeps its size.
 //!
 //! Only addition, subtraction, multiplication, division and the square root are used, which
 //! IEEE 754 rounds correctly; the logarithm and the exponential of a log axis are computed from
@@ -66,7 +66,19 @@
 //!   orbit smaller than a step, and a spiral when its turns come that close, so a spiral into
 //!   a sink keeps both its ways;
 //! - it is [`max_length`] steps long either way, a bound that a line meeting the rules above
-//!   does not reach in practice.
+//!   does not reach in practice;
+//! - it has taken [`MAX_TRIES`] steps that way, accepted or rejected, or the mark holds
+//!   [`MAX_POINTS`] points, after which no further line is traced. These bound the work of any
+//!   field: a line across a grid takes a few thousand steps, and the automatic lines of a
+//!   300 by 300 grid at the largest density about half a million points.
+//!
+//! The length along a line is summed with its rounding carried ([`Length`]), so steps far
+//! shorter than the line still count toward [`SELF_GAP`]. A line records a point in the
+//! occupancy only every [`RECORD_SPACING`] of a step, or that share of the radius of its curve,
+//! so a square holds few points of each line however short the steps; other lines are kept
+//! that much further off, so drawn points keep their spacing. A very eccentric orbit smaller
+//! than a step may run over part of its first turn again before it ends, which draws nothing
+//! new.
 //!
 //! # Seeds
 //!
@@ -84,6 +96,7 @@
 //! in steps along the line, pointing downstream ([`Streamline::head`]).
 
 use super::{Wide, length, unit};
+use crate::exact::two_sum;
 
 /// The steps along each axis per unit of density.
 pub(crate) const STEPS_PER_DENSITY: f64 = 30.0;
@@ -97,6 +110,12 @@ pub(crate) const SEED_SPACING: f64 = 0.9;
 /// How close, in steps, a line may come to another line, or to its own line further than
 /// [`SELF_GAP`] away along it, before it ends.
 pub(crate) const END_SPACING: f64 = 0.5;
+/// How far apart, in steps, the points a line leaves in the occupancy lie at least: a point
+/// closer than this to the last one it left is drawn but not recorded, so a square of the
+/// occupancy holds a bounded number of points of each line however short its steps. Other
+/// lines are kept this much further away, so every drawn point keeps [`END_SPACING`] and
+/// [`SEED_SPACING`]. On a curve of a radius below a step the spacing shrinks with the radius.
+pub(crate) const RECORD_SPACING: f64 = 1.0 / 16.0;
 /// How far apart along a line, in steps, two of its points must be for their nearness to end it.
 pub(crate) const SELF_GAP: f64 = 2.0;
 /// The shortest automatic line that is kept, in steps.
@@ -115,11 +134,25 @@ pub(crate) const MIN_CURVE_STEP: f64 = MAX_STEP / 1_099_511_627_776.0;
 /// The largest accepted distance, in steps, between the end of a Heun step and the end of the
 /// Euler step it starts with.
 pub(crate) const TOLERANCE: f64 = 0.01;
+/// The largest accepted distance between the ends of a Heun step and of its Euler step, as a
+/// share of the length of the step: it holds the accuracy where the flow grows exponentially
+/// along the data, as it does on a log axis that spans many decades in a step, and seldom binds
+/// elsewhere, where [`MAX_TURN`] keeps the share below about 0.025.
+pub(crate) const RELATIVE_TOLERANCE: f64 = 0.04;
 /// The largest accepted change of the unit direction of a line over a step, in steps: about
 /// 0.05 radians, so that a step turns by at most that, whatever the radius of the curve.
 pub(crate) const MAX_TURN: f64 = 0.05;
 /// The share of the largest speed at a grid point at or below which the speed counts as zero.
 pub(crate) const ZERO_SPEED: f64 = 1e-6;
+
+/// The most steps, accepted or rejected, that tracing one way of one line may take; it ends
+/// there, as at [`max_length`]. A line across a grid at the largest density takes a few
+/// thousand.
+pub(crate) const MAX_TRIES: usize = 100_000;
+/// The most points one mark may hold; tracing stops there, the line being traced ending at its
+/// last point. The automatic lines of a 300 by 300 grid at the largest density hold about half
+/// a million; at this bound a mark holds about 80 MB.
+pub(crate) const MAX_POINTS: usize = 1_000_000;
 
 /// The longest a line may grow either way from its seed, in steps, on a grid of `steps` steps
 /// along each axis: eight times the area of the grid in square steps, and at least 64.
@@ -343,14 +376,6 @@ impl Streamline {
 struct Field<'a> {
     /// The grid.
     grid: Grid<'a>,
-    /// `u` times the power of two that brings its largest finite magnitude to between 1/2 and
-    /// 1: exact, but without values so small that their interpolation underflows.
-    u: Vec<f64>,
-    /// `v` times the power of two that brings its largest finite magnitude to between 1/2 and 1.
-    v: Vec<f64>,
-    /// The inverses of the powers of two that `u` and `v` were scaled by, which
-    /// [`Field::velocity`] takes back.
-    unscale: [Wide; 2],
     /// Whether each cell, row by row, has four finite corners.
     open: Vec<bool>,
     /// The measures of the x and the y axis.
@@ -403,29 +428,7 @@ impl<'a> Field<'a> {
                 );
             }
         }
-        // Each component by a power of two alone, the power of `1 / largest`, which is exact.
-        let scaled = |values: &[f64]| -> (Vec<f64>, Wide) {
-            let largest = values
-                .iter()
-                .filter(|value| value.is_finite())
-                .fold(0.0_f64, |largest, value| largest.max(value.abs()));
-            let power = if largest > 0.0 {
-                Wide::of(1.0).over(Wide::of(largest)).parts().1
-            } else {
-                0
-            };
-            let scale = Wide::from_parts(1.0, power);
-            let values = values
-                .iter()
-                .map(|&value| Wide::of(value).times(scale).value())
-                .collect();
-            (values, Wide::from_parts(1.0, power.saturating_neg()))
-        };
-        let ((u, unscale_u), (v, unscale_v)) = (scaled(grid.u), scaled(grid.v));
         let mut field = Field {
-            u,
-            v,
-            unscale: [unscale_u, unscale_v],
             grid,
             open,
             measures,
@@ -440,7 +443,7 @@ impl<'a> Field<'a> {
                     continue;
                 }
                 let point = [grid.x[column], grid.y[row]];
-                let [p, q] = field.velocity(point, [field.u[i], field.v[i]]);
+                let [p, q] = field.velocity(point, [Wide::of(grid.u[i]), Wide::of(grid.v[i])]);
                 let speed = length(p, q);
                 if !speed.at_most(fastest) {
                     fastest = speed;
@@ -451,16 +454,11 @@ impl<'a> Field<'a> {
         field
     }
 
-    /// The velocity in steps per unit of time of the vector `(u, v)`, as scaled in
-    /// [`Field::u`] and [`Field::v`], at `point`.
-    fn velocity(&self, [x, y]: [f64; 2], [u, v]: [f64; 2]) -> [Wide; 2] {
+    /// The velocity in steps per unit of time of the vector `(u, v)` at `point`.
+    fn velocity(&self, [x, y]: [f64; 2], [u, v]: [Wide; 2]) -> [Wide; 2] {
         [
-            Wide::of(u)
-                .times(self.unscale[0])
-                .times(self.measures[0].rate(x)),
-            Wide::of(v)
-                .times(self.unscale[1])
-                .times(self.measures[1].rate(y)),
+            u.times(self.measures[0].rate(x)),
+            v.times(self.measures[1].rate(y)),
         ]
     }
 
@@ -507,23 +505,39 @@ impl<'a> Field<'a> {
         (a * (1.0 - tx) + b * tx) * (1.0 - ty) + (c * (1.0 - tx) + d * tx) * ty
     }
 
+    /// The bilinear value of `values` at `(tx, ty)` of the cell with `corners`, as a number of
+    /// any size: the corners are brought to the power of two of the largest of them, exactly,
+    /// interpolated, and given that power back, so that neither tiny nor huge corners underflow
+    /// or overflow on the way. A corner more than 2^1022 times smaller than the largest counts
+    /// as 0, far below anything the cell can show.
+    fn wide_bilinear(values: &[f64], corners: [usize; 4], tx: f64, ty: f64) -> Wide {
+        let wide = corners.map(|i| Wide::of(values[i]));
+        let top = wide
+            .iter()
+            .map(|value| value.power())
+            .max()
+            .unwrap_or(i32::MIN);
+        let [a, b, c, d] = wide.map(|value| value.at_power(top));
+        let mantissa = (a * (1.0 - tx) + b * tx) * (1.0 - ty) + (c * (1.0 - tx) + d * tx) * ty;
+        Wide::scaled(mantissa, top)
+    }
+
     /// The velocity at `point`, at `place` in an open cell.
     fn velocity_in(&self, point: [f64; 2], (column, row, tx, ty): Place) -> [Wide; 2] {
         let corners = self.corners(column, row);
-        let u = Field::bilinear(&self.u, corners, tx, ty);
-        let v = Field::bilinear(&self.v, corners, tx, ty);
+        let u = Field::wide_bilinear(self.grid.u, corners, tx, ty);
+        let v = Field::wide_bilinear(self.grid.v, corners, tx, ty);
         self.velocity(point, [u, v])
     }
 
     /// Whether a line moves at `point`, at `place` in an open cell: the fractions and the field
     /// there are finite and the speed is not zero. Anything not finite counts as blocked.
-    fn moves(&self, point: [f64; 2], place @ (column, row, tx, ty): Place) -> bool {
-        let corners = self.corners(column, row);
-        let finite = point.iter().chain(&[tx, ty]).all(|v| v.is_finite())
-            && [&self.u, &self.v]
-                .iter()
-                .all(|values| Field::bilinear(values, corners, tx, ty).is_finite());
-        finite && !self.is_still(self.velocity_in(point, place))
+    fn moves(&self, point: [f64; 2], place @ (_, _, tx, ty): Place) -> bool {
+        if !point.iter().chain(&[tx, ty]).all(|v| v.is_finite()) {
+            return false;
+        }
+        let [p, q] = self.velocity_in(point, place);
+        p.is_finite() && q.is_finite() && !self.is_still([p, q])
     }
 
     /// The field at `point`, or why no line can pass there.
@@ -578,7 +592,8 @@ impl<'a> Field<'a> {
                 from[1] + (to[1] - from[1]) * t,
             ]
         };
-        let mut cuts = vec![0.0, 1.0];
+        // No allocation for the usual step, which crosses no line.
+        let mut cuts = Vec::new();
         for (axis, coordinates) in [self.grid.x, self.grid.y].into_iter().enumerate() {
             let (a, b) = (from[axis], to[axis]);
             if a == b {
@@ -595,6 +610,10 @@ impl<'a> Field<'a> {
                 cuts.push(t);
             }
         }
+        if cuts.is_empty() {
+            return self.clear_piece(from, to, [0.0, 1.0]);
+        }
+        cuts.extend([0.0, 1.0]);
         cuts.sort_by(f64::total_cmp);
         cuts.windows(2)
             .all(|pair| self.clear_piece(from, to, [pair[0], pair[1]]))
@@ -667,8 +686,10 @@ impl<'a> Field<'a> {
         let ([x0, x1], [y0, y1]) = (tx, ty);
         let (dx, dy) = (x1 - x0, y1 - y0);
         let corners = self.corners(column, row);
-        let mut candidates = vec![0.0, 1.0];
-        for values in [&self.u, &self.v] {
+        // The ends, and at most three points of each component.
+        let mut candidates = [None; 8];
+        candidates[..2].copy_from_slice(&[Some(0.0), Some(1.0)]);
+        for (component, values) in [self.grid.u, self.grid.v].into_iter().enumerate() {
             let [a, b, c, d] = corners.map(|i| values[i]);
             let largest = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
             if largest == 0.0 {
@@ -686,14 +707,10 @@ impl<'a> Field<'a> {
             if !quadratic.iter().all(|v| v.is_finite()) {
                 return false;
             }
-            candidates.extend(
-                critical_points(quadratic)
-                    .into_iter()
-                    .flatten()
-                    .filter(|s| (0.0..=1.0).contains(s)),
-            );
+            let found = critical_points(quadratic).map(|s| s.filter(|s| (0.0..=1.0).contains(s)));
+            candidates[2 + 3 * component..5 + 3 * component].copy_from_slice(&found);
         }
-        candidates.into_iter().all(|s| {
+        candidates.into_iter().flatten().all(|s| {
             let point = at(start + (end - start) * s);
             let place = (
                 column,
@@ -750,7 +767,41 @@ fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
 struct Entry {
     at: [f64; 2],
     line: u32,
-    length: f64,
+    /// The length along the line, as the sum of `length` and `carry`, so that steps far
+    /// shorter than the length still count.
+    length: Length,
+}
+
+/// A length along a line kept as an unevaluated sum, compensated as it grows: a step a
+/// billionth of the length already traced is not lost to rounding, so the distance along the
+/// line between two of its points is right however short the steps become.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Length {
+    /// The rounded sum.
+    sum: f64,
+    /// What the rounding of `sum` left out.
+    carry: f64,
+}
+
+impl Length {
+    /// This length with `step` added.
+    fn plus(self, step: f64) -> Length {
+        let (sum, error) = two_sum(self.sum, step);
+        Length {
+            sum,
+            carry: self.carry + error,
+        }
+    }
+
+    /// The distance along the line from `other` to this length.
+    fn from(self, other: Length) -> f64 {
+        (self.sum - other.sum) + (self.carry - other.carry)
+    }
+
+    /// The length as one number.
+    fn value(self) -> f64 {
+        self.sum + self.carry
+    }
 }
 
 /// The points of the lines drawn so far, in squares one step wide, so that a test of nearness
@@ -783,7 +834,7 @@ impl Occupancy {
     }
 
     /// Adds the point at `at` of `line`, `length` along it.
-    fn insert(&mut self, at: [f64; 2], line: u32, length: f64) {
+    fn insert(&mut self, at: [f64; 2], line: u32, length: Length) {
         let (column, row) = self.square(at);
         let square = row * self.side + column;
         self.squares[square].push(self.entries.len());
@@ -838,6 +889,10 @@ struct Tracer<'a> {
     occupancy: Occupancy,
     /// The longest a line may grow either way.
     max_length: f64,
+    /// The most steps one way of a line may take: [`MAX_TRIES`].
+    max_tries: usize,
+    /// How many more points the mark may hold: [`MAX_POINTS`] less those traced.
+    points_left: usize,
 }
 
 impl Tracer<'_> {
@@ -855,11 +910,14 @@ impl Tracer<'_> {
         let mut traced = Vec::new();
         let (mut point, mut probe) = (seed, start);
         let mut at = field.position(seed);
-        let mut length = 0.0_f64;
+        let mut recorded = at;
+        let mut length = Length::default();
         let mut step = MAX_STEP;
+        let mut tries = 0;
         let along =
             |p: [f64; 2], slope: [f64; 2], by: f64| [p[0] + by * slope[0], p[1] + by * slope[1]];
-        loop {
+        while tries < self.max_tries && self.points_left > 0 {
+            tries += 1;
             let euler = along(point, probe.slope, sign * step);
             let next = field
                 .clear(point, euler)
@@ -895,15 +953,15 @@ impl Tracer<'_> {
                 continue;
             }
             // A step too inaccurate for the curve shrinks further, with the radius of the curve.
-            if error > TOLERANCE || turn > MAX_TURN {
+            if error > TOLERANCE || error > RELATIVE_TOLERANCE * moved || turn > MAX_TURN {
                 step /= 2.0;
                 if step < MIN_CURVE_STEP {
                     break;
                 }
                 continue;
             }
-            let next_length = length + sign * moved;
-            if next_length.abs() > self.max_length {
+            let next_length = length.plus(sign * moved);
+            if next_length.value().abs() > self.max_length {
                 break;
             }
             // Its own points keep a line apart by a share of the radius of its curve, up to a
@@ -914,20 +972,31 @@ impl Tracer<'_> {
                 1.0
             };
             let (near, gap) = (END_SPACING * scale, SELF_GAP * scale);
-            let crowded = self.occupancy.any_near(next_at, END_SPACING, |entry| {
-                if entry.line == line {
-                    (entry.length - next_length).abs() > gap && distance(entry.at, next_at) < near
-                } else {
-                    company == Company::Others
-                }
-            });
+            let crowded = self
+                .occupancy
+                .any_near(next_at, END_SPACING + RECORD_SPACING, |entry| {
+                    if entry.line == line {
+                        entry.length.from(next_length).abs() > gap
+                            && distance(entry.at, next_at) < near
+                    } else {
+                        company == Company::Others
+                    }
+                });
             if crowded {
                 break;
             }
-            self.occupancy.insert(next_at, line, next_length);
-            traced.push((next, next_length, next_probe.value));
+            if distance(recorded, next_at) >= RECORD_SPACING * scale {
+                self.occupancy.insert(next_at, line, next_length);
+                recorded = next_at;
+            }
+            traced.push((next, next_length.value(), next_probe.value));
+            self.points_left -= 1;
             (point, probe, at, length) = (next, next_probe, next_at, next_length);
-            if error < TOLERANCE / 4.0 && turn < MAX_TURN / 2.0 && step < MAX_STEP {
+            if error < TOLERANCE / 4.0
+                && error < RELATIVE_TOLERANCE / 4.0 * moved
+                && turn < MAX_TURN / 2.0
+                && step < MAX_STEP
+            {
                 step *= 2.0;
             }
         }
@@ -936,7 +1005,9 @@ impl Tracer<'_> {
 
     /// The line `line` through `seed`, where the field is `start`, traced both ways.
     fn line(&mut self, seed: [f64; 2], start: Probe, line: u32, company: Company) -> Streamline {
-        self.occupancy.insert(self.field.position(seed), line, 0.0);
+        self.occupancy
+            .insert(self.field.position(seed), line, Length::default());
+        self.points_left = self.points_left.saturating_sub(1);
         let upstream = self.half(seed, start, line, -1.0, company);
         let downstream = self.half(seed, start, line, 1.0, company);
         let first = upstream.last().map_or(0.0, |&(_, length, _)| length);
@@ -987,6 +1058,8 @@ impl<'a> Tracer<'a> {
         Tracer {
             occupancy: Occupancy::new(field.steps),
             max_length: max_length(field.steps),
+            max_tries: MAX_TRIES,
+            points_left: MAX_POINTS,
             field,
         }
     }
@@ -1018,24 +1091,35 @@ fn seed_order(side: usize) -> Vec<(usize, usize)> {
 /// The automatic streamlines of `grid`, in the order their seeds were tried (see the module
 /// documentation).
 pub(crate) fn automatic(grid: Grid<'_>) -> Vec<Streamline> {
-    let mut tracer = Tracer::new(grid);
+    automatic_with(Tracer::new(grid))
+}
+
+/// The automatic streamlines of the field of `tracer`, within its bounds.
+fn automatic_with(mut tracer: Tracer<'_>) -> Vec<Streamline> {
     let side = tracer.occupancy.side;
     let pitch = tracer.field.steps / side as f64;
     let mut lines = Vec::new();
     for (column, row) in seed_order(side) {
+        if tracer.points_left == 0 {
+            break;
+        }
         let at = [(column as f64 + 0.5) * pitch, (row as f64 + 0.5) * pitch];
         let seed = tracer.field.point(at);
         let Some(start) = tracer.field.flowing(seed) else {
             continue;
         };
         let position = tracer.field.position(seed);
-        if tracer.occupancy.any_near(position, SEED_SPACING, |_| true) {
+        if tracer
+            .occupancy
+            .any_near(position, SEED_SPACING + RECORD_SPACING, |_| true)
+        {
             continue;
         }
         let before = tracer.occupancy.len();
         let line = tracer.line(seed, start, lines.len() as u32, Company::Others);
         if line.length() < MIN_LENGTH {
             tracer.occupancy.truncate(before);
+            tracer.points_left += line.points().len();
         } else {
             lines.push(line);
         }
@@ -1062,7 +1146,7 @@ pub(crate) fn through(
         .map(|(i, (&start, probe))| {
             tracer.occupancy.truncate(0);
             let line = tracer.line(start, probe, 0, Company::Alone);
-            if line.points().len() < 2 {
+            if line.points().len() < 2 && tracer.points_left > 0 {
                 return Err((i, Blocked::Stuck));
             }
             Ok(line)
@@ -1103,6 +1187,52 @@ mod tests {
         assert_eq!(critical_points([1.0, 0.0, 1.0]), [None, None, Some(0.0)]);
         assert_eq!(critical_points([2.0, -4.0, 0.0]), [Some(0.5), None, None]);
         assert_eq!(critical_points([2.0, 0.0, 0.0]), [None, None, None]);
+    }
+
+    #[test]
+    fn a_length_keeps_steps_far_shorter_than_itself() {
+        let mut length = Length::default().plus(2000.0);
+        let start = length;
+        for _ in 0..1000 {
+            length = length.plus(1e-13);
+        }
+        assert_eq!(start.sum + 1e-13, start.sum);
+        assert!((length.from(start) / 1e-10 - 1.0).abs() < 1e-6);
+    }
+
+    /// A grid of a uniform flow along x, `columns` wide and two rows high.
+    fn uniform(columns: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let x: Vec<f64> = (0..columns).map(|i| i as f64).collect();
+        (x, vec![1.0; 2 * columns], vec![0.0; 2 * columns])
+    }
+
+    #[test]
+    fn the_work_of_a_line_and_of_a_mark_is_bounded() {
+        let (x, u, v) = uniform(11);
+        let grid = Grid {
+            x: &x,
+            y: &[0.0, 1.0],
+            u: &u,
+            v: &v,
+            values: None,
+            log: [false, false],
+            density: 10.0,
+        };
+        // Each way of a line takes at most `max_tries` steps, accepted or not.
+        let mut tracer = Tracer::new(grid);
+        tracer.max_tries = 40;
+        let start = tracer.field.probe([5.0, 0.5]).unwrap();
+        let line = tracer.line([5.0, 0.5], start, 0, Company::Alone);
+        assert_eq!(line.points().len(), 2 * 40 + 1);
+        // A mark holds at most `points_left` points.
+        let mut tracer = Tracer::new(grid);
+        tracer.points_left = 500;
+        let lines = automatic_with(tracer);
+        let points: usize = lines.iter().map(|line| line.points().len()).sum();
+        assert!(points <= 500 && points > 400, "{points}");
+        // The bounds themselves.
+        assert_eq!(Tracer::new(grid).max_tries, MAX_TRIES);
+        assert_eq!(Tracer::new(grid).points_left, MAX_POINTS);
     }
 
     #[test]
@@ -1149,9 +1279,9 @@ mod tests {
     #[test]
     fn the_occupancy_forgets_what_it_truncates() {
         let mut occupancy = Occupancy::new(4.0);
-        occupancy.insert([1.5, 1.5], 0, 0.0);
+        occupancy.insert([1.5, 1.5], 0, Length::default());
         let count = occupancy.len();
-        occupancy.insert([1.6, 1.5], 1, 0.0);
+        occupancy.insert([1.6, 1.5], 1, Length::default());
         assert!(occupancy.any_near([1.7, 1.5], 0.2, |entry| entry.line == 1));
         occupancy.truncate(count);
         assert!(!occupancy.any_near([1.7, 1.5], 0.2, |entry| entry.line == 1));

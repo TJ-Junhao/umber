@@ -131,6 +131,34 @@ impl Wide {
         Wide { mantissa, power }.normal()
     }
 
+    /// `mantissa × 2^power` for a finite `mantissa`, exactly.
+    pub(crate) fn scaled(mantissa: f64, power: i32) -> Wide {
+        if mantissa == 0.0 {
+            return Wide::ZERO;
+        }
+        let (mantissa, shift) = split(mantissa);
+        Wide {
+            mantissa,
+            power: power.saturating_add(shift),
+        }
+    }
+
+    /// The power of two; the lowest for zero.
+    pub(crate) fn power(self) -> i32 {
+        self.power
+    }
+
+    /// The number over `2^top`, for a `top` at or above its power: 0 where that is past the
+    /// range of `f64`.
+    pub(crate) fn at_power(self, top: i32) -> f64 {
+        self.mantissa * power_of_two(self.power.saturating_sub(top))
+    }
+
+    /// Whether the number is finite: its mantissa is.
+    pub(crate) fn is_finite(self) -> bool {
+        self.mantissa.is_finite()
+    }
+
     /// The mantissa, from 1 to 2 in magnitude, and the power of two of this nonzero number.
     pub(crate) fn parts(self) -> (f64, i32) {
         let Wide { mantissa, power } = self.normal();

@@ -534,10 +534,10 @@ fn the_same_input_draws_the_same_lines_and_pinned_points() {
     };
     let pins = PINS;
     assert_eq!(mark.lines().len(), pins.0);
-    let counts: Vec<usize> = [0, 2, 24]
+    let counts: Vec<usize> = [0, 2, 21]
         .map(|line| mark.lines()[line].points().len())
         .into();
-    assert_eq!(counts, [55, 51, 99]);
+    assert_eq!(counts, [55, 41, 117]);
     for &(line, point, expected) in pins.1 {
         assert_eq!(bits(line, point), expected, "line {line} point {point}");
     }
@@ -549,20 +549,20 @@ type Pin = (usize, usize, [u64; 2]);
 /// The number of lines of the field of `the_same_input_draws_the_same_lines_and_pinned_points`,
 /// and some of their points.
 const PINS: (usize, &[Pin]) = (
-    25,
+    22,
     &[
         (0, 0, [13835058039812354821, 4601676632307505571]),
         (0, 1, [13835058020891086694, 4601676047123623716]),
         (0, 27, [13834241892654899192, 13821943227258726190]),
         (0, 54, [13834625805468435243, 13830554428779167632]),
-        (2, 0, [13833811292332938980, 4603035619859107686]),
-        (2, 1, [13833785065355079593, 4602736548190851709]),
-        (2, 25, [13832354520325793507, 13822015987285144708]),
-        (2, 50, [13832233215512487752, 13830554399481583457]),
-        (24, 0, [13829873068854694405, 4607182223735094508]),
-        (24, 1, [13829873280744088485, 4607181646978686636]),
-        (24, 49, [4582308498644150626, 4591829656596033160]),
-        (24, 98, [4610848903535031185, 4607182298394125634]),
+        (2, 0, [13833426594973318479, 4596702239416484422]),
+        (2, 1, [13833375355981271236, 4595518908930051595]),
+        (2, 20, [13831998350526190834, 13824931684478837904]),
+        (2, 40, [13832233215512487752, 13830554399481583457]),
+        (21, 0, [13828522504085098136, 4607182319403072664]),
+        (21, 1, [13828522605026007560, 4607182030576495871]),
+        (21, 58, [13818591581857587006, 4598582449584856202]),
+        (21, 116, [4610015257178830649, 4607182404741929424]),
     ],
 );
 
@@ -1143,4 +1143,71 @@ fn cells_narrower_than_any_step_still_stop_the_line_at_a_zero() {
     let points = line.points();
     assert!(points.iter().all(|p| p[0] >= 0.0), "{:?}", points[0]);
     assert!(points[0][0] < 1e-4);
+}
+
+#[test]
+fn a_cell_keeps_small_values_beside_huge_ones() {
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let x = [1e-200, 1.0, 1e200];
+    // u = x: one step along the log axis takes the same time everywhere.
+    let u = [1e-200, 1.0, 1e200, 1e-200, 1.0, 1e200];
+    let line = through(
+        [log, ScaleKind::Linear],
+        (&x, &[0.0, 1.0]),
+        (&u, &[0.0; 6]),
+        PointColor::AUTO,
+        [1e-180, 0.5],
+    );
+    let (first, last) = (line.points()[0], line.points()[line.points().len() - 1]);
+    // Within 1/2048 of a step of each end: 0.007 of a decade here.
+    assert!((first[0].log10() + 200.0).abs() < 0.01, "{first:?}");
+    assert!((last[0].log10() - 200.0).abs() < 0.01, "{last:?}");
+    // With v of 30 / 921.03... steps per unit of time along y, as along x: a diagonal in steps.
+    let v = [1.0 / 921.034_037_197_618_3; 6];
+    let line = through(
+        [log, ScaleKind::Linear],
+        (&x, &[0.0, 1.0]),
+        (&u, &v),
+        PointColor::AUTO,
+        [1e-180, 0.5],
+    );
+    let (first, last) = (line.points()[0], line.points()[line.points().len() - 1]);
+    // From 1.5 steps along x and 15 along y: back 1.5 steps to the left edge, on 15 to the top.
+    assert!((first[0].log10() + 200.0).abs() < 0.01, "{first:?}");
+    // Within a tenth of a step: the flow grows exponentially in x, which each step integrates to
+    // its tolerance.
+    assert!((first[1] - 0.45).abs() < 0.1 / 30.0, "{first:?}");
+    assert!((last[1] - 1.0).abs() < 1e-4, "{last:?}");
+    assert!(
+        (last[0].log10() - 20.0).abs() < 0.1 * 400.0 / 30.0,
+        "{last:?}"
+    );
+}
+
+#[test]
+fn a_long_spiral_onto_a_tiny_orbit_ends_within_the_bounds() {
+    // Four coordinates a decade from 1 down to 1e-16 on each side of 0, and a flow that spirals
+    // in from the edge onto an orbit of radius 5e-14.
+    let mut positive: Vec<f64> = (0..=64).map(|k| 10_f64.powf(-f64::from(k) / 4.0)).collect();
+    positive.reverse();
+    let mut x: Vec<f64> = positive.iter().rev().map(|v| -v).collect();
+    x.push(0.0);
+    x.extend(&positive);
+    let (radius, pull) = (5e-14, 0.2);
+    let (u, v) = sampled(&x, &x, |x, y| {
+        let r = x.hypot(y);
+        let (cx, cy) = if r > 0.0 { (x / r, y / r) } else { (0.0, 0.0) };
+        (-y - pull * (r - radius) * cx, x - pull * (r - radius) * cy)
+    });
+    let mut f = linear();
+    let options = StreamplotOptions {
+        density: 10.0,
+        ..starting(&[0.9], &[0.0])
+    };
+    let mark = streamplot(&mut f, (&x, &x), (&u, &v), options);
+    let points = mark.lines()[0].points().len();
+    assert!(
+        points <= 2 * crate::field::stream::MAX_TRIES + 1,
+        "{points}"
+    );
 }
