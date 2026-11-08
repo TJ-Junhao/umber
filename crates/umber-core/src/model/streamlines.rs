@@ -95,14 +95,17 @@ impl Default for StreamplotOptions {
 /// of a step, and its line is traced both ways. A line ends at the edge of the grid; at a hole,
 /// the four cells around a NaN of `u`, `v` or a mapped color value; where the speed is zero, at
 /// most 1e-6 of the largest speed at a grid point, both in steps per unit of time, or where the
-/// line runs into a point where the flow stops; where an automatic line would come within half
-/// a step of another line; and where a line would come within half a step of its own points
-/// more than two steps back along it, which ends a closed orbit after one turn. An automatic
-/// line shorter than two steps is dropped. [`StreamStarts::At`] draws one line through each start
-/// instead, regardless of the others. A line is traced by Heun's method, each step accepted when
-/// it ends within 0.01 of a step of the Euler step it starts with, and at most a quarter of a
-/// step long. Nothing here depends on the figure size: the same input gives the same lines,
-/// point for point, on every platform.
+/// line runs into a point where the flow stops, whether the field changes sign there or not;
+/// where an automatic line would come within half a step of another line; where a line would
+/// come within half a step of its own points more than two steps back along it, which ends a
+/// closed orbit after one turn; and where it has turned once round and come back within half a
+/// step of its start, which ends an orbit shorter than two steps. An automatic line shorter than
+/// two steps is dropped. [`StreamStarts::At`] draws one line through each start instead,
+/// regardless of the others. A line is traced by Heun's method in steps of at most a quarter of
+/// a step, each accepted when it ends within 0.01 of a step of the Euler step it starts with,
+/// turns the line by at most about 0.05 radians, and crosses no hole and no point where the
+/// speed is zero. Nothing here depends on the figure size: the same input gives the same lines,
+/// point for point, on every platform, at any range of the data.
 ///
 /// A line at least one step long carries one arrow head at its middle, measured in steps,
 /// pointing downstream: the head of a quiver arrow, 5 pt long and 4 pt wide, in the line's

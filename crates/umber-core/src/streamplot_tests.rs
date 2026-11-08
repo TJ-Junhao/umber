@@ -537,7 +537,7 @@ fn the_same_input_draws_the_same_lines_and_pinned_points() {
     let counts: Vec<usize> = [0, 2, 24]
         .map(|line| mark.lines()[line].points().len())
         .into();
-    assert_eq!(counts, [55, 51, 91]);
+    assert_eq!(counts, [55, 51, 99]);
     for &(line, point, expected) in pins.1 {
         assert_eq!(bits(line, point), expected, "line {line} point {point}");
     }
@@ -559,10 +559,10 @@ const PINS: (usize, &[Pin]) = (
         (2, 1, [13833785065355079593, 4602736548190851709]),
         (2, 25, [13832354520325793507, 13822015987285144708]),
         (2, 50, [13832233215512487752, 13830554399481583457]),
-        (24, 0, [13829873633525203614, 4607182346126793954]),
-        (24, 1, [13829874057273880314, 4607181192611214187]),
-        (24, 45, [4588288875551560517, 4591840330265130956]),
-        (24, 90, [4610848656950914824, 4607182415211269415]),
+        (24, 0, [13829873068854694405, 4607182223735094508]),
+        (24, 1, [13829873280744088485, 4607181646978686636]),
+        (24, 49, [4582308498644150626, 4591829656596033160]),
+        (24, 98, [4610848903535031185, 4607182298394125634]),
     ],
 );
 
@@ -896,4 +896,179 @@ fn limits_are_the_outer_coordinates_even_past_a_hole() {
     assert_eq!(resolved.x.continuous().unwrap().domain(), (-1.0, 2.0));
     let ratio = (layout.plot.width / 3.0) / (layout.plot.height / 2.5);
     assert!((ratio - 1.0).abs() < 1e-9, "{ratio}");
+}
+
+/// The single line through `start` of the field `(u, v)` on the grid of `x` and `y`, on axes of
+/// the scale kinds `kinds`.
+fn through(
+    kinds: [ScaleKind; 2],
+    (x, y): (&[f64], &[f64]),
+    (u, v): (&[f64], &[f64]),
+    color: PointColor,
+    start: [f64; 2],
+) -> Streamline {
+    let mut f = figure_of(6.0, 4.0, kinds);
+    let options = StreamplotOptions {
+        color,
+        ..starting(&[start[0]], &[start[1]])
+    };
+    let mark = streamplot(&mut f, (x, y), (u, v), options);
+    assert_eq!(mark.lines().len(), 1);
+    mark.lines()[0].clone()
+}
+
+#[test]
+fn a_step_never_jumps_a_narrow_hole() {
+    let narrow = [0.0, 0.501, 0.502, 0.503, 1.0];
+    let ones = [1.0; 10];
+    // A NaN at 0.502 makes the cells from 0.501 to 0.503 a hole, across the flow along x.
+    let mut across = ones;
+    across[2] = f64::NAN;
+    across[7] = f64::NAN;
+    let line = through(
+        LINEAR,
+        (&narrow, &[0.0, 1.0]),
+        (&across, &[0.0; 10]),
+        PointColor::AUTO,
+        [0.5, 0.5],
+    );
+    let last = line.points()[line.points().len() - 1];
+    assert!(line.points().iter().all(|p| p[0] <= 0.501), "{last:?}");
+    assert!(last[0] > 0.501 - 1e-4, "{last:?}");
+    // The same along y.
+    let along_y = [1.0, 1.0, 1.0, 1.0, f64::NAN, f64::NAN, 1.0, 1.0, 1.0, 1.0];
+    let line = through(
+        LINEAR,
+        (&[0.0, 1.0], &narrow),
+        (&[0.0; 10], &along_y),
+        PointColor::AUTO,
+        [0.5, 0.5],
+    );
+    assert!(line.points().iter().all(|p| p[1] <= 0.501));
+    // Slanting across a hole on an uneven grid.
+    let uneven = [0.0, 0.3, 0.3001, 0.3002, 1.0];
+    let (u, v) = (vec![1.0; 10], vec![0.5; 10]);
+    let mut slanting = u.clone();
+    slanting[2] = f64::NAN;
+    slanting[7] = f64::NAN;
+    let line = through(
+        LINEAR,
+        (&uneven, &[0.0, 1.0]),
+        (&slanting, &v),
+        PointColor::AUTO,
+        [0.1, 0.2],
+    );
+    assert!(
+        line.points().iter().all(|p| p[0] <= 0.3),
+        "{:?}",
+        line.points()
+    );
+    // A NaN of the mapped colors is a hole too.
+    let mut colors = vec![1.0; 10];
+    colors[2] = f64::NAN;
+    let line = through(
+        LINEAR,
+        (&narrow, &[0.0, 1.0]),
+        (&u, &[0.0; 10]),
+        PointColor::By(ColorBy::new(colors)),
+        [0.5, 0.5],
+    );
+    assert!(line.points().iter().all(|p| p[0] <= 0.501));
+}
+
+#[test]
+fn a_line_ends_where_the_flow_stops_without_turning_back() {
+    let (x, y) = ([0.0, 0.5, 1.0], [0.0, 1.0]);
+    // u = |2x - 1| is zero along x = 0.5 and positive on both sides.
+    let line = through(
+        LINEAR,
+        (&x, &y),
+        (&[1.0, 0.0, 1.0, 1.0, 0.0, 1.0], &[0.0; 6]),
+        PointColor::AUTO,
+        [0.501, 0.5],
+    );
+    let points = line.points();
+    assert!(points.iter().all(|p| p[0] >= 0.5), "{points:?}");
+    assert!(points[0][0] < 0.5 + 1e-4, "{:?}", points[0]);
+    assert!(points[points.len() - 1][0] > 1.0 - 1e-4);
+    // u = 1 - 2x changes sign there: the flow runs into the line from the left.
+    let line = through(
+        LINEAR,
+        (&x, &y),
+        (&[1.0, 0.0, -1.0, 1.0, 0.0, -1.0], &[0.0; 6]),
+        PointColor::AUTO,
+        [0.25, 0.5],
+    );
+    let points = line.points();
+    assert!(points[0][0] < 1e-4 && points.iter().all(|p| p[0] <= 0.5));
+    assert!(points[points.len() - 1][0] > 0.5 - 1e-4);
+}
+
+#[test]
+fn directions_hold_at_any_range_of_the_data() {
+    // Steps of 1e200 / 30 along x and 1e-200 / 30 along y: the flow runs diagonally in steps.
+    let line = through(
+        LINEAR,
+        (&[0.0, 1e200], &[0.0, 1e-200]),
+        (&[1e200; 4], &[1e-200; 4]),
+        PointColor::AUTO,
+        [5e199, 5e-201],
+    );
+    let (first, last) = (line.points()[0], line.points()[line.points().len() - 1]);
+    assert!(
+        first[0] / 1e200 < 1e-3 && first[1] / 1e-200 < 1e-3,
+        "{first:?}"
+    );
+    assert!(
+        last[0] / 1e200 > 1.0 - 1e-3 && last[1] / 1e-200 > 1.0 - 1e-3,
+        "{last:?}"
+    );
+    assert!((line.length() - STEPS_PER_DENSITY * 2_f64.sqrt()).abs() < 1e-3);
+    // A log axis over a ratio of 1 + 1e-8 has 3e309 steps per data unit at its start.
+    let log = ScaleKind::Log { base: LogBase::TEN };
+    let (low, high) = (1e-300, 1.000_000_01e-300);
+    let line = through(
+        [log, ScaleKind::Linear],
+        (&[low, high], &[0.0, 1.0]),
+        (&[1.0; 4], &[0.0; 4]),
+        PointColor::AUTO,
+        [1.000_000_005e-300, 0.5],
+    );
+    let (first, last) = (line.points()[0], line.points()[line.points().len() - 1]);
+    assert!(line.points().len() > 100);
+    assert!((first[0] / low - 1.0).abs() < 1e-11 && (last[0] / high - 1.0).abs() < 1e-11);
+    assert!(
+        (line.length() - STEPS_PER_DENSITY).abs() < 1e-3,
+        "{}",
+        line.length()
+    );
+}
+
+#[test]
+fn small_and_large_orbits_close_after_one_turn() {
+    let (x, y) = ([-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]);
+    let (u, v) = sampled(&x, &y, |x, y| (-y, x));
+    let per = 2.0 / STEPS_PER_DENSITY;
+    for radius in [0.001, 0.3 * per, 5.0 * per] {
+        let line = through(LINEAR, (&x, &y), (&u, &v), PointColor::AUTO, [radius, 0.0]);
+        let radii: Vec<f64> = line.points().iter().map(|&[x, y]| x.hypot(y)).collect();
+        assert!(
+            radii.iter().all(|r| (r / radius - 1.0).abs() < 1e-3),
+            "{radius}: {radii:?}"
+        );
+        let turn = 2.0 * std::f64::consts::PI * radius / per;
+        let length = line.length();
+        if turn < 2.0 {
+            // Shorter than the reach of its own points: closed when it has turned once round.
+            assert!(
+                (length / turn - 1.0).abs() < 0.05,
+                "{radius}: {length} {turn}"
+            );
+        } else {
+            assert!(
+                length > turn - 1.0 && length <= turn,
+                "{radius}: {length} {turn}"
+            );
+        }
+    }
 }

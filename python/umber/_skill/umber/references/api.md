@@ -2067,11 +2067,12 @@ so lines look even on the screen. Automatic lines start from seeds tried in a fi
 order, ring by ring from the edge of the grid inward; a seed is used where no line comes
 within 0.9 of a step, and its line is followed both ways. A line ends at the edge of the
 grid or of a hole; where the speed is zero (at most 1e-6 of the largest speed at a grid
-point, measured in steps); where an automatic line would come within half a step of
-another; and where it would come within half a step of itself, more than two steps back
-along it, so a closed orbit ends after one turn. Automatic lines shorter than two steps
-are dropped.
-Nothing depends on the figure size, and nothing is random: the same input draws the same
+point, measured in steps), whether the field changes sign there or not; where an
+automatic line would come within half a step of another; and where it would come within
+half a step of itself, more than two steps back along it, or back to where it started
+after one turn, so a closed orbit ends after one turn. No step jumps a hole, however
+narrow. Automatic lines shorter than two steps are dropped. Nothing depends on the figure
+size, and nothing is random: the same input draws the same
 lines, point for point, on every platform.
 
 ``starts`` draws exactly one line through each given point instead, both ways,
