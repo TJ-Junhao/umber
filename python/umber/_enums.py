@@ -491,3 +491,29 @@ class Direction(Enum):
     """The arrow points from ``(x, y)`` towards ``(x + u, y + v)`` on the plot, so it is tangent
     to a streamline of the same field and square to a contour of its potential, on any plot
     shape. Both axes must be linear: a log or time axis has no single scale for a step."""
+
+
+@unique
+class TriValues(Enum):
+    """What the values of ``tripcolor()`` belong to: the points, or the triangles.
+
+    The number of values is checked against it, and never used to guess it, so it holds even
+    when a mesh has as many triangles as points.
+
+    Example:
+        >>> import umber as ub
+        >>> x, y = [0, 1, 1, 0], [0, 0, 1, 1]
+        >>> ax = ub.Figure().add_axes().tripcolor(x, y, [1.0, 2.0, 3.0, 4.0])
+        >>> per_triangle = ub.Figure().add_axes()
+        >>> per_triangle = per_triangle.tripcolor(x, y, [5.0, 6.0], on=ub.TriValues.TRIANGLES)
+    """
+
+    __slots__ = ()
+
+    POINTS = 0
+    """One value per point; a triangle takes the mean of its three corners, and is blank when
+    one of them is NaN."""
+
+    TRIANGLES = 1
+    """One value per triangle, in the order of the rows of ``triangles`` (or of
+    ``delaunay(x, y)``), as finite-element results often are; NaN leaves a triangle blank."""

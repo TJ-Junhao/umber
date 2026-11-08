@@ -85,6 +85,7 @@ fig.save_pdf("temperature.pdf")
 | 网格色块图 | `ax.mesh(x_edges, y_edges, values)` |
 | 等值线图 | `ax.contour(x, y, z, style=ub.Contour.FILLED)`；也可用 `Contour.LINES`（默认）或 `Contour.BOTH` |
 | 向量场图 | 箭头用 `ax.quiver(x, y, u, v, key=(10, "10 m/s"))`，图例中的 key 按真实长度绘制；风羽用 `ax.barbs(x, y, u, v)`；流线用 `ax.streamplot(x, y, u, v)` |
+| 三角网格图 | `ax.tripcolor(x, y, values)` 为连接散点的三角形按值着色，`ax.triplot(x, y)` 画出三角形的边；`triangles=ub.delaunay(x, y)[keep]` 可挖出空洞 |
 | 二维直方图、六边形分箱图 | `ax.hist2d(x, y, bins=40)`、`ax.hexbin(x, y, gridsize=30)` |
 | 按值着色的散点 | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 | 饼图、环形图 | `ub.pie(categories, values, hole=0.5, annotate=True)` 或 `fig.add_pie_axes().pie(...)` |

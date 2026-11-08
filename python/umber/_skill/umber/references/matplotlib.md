@@ -40,6 +40,13 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.streamplot(..., broken_streamlines=False)` | not offered: a line ends where it would come too close to another; use `starts=` for lines that must run on |
 | `ax.streamplot(..., maxlength=, integration_direction=)` | not offered: lines run both ways until an edge, a hole, zero speed or another line, and a closed orbit ends after one turn |
 | `ax.streamplot(..., arrowsize=, arrowstyle=)` | `arrows=False` leaves the heads out; their shape and size are those of `quiver()` |
+| `tri = matplotlib.tri.Triangulation(x, y)` | `tri = ub.delaunay(x, y)`: a plain `int64` array shaped `(n, 3)`, or pass `x, y` alone and the marks triangulate them |
+| `Triangulation(x, y, triangles)` | `triangles=` on the call: an integer array shaped `(n, 3)`, in any order and winding |
+| `tri.set_mask(mask)` | `triangles=tri[~mask]`: keep the rows with NumPy |
+| `ax.triplot(tri)` / `ax.triplot(x, y, "k-")` | `ax.triplot(x, y, triangles=tri, color=ub.Color.BLACK)`: each edge once; add `ax.scatter(x, y)` for the points |
+| `ax.tripcolor(x, y, z)` | `ax.tripcolor(x, y, z)`: one value per point, a triangle takes the mean of its corners |
+| `ax.tripcolor(x, y, facecolors=v)` | `ax.tripcolor(x, y, v, on=ub.TriValues.TRIANGLES)`: one value per triangle |
+| `ax.tripcolor(..., shading="gouraud")` | not offered: triangles are flat; for a smooth field on a grid use `contour(style=ub.Contour.FILLED)` |
 | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` |
 | `ax.pie(values, labels=names, autopct="%1.0f%%")` | `ub.pie(names, values, annotate=True)` |
 | `ax.pie(..., wedgeprops={"width": 0.5})` | `ub.pie(names, values, hole=0.5)` |

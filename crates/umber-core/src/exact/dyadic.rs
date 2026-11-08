@@ -197,6 +197,15 @@ impl Dyadic {
         }
     }
 
+    /// The sign of `self`: `Less` below 0, `Equal` at 0, `Greater` above.
+    pub(crate) fn sign(&self) -> Ordering {
+        match (self.m.mag.is_empty(), self.m.neg) {
+            (true, _) => Ordering::Equal,
+            (false, true) => Ordering::Less,
+            (false, false) => Ordering::Greater,
+        }
+    }
+
     /// `self / o` rounded to `f64` with a relative error of a few ulps; `None` when `o` is 0.
     pub(crate) fn div_to_f64(&self, o: &Dyadic) -> Option<f64> {
         let ((m1, e1), (m2, e2)) = (self.m.top_bits(), o.m.top_bits());

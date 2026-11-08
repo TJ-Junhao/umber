@@ -73,6 +73,7 @@ mod strip;
 mod stroke;
 #[cfg(test)]
 mod tests;
+pub(crate) mod triangles;
 mod violin;
 pub(crate) use strip::check as check_points;
 
@@ -433,6 +434,16 @@ pub(crate) fn drawn_marks(
             } => {
                 if let Some(fill) = field::fill(resolved.color.as_ref(), color, mapped.as_ref()) {
                     streamlines::streamline_items(&context, resolved, mark, fill, &mut items);
+                }
+            }
+            ResolvedMark::Triplot {
+                mark, color, width, ..
+            } => {
+                triangles::triplot_items(&context, resolved, mark, (color, width), &mut items);
+            }
+            ResolvedMark::Tripcolor { mark, .. } => {
+                if let Some(color) = &resolved.color {
+                    triangles::tripcolor_items(&context, resolved, mark, color, &mut items);
                 }
             }
             ResolvedMark::Stem {

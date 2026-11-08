@@ -128,6 +128,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/text_size.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/time.rs
+  crates/umber-core/tests/support/corpus/triangles.rs
   crates/umber-core/tests/support/corpus/twin_y.rs
   crates/umber-core/tests/support/corpus/value_column.rs
   crates/umber-core/tests/support/corpus/vector_fields.rs

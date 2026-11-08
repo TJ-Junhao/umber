@@ -45,6 +45,7 @@ use umber_core::{
 use umber_core::{ContourLevels, ContourOptions, ContourStyle, QuiverOptions};
 use umber_core::{ErrorRange, ScatterGroup};
 use umber_core::{StreamStarts, StreamplotOptions};
+use umber_core::{TriValues, Triangles, TripcolorOptions, TriplotOptions};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
@@ -54,8 +55,8 @@ use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
 use crate::ticks::{TickFormatArg, tick_format};
 use crate::values::{
-    axis_value, coordinate, floats, is_int64_buffer, micros, names, series_data, shared_floats,
-    times,
+    axis_value, coordinate, floats, index_triples, is_int64_buffer, micros, names, series_data,
+    shared_floats, times,
 };
 
 /// The series of a grouped or stacked bar chart: `(label, values, color)` for each series.
@@ -1764,6 +1765,64 @@ impl Figure {
         let (x, y, u, v) = (floats(x)?, floats(y)?, floats(u)?, floats(v)?);
         self.axes(row, col)?
             .streamplot(&x, &y, &u, &v, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the edges of a triangle mesh: `triangles` is a flat int64 buffer of three point
+    /// indices per triangle, or `None` for the Delaunay triangulation of the points.
+    #[pyo3(signature = (row, col, x, y, triangles, label, color))]
+    fn triplot(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        triangles: Option<&Bound<'_, PyAny>>,
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let given = triangles.map(index_triples).transpose()?;
+        let triangles = given.as_deref().map_or(Triangles::Auto, Triangles::Given);
+        let options = TriplotOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        let (x, y) = (floats(x)?, floats(y)?);
+        self.axes(row, col)?
+            .triplot(&x, &y, triangles, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds the triangles of a mesh filled by value: `triangles` as for `triplot`, `on` a
+    /// `TriValues` value.
+    #[pyo3(signature = (row, col, x, y, triangles, values, on, cmap, scale, base, center))]
+    fn tripcolor(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        triangles: Option<&Bound<'_, PyAny>>,
+        values: &Bound<'_, PyAny>,
+        on: i64,
+        cmap: Option<PyRef<'_, Cmap>>,
+        scale: i64,
+        base: f64,
+        center: Option<f64>,
+    ) -> PyResult<()> {
+        let given = triangles.map(index_triples).transpose()?;
+        let triangles = given.as_deref().map_or(Triangles::Auto, Triangles::Given);
+        let options = TripcolorOptions {
+            on: enum_value::<TriValues>(on)?,
+            cmap: cmap_choice(cmap),
+            scale: color_transform(scale, base)?,
+            center,
+        };
+        let (x, y, values) = (floats(x)?, floats(y)?, floats(values)?);
+        self.axes(row, col)?
+            .tripcolor(&x, &y, triangles, &values, options)
             .map(drop)
             .map_err(core_error)
     }

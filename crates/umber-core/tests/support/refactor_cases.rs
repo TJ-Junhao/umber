@@ -63,6 +63,10 @@
 //! - Streamlines: flow around a cylinder with a hole on equal aspect, the same colored by speed
 //!   with a colorbar, lines through given starts in a rotation, and an unevenly spaced grid on a
 //!   log x axis with a label (in `corpus/streamlines.rs`).
+//! - Triangle meshes: the edges of a mesh with a hole cut out of its Delaunay triangles under
+//!   its points, triangles colored by values at the points with a colorbar on equal aspect,
+//!   triangles colored by their own values with some blank, and given triangles on a log x axis
+//!   with their edges over their colors (in `corpus/triangles.rs`).
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
@@ -157,6 +161,7 @@ mod corpus {
     pub mod text_size;
     pub mod ticks;
     pub mod time;
+    pub mod triangles;
     pub mod twin_y;
     pub mod value_column;
     pub mod vector_fields;
@@ -255,6 +260,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::equal_aspect::cases(&lib, &mut sink);
     corpus::vector_fields::cases(&lib, &mut sink);
     corpus::streamlines::cases(&lib, &mut sink);
+    corpus::triangles::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

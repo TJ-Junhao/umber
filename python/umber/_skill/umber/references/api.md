@@ -2350,6 +2350,133 @@ Example:
 >>> ax = ub.Figure().add_axes().title("Revenue")
 ```
 
+### `umber.Axes.tripcolor`
+
+```text
+Axes.tripcolor(self: 'Axes[float, float]', x: Values[float], y: Values[float], values: Values[float], *, triangles: TriangleIndices | Auto=AUTO, on: TriValues=TriValues.POINTS, cmap: Cmap | Auto=AUTO, scale: Scale[float]=Scale.linear(), center: float | Auto=AUTO) -> 'Axes[float, float]'
+```
+
+Add the triangles of a mesh, each filled with one color from its value.
+
+The points and ``triangles`` are those of ``triplot()``. ``on=TriValues.POINTS`` takes
+one value per point, and a triangle the mean of its three corners;
+``on=TriValues.TRIANGLES`` takes one value per triangle, in the order of the rows of
+``triangles`` (or of ``delaunay(x, y)``), as finite-element results often are. The
+number of values is checked against ``on`` and never used to guess it. A NaN leaves a
+triangle blank; with ``POINTS`` one NaN corner is enough.
+
+The colors come from the color scale of these axes, which every color-mapped mark
+shares, as for ``mesh()``; the automatic color range is that of the triangles' values,
+the colors drawn. Triangles are straight on the plot between their corners, on a log
+axis too. Each is filled flat and stroked with a 0.75 pt hairline in its own color, so
+neighbours meet without a seam; the outer edge of the mesh, and the edge of a blank
+triangle, grow by 0.375 pt. The triangles of one color are drawn as one shape, and the
+same triangles in any order draw the same output. The mesh is always drawn flat, as
+vector shapes. Automatic limits are the extent of the points, without padding.
+
+Args:
+    x: The x coordinate of each point: finite, positive on a log axis.
+    y: The y coordinate of each point, one per x coordinate.
+    values: One value per point or per triangle, as ``on`` says: finite, at most 1e300
+        in magnitude, positive on a log ``scale``, or NaN for a blank triangle.
+    triangles: ``AUTO`` for the Delaunay triangulation of the points, or an integer
+        array shaped ``(n, 3)`` of point indices, as for ``triplot()``.
+    on: ``TriValues.POINTS`` or ``TriValues.TRIANGLES``.
+    cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+        is given and its sequential colormap otherwise.
+    scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+    center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+        ``AUTO`` for a sequential mapping.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type, such as a float array for
+        ``triangles``, or ``scale`` is not linear or log.
+    DataError: If the points or ``triangles`` are invalid, as ``triplot()`` says, or
+        ``values`` does not hold one value per point (``POINTS``) or per triangle
+        (``TRIANGLES``), or a value is infinite, beyond 1e300 in magnitude, or not
+        positive on a log scale.
+    StyleError: If ``center`` is not finite or comes with a log scale, or the color
+        range set by ``clim()`` does not suit ``scale`` or ``center``.
+    UsageError: If an axis is not linear or log (type checkers refuse such axes), or
+        ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
+        marks of these axes.
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> rng = np.random.default_rng(2)
+>>> x, y = rng.uniform(-2, 2, 200), rng.uniform(-2, 2, 200)
+>>> ax = ub.Figure().add_axes().tripcolor(x, y, np.exp(-(x**2) - y**2)).colorbar()
+>>> tri = ub.delaunay(x, y)
+>>> strain = x[tri].std(axis=1)
+>>> fem = ub.Figure().add_axes()
+>>> fem = fem.tripcolor(x, y, strain, triangles=tri, on=ub.TriValues.TRIANGLES)
+```
+
+### `umber.Axes.triplot`
+
+```text
+Axes.triplot(self: 'Axes[float, float]', x: Values[float], y: Values[float], *, triangles: TriangleIndices | Auto=AUTO, label: str='', color: Color=Color.AUTO) -> 'Axes[float, float]'
+```
+
+Add the edges of a triangle mesh: scattered points joined into triangles.
+
+``triangles=AUTO`` joins the points by their Delaunay triangulation, ``delaunay(x,
+y)``. Pass that result filtered with NumPy, or the triangles of a finite-element mesh,
+to draw those instead: each row holds three indices into the points, in any order and
+with either winding. Every edge is drawn once, as one path, straight on the plot
+between its points (on a log axis too), at half the automatic line width, with round
+ends. The edges are drawn in a fixed order, sorted by their point indices, so the same
+triangles in any order draw the same output. No point is drawn: add ``scatter()`` for
+those. Automatic limits are the extent of the points, without padding, as for
+``contour()``.
+
+Args:
+    x: The x coordinate of each point: finite, positive on a log axis.
+    y: The y coordinate of each point, one per x coordinate.
+    triangles: ``AUTO`` for the Delaunay triangulation of the points, or an integer
+        array shaped ``(n, 3)`` (or a list of rows of three ints) of point indices.
+        Each triangle has three different corners that do not lie on one line, no
+        triangle is given twice, and no edge borders more than two triangles. A point
+        that no triangle uses still counts in the automatic limits.
+    label: The legend label; empty skips this mark's legend entry. The entry is a line
+        swatch.
+    color: The edge color. ``Color.AUTO`` takes the next palette color.
+
+Returns:
+    These axes.
+
+Raises:
+    TypeError: If an argument has the wrong type, such as a float array for
+        ``triangles``.
+    DataError: If ``x`` and ``y`` differ in length, a coordinate is not finite, beyond
+        1e300 in magnitude or not positive on a log axis, there are fewer than three
+        points, ``triangles`` is not shaped ``(n, 3)``, is empty, holds an index out of
+        range, a triangle with a repeated corner or without area, a triangle twice, or
+        an edge of three triangles, or ``AUTO`` cannot triangulate the points (as
+        ``delaunay()`` says; each message names the points or rows).
+    StyleError: If ``label`` is too long or holds a line break or another control
+        character.
+    UsageError: If an axis is not linear or log (type checkers refuse such axes).
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> rng = np.random.default_rng(1)
+>>> x, y = rng.uniform(0, 4, 60), rng.uniform(0, 3, 60)
+>>> ax = ub.Figure().add_axes().triplot(x, y, label="Mesh").scatter(x, y)
+>>> tri = ub.delaunay(x, y)
+>>> keep = np.hypot(x[tri].mean(axis=1) - 2, y[tri].mean(axis=1) - 1.5) > 0.6
+>>> holed = ub.Figure().add_axes().triplot(x, y, triangles=tri[keep])
+```
+
 ### `umber.Axes.twin_y`
 
 ```text
@@ -6939,6 +7066,45 @@ Example:
 True
 ```
 
+## `umber.TriValues`
+
+```text
+class TriValues(Enum)
+```
+
+What the values of ``tripcolor()`` belong to: the points, or the triangles.
+
+The number of values is checked against it, and never used to guess it, so it holds even
+when a mesh has as many triangles as points.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> x, y = [0, 1, 1, 0], [0, 0, 1, 1]
+>>> ax = ub.Figure().add_axes().tripcolor(x, y, [1.0, 2.0, 3.0, 4.0])
+>>> per_triangle = ub.Figure().add_axes()
+>>> per_triangle = per_triangle.tripcolor(x, y, [5.0, 6.0], on=ub.TriValues.TRIANGLES)
+```
+
+### `umber.TriValues.POINTS`
+
+```text
+TriValues.POINTS
+```
+
+One value per point; a triangle takes the mean of its three corners, and is blank when
+one of them is NaN.
+
+### `umber.TriValues.TRIANGLES`
+
+```text
+TriValues.TRIANGLES
+```
+
+One value per triangle, in the order of the rows of ``triangles`` (or of
+``delaunay(x, y)``), as finite-element results often are; NaN leaves a triangle blank.
+
 ## `umber.UmberError`
 
 ```text
@@ -7075,6 +7241,56 @@ Example:
 >>> ax.figure.save_svg("regions.svg")
 >>> labelled = ub.bar(["North", "South"], [3.5, 5.25], annotate=True)
 >>> grouped = ub.bar(["Q1", "Q1", "Q2"], [3, 4, 5], by=["North", "South", "North"])
+```
+
+## `umber.delaunay`
+
+```text
+delaunay(x: Values[float], y: Values[float]) -> IndexArray
+```
+
+Return the Delaunay triangulation of the points ``(x[i], y[i])``.
+
+Each row of the result is one triangle: three indices into the points, counter-clockwise
+in data coordinates with y up, starting at the smallest; the rows are sorted. Pass the
+result, or a part of it chosen with NumPy, as ``triangles=`` to ``triplot()`` and
+``tripcolor()``; ``triangles=AUTO`` is this triangulation.
+
+It works on the raw coordinates, as ``scipy.spatial.Delaunay`` does, and a log axis changes
+nothing here. For x and y in very different units, or for points shown on a log axis,
+triangulate coordinates scaled to look even, such as ``delaunay(np.log10(x), y)``, and pass
+the result as ``triangles=``. Which diagonal splits four points on one circle is fixed, the
+same on every platform.
+
+Args:
+    x: The x coordinate of each point: finite.
+    y: The y coordinate of each point, one per x coordinate: finite.
+
+Returns:
+    An ``int64`` array shaped ``(n, 3)``.
+
+Raises:
+    TypeError: If ``x`` or ``y`` is not a sequence or an array of numbers.
+    DataError: If ``x`` and ``y`` differ in length, there are fewer than three points, a
+        coordinate is NaN or infinite (there are no missing points: an index counts every
+        point), a point repeats an earlier one (the message names both), all points lie on
+        one line, or two points lie too close to tell apart, within about 1e-15 of the
+        largest coordinate along both axes (the message names both).
+
+Example:
+
+```python
+>>> import numpy as np
+>>> import umber as ub
+>>> ub.delaunay([0, 1, 1, 0], [0, 0, 1, 1])
+array([[0, 1, 2],
+       [0, 2, 3]])
+>>> angle = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+>>> x = np.concatenate([np.cos(angle), 2 * np.cos(angle)])
+>>> y = np.concatenate([np.sin(angle), 2 * np.sin(angle)])
+>>> tri = ub.delaunay(x, y)
+>>> ring = tri[np.hypot(x[tri].mean(axis=1), y[tri].mean(axis=1)) > 1]
+>>> ax = ub.Figure().add_axes().triplot(x, y, triangles=ring)
 ```
 
 ## `umber.hist`

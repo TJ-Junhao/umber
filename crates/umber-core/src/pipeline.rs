@@ -261,6 +261,8 @@ fn check_contour_levels(
                     | Mark::Quiver(_)
                     | Mark::Barbs(_)
                     | Mark::Streamplot(_)
+                    | Mark::Triplot(_)
+                    | Mark::Tripcolor(_)
                     | Mark::Stem(_)
                     | Mark::Heatmap(_)
                     | Mark::Area(_)

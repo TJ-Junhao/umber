@@ -22,12 +22,14 @@ include = [
 ]
 
 [dependencies]
+delaunator = "1.1.0"
 fontdb = "0.24.0"
 harfrust = "0.14.0"
 miniz_oxide = "0.8.9"
 pdf-writer = "0.15.0"
 png = "0.18.1"
 read-fonts = "0.45.0"
+robust = "1.2.0"
 skrifa = "0.48.0"
 subsetter = { version = "0.2.6", features = ["variable-fonts"] }
 thiserror.workspace = true

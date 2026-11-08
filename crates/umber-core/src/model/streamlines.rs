@@ -160,7 +160,7 @@ impl StreamplotMark {
         (u, v): (&[f64], &[f64]),
         options: StreamplotOptions,
     ) -> Result<StreamplotMark> {
-        let transforms = check_axes(kinds)?;
+        let transforms = check_linear_or_log(STREAMPLOT_CONTEXT, kinds, "streamlines need")?;
         let field = VectorField::new(
             STREAMPLOT_CONTEXT,
             kinds,
@@ -223,9 +223,14 @@ impl StreamplotMark {
     }
 }
 
-/// The transforms of the axes of the scale kinds `kinds`, refusing a time or category axis:
+/// The transforms of the axes of the scale kinds `kinds`, refusing a time or category axis for
+/// the call `context`, whose marks `needs` (such as `"streamlines need"`) linear or log axes:
 /// `Error::Usage` naming `x` or `y`.
-fn check_axes((x, y): (ScaleKind, ScaleKind)) -> Result<[Transform; 2]> {
+pub(super) fn check_linear_or_log(
+    context: &'static str,
+    (x, y): (ScaleKind, ScaleKind),
+    needs: &str,
+) -> Result<[Transform; 2]> {
     let transform = |name: &'static str, kind: ScaleKind| {
         kind.transform().ok_or_else(|| {
             let what = match kind {
@@ -233,8 +238,8 @@ fn check_axes((x, y): (ScaleKind, ScaleKind)) -> Result<[Transform; 2]> {
                 _ => "a category axis",
             };
             Error::usage(
-                STREAMPLOT_CONTEXT,
-                format!("the {name} axis is {what}; streamlines need linear or log axes."),
+                context,
+                format!("the {name} axis is {what}; {needs} linear or log axes."),
             )
             .with_parameter(name)
             .with_hint("use Scale.linear() or Scale.log() for both axes.")

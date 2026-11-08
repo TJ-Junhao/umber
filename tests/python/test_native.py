@@ -47,6 +47,7 @@ def test_enum_members_lists_every_enum_with_values_in_declaration_order() -> Non
         "Contour": [("LINES", 0), ("FILLED", 1), ("BOTH", 2)],
         "Pivot": [("TAIL", 0), ("MIDDLE", 1), ("TIP", 2)],
         "Direction": [("SCREEN", 0), ("DATA", 1)],
+        "TriValues": [("POINTS", 0), ("TRIANGLES", 1)],
         "Place": [
             ("AUTO", 0),
             ("ABOVE", 1),
@@ -88,6 +89,7 @@ def test_enum_members_keys_are_the_bound_enum_names() -> None:
         "Contour",
         "Pivot",
         "Direction",
+        "TriValues",
         "Place",
     }
 

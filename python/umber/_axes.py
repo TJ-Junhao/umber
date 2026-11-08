@@ -49,6 +49,7 @@ from umber._enums import (
     Render,
     Stat,
     Step,
+    TriValues,
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError, details, new_error
 from umber._in_plot import InPlot
@@ -59,6 +60,7 @@ from umber._size import TEXT_SIZE_HINT as _SIZE_HINT
 from umber._size import Size
 from umber._ticks import TickFormat
 from umber._time import MicrosArray
+from umber._tri import TriangleIndices, native_triangles
 from umber._types import SupportsArray, Time, Values
 from umber._values import (
     FloatArray,
@@ -133,6 +135,7 @@ _FORMAT_HINT: Final = (
 )
 _ALIGN_HINT: Final = _members_hint(Align)
 _PIVOT_HINT: Final = _members_hint(Pivot)
+_ON_HINT: Final = _members_hint(TriValues)
 _DIRECTION_HINT: Final = _members_hint(Direction)
 _PT_PER_UNIT_HINT: Final = "pass a number of points per unit of magnitude, such as 3, or AUTO."
 _KEY_HINT: Final = 'pass a value and a text, such as key=(10, "10 m/s"), or leave it out.'
@@ -4392,6 +4395,177 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 spec,
                 given,
                 drawn,
+            )
+            return self
+
+    def triplot(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        *,
+        triangles: TriangleIndices | Auto = AUTO,
+        label: str = "",
+        color: Color = Color.AUTO,
+    ) -> "Axes[float, float]":
+        """Add the edges of a triangle mesh: scattered points joined into triangles.
+
+        ``triangles=AUTO`` joins the points by their Delaunay triangulation, ``delaunay(x,
+        y)``. Pass that result filtered with NumPy, or the triangles of a finite-element mesh,
+        to draw those instead: each row holds three indices into the points, in any order and
+        with either winding. Every edge is drawn once, as one path, straight on the plot
+        between its points (on a log axis too), at half the automatic line width, with round
+        ends. The edges are drawn in a fixed order, sorted by their point indices, so the same
+        triangles in any order draw the same output. No point is drawn: add ``scatter()`` for
+        those. Automatic limits are the extent of the points, without padding, as for
+        ``contour()``.
+
+        Args:
+            x: The x coordinate of each point: finite, positive on a log axis.
+            y: The y coordinate of each point, one per x coordinate.
+            triangles: ``AUTO`` for the Delaunay triangulation of the points, or an integer
+                array shaped ``(n, 3)`` (or a list of rows of three ints) of point indices.
+                Each triangle has three different corners that do not lie on one line, no
+                triangle is given twice, and no edge borders more than two triangles. A point
+                that no triangle uses still counts in the automatic limits.
+            label: The legend label; empty skips this mark's legend entry. The entry is a line
+                swatch.
+            color: The edge color. ``Color.AUTO`` takes the next palette color.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, such as a float array for
+                ``triangles``.
+            DataError: If ``x`` and ``y`` differ in length, a coordinate is not finite, beyond
+                1e300 in magnitude or not positive on a log axis, there are fewer than three
+                points, ``triangles`` is not shaped ``(n, 3)``, is empty, holds an index out of
+                range, a triangle with a repeated corner or without area, a triangle twice, or
+                an edge of three triangles, or ``AUTO`` cannot triangulate the points (as
+                ``delaunay()`` says; each message names the points or rows).
+            StyleError: If ``label`` is too long or holds a line break or another control
+                character.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes).
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> rng = np.random.default_rng(1)
+            >>> x, y = rng.uniform(0, 4, 60), rng.uniform(0, 3, 60)
+            >>> ax = ub.Figure().add_axes().triplot(x, y, label="Mesh").scatter(x, y)
+            >>> tri = ub.delaunay(x, y)
+            >>> keep = np.hypot(x[tri].mean(axis=1) - 2, y[tri].mean(axis=1) - 1.5) > 0.6
+            >>> holed = ub.Figure().add_axes().triplot(x, y, triangles=tri[keep])
+        """
+        with api_call():
+            context = "Axes.triplot()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            given = native_triangles(context, triangles)
+            _args.require_text(context, "label", label)
+            spec = _color_argument(context, color)
+            _numeric_cells(context, self, time=False)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            name = _args.text(context, "label", label, one_line="legend labels")
+            flat = None if given is None else given.reshape(-1)
+            self._native.triplot(self._target, self._col, xs, ys, flat, name, spec)
+            return self
+
+    def tripcolor(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        values: Values[float],
+        *,
+        triangles: TriangleIndices | Auto = AUTO,
+        on: TriValues = TriValues.POINTS,
+        cmap: Cmap | Auto = AUTO,
+        scale: Scale[float] = Scale.linear(),
+        center: float | Auto = AUTO,
+    ) -> "Axes[float, float]":
+        """Add the triangles of a mesh, each filled with one color from its value.
+
+        The points and ``triangles`` are those of ``triplot()``. ``on=TriValues.POINTS`` takes
+        one value per point, and a triangle the mean of its three corners;
+        ``on=TriValues.TRIANGLES`` takes one value per triangle, in the order of the rows of
+        ``triangles`` (or of ``delaunay(x, y)``), as finite-element results often are. The
+        number of values is checked against ``on`` and never used to guess it. A NaN leaves a
+        triangle blank; with ``POINTS`` one NaN corner is enough.
+
+        The colors come from the color scale of these axes, which every color-mapped mark
+        shares, as for ``mesh()``; the automatic color range is that of the triangles' values,
+        the colors drawn. Triangles are straight on the plot between their corners, on a log
+        axis too. Each is filled flat and stroked with a 0.75 pt hairline in its own color, so
+        neighbours meet without a seam; the outer edge of the mesh, and the edge of a blank
+        triangle, grow by 0.375 pt. The triangles of one color are drawn as one shape, and the
+        same triangles in any order draw the same output. The mesh is always drawn flat, as
+        vector shapes. Automatic limits are the extent of the points, without padding.
+
+        Args:
+            x: The x coordinate of each point: finite, positive on a log axis.
+            y: The y coordinate of each point, one per x coordinate.
+            values: One value per point or per triangle, as ``on`` says: finite, at most 1e300
+                in magnitude, positive on a log ``scale``, or NaN for a blank triangle.
+            triangles: ``AUTO`` for the Delaunay triangulation of the points, or an integer
+                array shaped ``(n, 3)`` of point indices, as for ``triplot()``.
+            on: ``TriValues.POINTS`` or ``TriValues.TRIANGLES``.
+            cmap: The colormap. ``AUTO`` uses the theme's diverging colormap when ``center``
+                is given and its sequential colormap otherwise.
+            scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
+            center: The value at the middle of a diverging colormap, as for ``ColorBy``;
+                ``AUTO`` for a sequential mapping.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type, such as a float array for
+                ``triangles``, or ``scale`` is not linear or log.
+            DataError: If the points or ``triangles`` are invalid, as ``triplot()`` says, or
+                ``values`` does not hold one value per point (``POINTS``) or per triangle
+                (``TRIANGLES``), or a value is infinite, beyond 1e300 in magnitude, or not
+                positive on a log scale.
+            StyleError: If ``center`` is not finite or comes with a log scale, or the color
+                range set by ``clim()`` does not suit ``scale`` or ``center``.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes), or
+                ``cmap``, ``scale`` or ``center`` differs from those of the other color-mapped
+                marks of these axes.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> rng = np.random.default_rng(2)
+            >>> x, y = rng.uniform(-2, 2, 200), rng.uniform(-2, 2, 200)
+            >>> ax = ub.Figure().add_axes().tripcolor(x, y, np.exp(-(x**2) - y**2)).colorbar()
+            >>> tri = ub.delaunay(x, y)
+            >>> strain = x[tri].std(axis=1)
+            >>> fem = ub.Figure().add_axes()
+            >>> fem = fem.tripcolor(x, y, strain, triangles=tri, on=ub.TriValues.TRIANGLES)
+        """
+        with api_call():
+            context = "Axes.tripcolor()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            check_floats_type(context, "values", values)
+            given = native_triangles(context, triangles)
+            belongs = instance(context, "on", on, TriValues, _ON_HINT)
+            native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            _numeric_cells(context, self, time=False)
+            xs, ys = floats(context, "x", x), floats(context, "y", y)
+            data = floats(context, "values", values)
+            flat = None if given is None else given.reshape(-1)
+            self._native.tripcolor(
+                self._target,
+                self._col,
+                xs,
+                ys,
+                flat,
+                data,
+                belongs.value,
+                native_cmap,
+                kind,
+                base,
+                middle,
             )
             return self
 

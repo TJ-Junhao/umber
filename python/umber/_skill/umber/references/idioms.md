@@ -118,6 +118,29 @@ svg = ax.figure.to_svg()
 - **Arrows.** Each line carries one head at its middle, pointing downstream; `arrows=False` leaves them out.
 - **quiver or streamplot.** Use `quiver()` when the magnitude at each sample matters, since arrow lengths are exact, and for scattered points; use `streamplot()` to show the paths of the flow, its eddies and where it parts.
 
+## Triangle meshes
+
+For values at scattered points, such as weather stations or the nodes of a finite-element mesh, join the points into triangles: `ax.tripcolor(x, y, values)` fills each triangle with one color, and `ax.triplot(x, y)` draws its edges. Both triangulate the points with `ub.delaunay(x, y)` unless `triangles=` gives the triangles. Do not grid scattered data first to draw it with `mesh()` or `contour()`. Both need linear or log axes; automatic limits are the extent of the points, without padding.
+
+```python
+rng = np.random.default_rng(0)
+radius, angle = np.sqrt(rng.uniform(0.16, 1, 400)), rng.uniform(0, 2 * np.pi, 400)
+x, y = radius * np.cos(angle), radius * np.sin(angle)
+tri = ub.delaunay(x, y)
+keep = np.hypot(x[tri].mean(axis=1), y[tri].mean(axis=1)) > 0.4
+ax = ub.Figure().add_axes().tripcolor(x, y, x**2 - y, triangles=tri[keep])
+ax.triplot(x, y, triangles=tri[keep]).colorbar("Pressure").equal_aspect()
+svg = ax.figure.to_svg()
+```
+
+- **A domain with a hole.** `ub.delaunay()` triangulates the convex hull of the points, so it bridges holes and concave edges. It returns an ordinary `int64` array shaped `(n, 3)`: filter its rows with NumPy, as above, and pass the rest as `triangles=`. There is no `Triangulation` object and no `mask=`.
+- **Given triangles.** `triangles=` takes an integer array shaped `(n, 3)` of indices into the points, in any order and with either winding. A float array raises `TypeError`; an index out of range, a repeated corner, a triangle without area, a triangle given twice or an edge of three triangles raise `ub.DataError` naming the rows.
+- **Finite-element results.** `on=ub.TriValues.TRIANGLES` takes one value per triangle, in the order of the rows of `triangles` (or of `ub.delaunay(x, y)`); the default `ub.TriValues.POINTS` takes one value per point, and a triangle takes the mean of its corners. The number of values is checked against `on`, never used to guess it. NaN leaves a triangle blank; with `POINTS` one NaN corner is enough.
+- **Colors.** `tripcolor()` shares the color scale of the axes with `mesh()` and `contour()`, so it takes `cmap=`, `scale=` and `center=` directly, and `ax.colorbar()` explains it. The triangles are flat, one color each.
+- **Edges.** `triplot()` draws each edge once at half the automatic line width and no points; add `ax.scatter(x, y)` for those. `label=` gives a line swatch.
+- **Units.** `delaunay()` works on the raw coordinates. For x and y in very different units, or points shown on a log axis, triangulate scaled coordinates, such as `ub.delaunay(np.log10(x), y)`, and pass the result as `triangles=`.
+- **mesh, contour or tripcolor.** Use `mesh()` for values on a rectangular grid of cells and `contour()` for a field sampled on a grid; use `tripcolor()` when the points are scattered or the mesh is made of triangles.
+
 ## Values next to points
 
 Label points with `annotate=True`; do not place value text by hand with `ax.text()` at data coordinates. Each label follows its point when the data change, takes the series color (darkened or lightened just enough to read at 4.5:1 against the background), and with the default `place=ub.Place.AUTO` sits on the first side of above, right, below and left that stays inside the plot and clear of markers, error bars, lines, bars, areas and other value labels. A fixed side (`ub.Place.ABOVE`, `BELOW`, `LEFT`, `RIGHT`) never moves, and automatic limits grow so that it fits. `format=` sets how values are written (`AUTO` follows the value axis's tick format) and `label_size=` their size; `size=` stays the marker size.
@@ -177,7 +200,7 @@ svg = ax.figure.to_svg()
 
 ## Colors, colormaps and color scales
 
-`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
+`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `tripcolor`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
 
 ```python
 values = np.arange(12.0).reshape(3, 4) - 5.0

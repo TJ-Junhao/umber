@@ -78,6 +78,9 @@
 //!   read-only [`QuiverMark`], [`BarbsMark`] and [`VectorField`] payloads of [`Mark`];
 //!   streamlines: [`StreamplotOptions`] with its [`StreamStarts`], and the read-only
 //!   [`StreamplotMark`] payload of [`Mark`] with its [`Streamline`]s;
+//! - triangle meshes: [`delaunay`], the [`Triangles`] that join the points, [`TriplotOptions`],
+//!   [`TripcolorOptions`] with its [`TriValues`], and the read-only [`TriplotMark`] and
+//!   [`TripcolorMark`] payloads of [`Mark`] with their [`TriMesh`];
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -173,6 +176,9 @@ pub mod ticks;
 mod time;
 #[cfg(test)]
 mod time_axes_tests;
+mod tri;
+#[cfg(test)]
+mod triangles_tests;
 #[cfg(test)]
 mod vector_field_tests;
 
@@ -216,6 +222,7 @@ pub use figure::{
 pub use figure::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use figure::{StemMark, StemOptions};
 pub use figure::{StreamStarts, Streamline, StreamplotMark, StreamplotOptions};
+pub use figure::{TriValues, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};
@@ -236,6 +243,7 @@ pub use theme::{Align, Dash, FillStyle, GridLines, LegendPosition, LegendStyle, 
 pub use tick_format::{Decimals, NumberStyle, TickFormat};
 pub use ticks::Tick;
 pub use time::{Civil, Instant, MISSING_TIME, time_from_micros, times_from_micros};
+pub use tri::{TriMesh, Triangles, delaunay};
 
 /// The version of this crate, as written in `Cargo.toml`.
 ///
