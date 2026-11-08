@@ -35,7 +35,8 @@ pub enum StreamStarts {
     #[default]
     Auto,
     /// One line through each point `(x[i], y[i])`, both ways, regardless of the other lines.
-    /// Every point lies on the grid, outside its holes, where the field is not zero.
+    /// Every point lies on the grid, outside its holes, where the field is not zero, and a line
+    /// can leave it.
     At {
         /// The x coordinate of each start.
         x: Vec<f64>,
@@ -97,10 +98,9 @@ impl Default for StreamplotOptions {
 /// most 1e-6 of the largest speed at a grid point, both in steps per unit of time, or where the
 /// line runs into a point where the flow stops, whether the field changes sign there or not;
 /// where an automatic line would come within half a step of another line; where a line would
-/// come within half a step of its own points more than two steps back along it, which ends a
-/// closed orbit after one turn; and where it has turned once round and come back within half a
-/// step of its start, which ends an orbit shorter than two steps. An automatic line shorter than
-/// two steps is dropped. [`StreamStarts::At`] draws one line through each start instead,
+/// come within half a step of its own points more than two steps back along it, both times the
+/// radius of its curve where that is below a step, which ends a closed orbit after one turn at
+/// any size. An automatic line shorter than two steps is dropped. [`StreamStarts::At`] draws one line through each start instead,
 /// regardless of the others. A line is traced by Heun's method in steps of at most a quarter of
 /// a step, each accepted when it ends within 0.01 of a step of the Euler step it starts with,
 /// turns the line by at most about 0.05 radians, and crosses no hole and no point where the
@@ -152,7 +152,8 @@ impl StreamplotMark {
     /// 5. a color mapping has one value per value of `u` (`Error::Data`), and no label
     ///    (`Error::Usage`);
     /// 6. given starts have as many y as x coordinates and at least one, and each lies on the
-    ///    grid, outside its holes, where the speed is not zero (`Error::Data`, naming the start).
+    ///    grid, outside its holes, where the speed is not zero, and a line can be traced from it
+    ///    (`Error::Data`, naming the start).
     pub(super) fn new(
         kinds: (ScaleKind, ScaleKind),
         (x, y): (&[f64], &[f64]),
@@ -348,6 +349,13 @@ fn start_error(field: &VectorField, i: usize, [x, y]: [f64; 2], blocked: Blocked
         Blocked::Still => (
             format!("the speed is zero at {at}; no line passes there."),
             "move the start to where the field flows, or leave it out.",
+        ),
+        Blocked::Stuck => (
+            format!(
+                "no line can be traced from {at}: every step from it is blocked at once, by the \
+                 edge, a hole or a point where the flow stops, or turns too fast to follow."
+            ),
+            "move the start away from the edge, holes and points where the flow stops.",
         ),
     };
     Error::data(STREAMPLOT_CONTEXT, message)

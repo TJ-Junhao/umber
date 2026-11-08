@@ -1049,7 +1049,7 @@ fn small_and_large_orbits_close_after_one_turn() {
     let (x, y) = ([-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]);
     let (u, v) = sampled(&x, &y, |x, y| (-y, x));
     let per = 2.0 / STEPS_PER_DENSITY;
-    for radius in [0.001, 0.3 * per, 5.0 * per] {
+    for radius in [0.000_03, 0.000_3, 0.001, 0.3 * per, 5.0 * per] {
         let line = through(LINEAR, (&x, &y), (&u, &v), PointColor::AUTO, [radius, 0.0]);
         let radii: Vec<f64> = line.points().iter().map(|&[x, y]| x.hypot(y)).collect();
         assert!(
@@ -1058,17 +1058,89 @@ fn small_and_large_orbits_close_after_one_turn() {
         );
         let turn = 2.0 * std::f64::consts::PI * radius / per;
         let length = line.length();
-        if turn < 2.0 {
-            // Shorter than the reach of its own points: closed when it has turned once round.
-            assert!(
-                (length / turn - 1.0).abs() < 0.05,
-                "{radius}: {length} {turn}"
-            );
-        } else {
-            assert!(
-                length > turn - 1.0 && length <= turn,
-                "{radius}: {length} {turn}"
-            );
-        }
+        // Once round, short of closing by its own spacing: half a step, or a share of the
+        // radius on an orbit smaller than a step.
+        let near = END_SPACING * (radius / per).min(1.0);
+        assert!(
+            length > turn - 3.0 * near && length <= turn,
+            "{radius}: {length} {turn}"
+        );
     }
+}
+
+#[test]
+fn a_spiral_draws_both_ways_from_its_start() {
+    let (x, y) = ([-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]);
+    let (u, v) = sampled(&x, &y, |x, y| (-y - 0.1 * x, x - 0.1 * y));
+    let line = through(LINEAR, (&x, &y), (&u, &v), PointColor::AUTO, [0.001, 0.0]);
+    let seed = line
+        .points()
+        .iter()
+        .position(|&p| p == [0.001, 0.0])
+        .expect("the start is on its line");
+    assert!(
+        seed > 10 && line.points().len() - seed > 10,
+        "{seed} of {}",
+        line.points().len()
+    );
+    // Upstream the spiral grows, downstream it shrinks towards the sink.
+    let radius = |p: [f64; 2]| p[0].hypot(p[1]);
+    assert!(radius(line.points()[0]) > 0.0015);
+    assert!(radius(line.points()[line.points().len() - 1]) < 0.001);
+}
+
+#[test]
+fn a_start_from_which_every_step_is_blocked_is_refused() {
+    // The one open cell is 1e-12 wide, far less than the shortest step.
+    let x = [0.0, 1.0, 1.0 + 1e-12, 2.0];
+    let u = [f64::NAN, 1.0, 1.0, f64::NAN, f64::NAN, 1.0, 1.0, f64::NAN];
+    let mut f = linear();
+    let error = refused(
+        &mut f,
+        (&x, &[0.0, 1.0]),
+        (&u, &[0.0; 8]),
+        starting(&[1.0 + 5e-13], &[0.5]),
+    );
+    assert!(matches!(error, Error::Data { .. }));
+    assert_eq!(error.parameter(), Some("starts"));
+    assert!(
+        error
+            .to_string()
+            .contains("no line can be traced from starts[0]"),
+        "{error}"
+    );
+}
+
+#[test]
+fn subnormal_and_huge_fields_flow() {
+    for speed in [f64::from_bits(1), 1e300] {
+        let line = through(
+            LINEAR,
+            (&[0.0, 1.0], &[0.0, 1.0]),
+            (&[speed; 4], &[0.0; 4]),
+            PointColor::AUTO,
+            [0.5, 0.5],
+        );
+        let (first, last) = (line.points()[0], line.points()[line.points().len() - 1]);
+        assert!(
+            first[0] < 1e-4 && last[0] > 1.0 - 1e-4,
+            "{speed}: {first:?} {last:?}"
+        );
+    }
+}
+
+#[test]
+fn cells_narrower_than_any_step_still_stop_the_line_at_a_zero() {
+    let x = [-1.0, -1e-320, 0.0, 1e-320, 1.0];
+    let u = [1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0];
+    let line = through(
+        LINEAR,
+        (&x, &[0.0, 1.0]),
+        (&u, &[0.0; 10]),
+        PointColor::AUTO,
+        [0.001, 0.5],
+    );
+    let points = line.points();
+    assert!(points.iter().all(|p| p[0] >= 0.0), "{:?}", points[0]);
+    assert!(points[0][0] < 1e-4);
 }

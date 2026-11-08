@@ -30,7 +30,13 @@
 //! may cross no hole and pass no point where the speed is zero ([`Field::clear`]). The segment
 //! is cut at the lines of the grid and each piece tested in its own cell, so a step never jumps
 //! a hole, however narrow, nor a line where the flow stops, whether the field changes sign there
-//! or not. A step that is not clear is halved like a rejected one.
+//! or not. A step that is not clear is halved like a rejected one, down to [`MIN_STEP`]; a step
+//! too inaccurate for the curve is halved further, down to [`MIN_CURVE_STEP`], so an orbit far
+//! smaller than a step is still traced to the same accuracy.
+//!
+//! The components are scaled once, each by the power of two that brings its largest magnitude
+//! to between 1/2 and 1, which is exact and is taken back in every speed, so that a field of
+//! subnormal numbers does not underflow when it is interpolated.
 //!
 //! Speeds are the components times the steps per data unit, either of which can lie far beyond
 //! the range of `f64`; they are kept as mantissas and powers of two ([`Wide`]), as the
@@ -54,11 +60,11 @@
 //!   back on itself, as at a point where the flow runs in from both sides, and is halved too;
 //! - an automatic line would come within [`END_SPACING`], half a step, of another line;
 //! - it would come within [`END_SPACING`] of a point of its own line more than [`SELF_GAP`],
-//!   two steps, away along the line: a closed orbit ends when it has gone once round, half a
-//!   step short of closing, and a spiral when its turns come that close;
-//! - it has turned once round and come back within [`END_SPACING`] of its seed: an orbit too
-//!   short for the rule above, less than two steps round, ends after one turn
-//!   ([`Turning`]). Its other way is not traced;
+//!   two steps, away along the line, both times the radius of its curve in steps where that is
+//!   below one step (the step's length over its change of direction): a closed orbit ends when
+//!   it has gone once round, half a step short of closing, or a quarter of its radius on an
+//!   orbit smaller than a step, and a spiral when its turns come that close, so a spiral into
+//!   a sink keeps both its ways;
 //! - it is [`max_length`] steps long either way, a bound that a line meeting the rules above
 //!   does not reach in practice.
 //!
@@ -99,8 +105,13 @@ pub(crate) const MIN_LENGTH: f64 = 2.0;
 pub(crate) const HEAD_LENGTH_MIN: f64 = 1.0;
 /// The longest integration step, in steps.
 pub(crate) const MAX_STEP: f64 = 0.25;
-/// The shortest integration step, in steps: [`MAX_STEP`] halved ten times.
+/// The shortest integration step, in steps, that a blocked step is halved to before the line
+/// ends: [`MAX_STEP`] halved ten times.
 pub(crate) const MIN_STEP: f64 = MAX_STEP / 1024.0;
+/// The shortest integration step, in steps, that a step too inaccurate for the curve is halved
+/// to: [`MAX_STEP`] halved forty times, so that an orbit of a hundred-millionth of a step is
+/// still traced to the accuracy of a large one.
+pub(crate) const MIN_CURVE_STEP: f64 = MAX_STEP / 1_099_511_627_776.0;
 /// The largest accepted distance, in steps, between the end of a Heun step and the end of the
 /// Euler step it starts with.
 pub(crate) const TOLERANCE: f64 = 0.01;
@@ -253,6 +264,10 @@ pub(crate) enum Blocked {
     Hole,
     /// The speed is zero there.
     Still,
+    /// Every step from the point is blocked at once, by the edge, a hole or a point where the
+    /// flow stops, or turns faster than the shortest step can follow: a line through it would be
+    /// the point alone.
+    Stuck,
 }
 
 /// Where an arrow head sits on a line: the fraction `fraction` of the way along the segment
@@ -328,6 +343,14 @@ impl Streamline {
 struct Field<'a> {
     /// The grid.
     grid: Grid<'a>,
+    /// `u` times the power of two that brings its largest finite magnitude to between 1/2 and
+    /// 1: exact, but without values so small that their interpolation underflows.
+    u: Vec<f64>,
+    /// `v` times the power of two that brings its largest finite magnitude to between 1/2 and 1.
+    v: Vec<f64>,
+    /// The inverses of the powers of two that `u` and `v` were scaled by, which
+    /// [`Field::velocity`] takes back.
+    unscale: [Wide; 2],
     /// Whether each cell, row by row, has four finite corners.
     open: Vec<bool>,
     /// The measures of the x and the y axis.
@@ -380,7 +403,29 @@ impl<'a> Field<'a> {
                 );
             }
         }
+        // Each component by a power of two alone, the power of `1 / largest`, which is exact.
+        let scaled = |values: &[f64]| -> (Vec<f64>, Wide) {
+            let largest = values
+                .iter()
+                .filter(|value| value.is_finite())
+                .fold(0.0_f64, |largest, value| largest.max(value.abs()));
+            let power = if largest > 0.0 {
+                Wide::of(1.0).over(Wide::of(largest)).parts().1
+            } else {
+                0
+            };
+            let scale = Wide::from_parts(1.0, power);
+            let values = values
+                .iter()
+                .map(|&value| Wide::of(value).times(scale).value())
+                .collect();
+            (values, Wide::from_parts(1.0, power.saturating_neg()))
+        };
+        let ((u, unscale_u), (v, unscale_v)) = (scaled(grid.u), scaled(grid.v));
         let mut field = Field {
+            u,
+            v,
+            unscale: [unscale_u, unscale_v],
             grid,
             open,
             measures,
@@ -395,7 +440,7 @@ impl<'a> Field<'a> {
                     continue;
                 }
                 let point = [grid.x[column], grid.y[row]];
-                let [p, q] = field.velocity(point, [grid.u[i], grid.v[i]]);
+                let [p, q] = field.velocity(point, [field.u[i], field.v[i]]);
                 let speed = length(p, q);
                 if !speed.at_most(fastest) {
                     fastest = speed;
@@ -406,11 +451,16 @@ impl<'a> Field<'a> {
         field
     }
 
-    /// The velocity in steps per unit of time of the vector `(u, v)` at `point`.
+    /// The velocity in steps per unit of time of the vector `(u, v)`, as scaled in
+    /// [`Field::u`] and [`Field::v`], at `point`.
     fn velocity(&self, [x, y]: [f64; 2], [u, v]: [f64; 2]) -> [Wide; 2] {
         [
-            Wide::of(u).times(self.measures[0].rate(x)),
-            Wide::of(v).times(self.measures[1].rate(y)),
+            Wide::of(u)
+                .times(self.unscale[0])
+                .times(self.measures[0].rate(x)),
+            Wide::of(v)
+                .times(self.unscale[1])
+                .times(self.measures[1].rate(y)),
         ]
     }
 
@@ -433,14 +483,6 @@ impl<'a> Field<'a> {
     /// The cell of `point` and the fractions of the way across it; `None` outside the grid. A
     /// point on a line between cells belongs to the cell after it, except on the last line.
     fn cell(&self, [x, y]: [f64; 2]) -> Option<Place> {
-        let along = |values: &[f64], v: f64| {
-            let last = values.len() - 1;
-            if !(values[0]..=values[last]).contains(&v) {
-                return None;
-            }
-            let i = (values.partition_point(|&c| c <= v).max(1) - 1).min(last - 1);
-            Some((i, (v - values[i]) / (values[i + 1] - values[i])))
-        };
         let (column, tx) = along(self.grid.x, x)?;
         let (row, ty) = along(self.grid.y, y)?;
         Some((column, row, tx, ty))
@@ -468,9 +510,20 @@ impl<'a> Field<'a> {
     /// The velocity at `point`, at `place` in an open cell.
     fn velocity_in(&self, point: [f64; 2], (column, row, tx, ty): Place) -> [Wide; 2] {
         let corners = self.corners(column, row);
-        let u = Field::bilinear(self.grid.u, corners, tx, ty);
-        let v = Field::bilinear(self.grid.v, corners, tx, ty);
+        let u = Field::bilinear(&self.u, corners, tx, ty);
+        let v = Field::bilinear(&self.v, corners, tx, ty);
         self.velocity(point, [u, v])
+    }
+
+    /// Whether a line moves at `point`, at `place` in an open cell: the fractions and the field
+    /// there are finite and the speed is not zero. Anything not finite counts as blocked.
+    fn moves(&self, point: [f64; 2], place @ (column, row, tx, ty): Place) -> bool {
+        let corners = self.corners(column, row);
+        let finite = point.iter().chain(&[tx, ty]).all(|v| v.is_finite())
+            && [&self.u, &self.v]
+                .iter()
+                .all(|values| Field::bilinear(values, corners, tx, ty).is_finite());
+        finite && !self.is_still(self.velocity_in(point, place))
     }
 
     /// The field at `point`, or why no line can pass there.
@@ -507,10 +560,24 @@ impl<'a> Field<'a> {
     }
 
     /// Whether a line can run straight from `from` to `to`: every cell the segment crosses is
-    /// open, and the speed is zero nowhere along it ([`Field::clear_piece`]). The segment is cut
-    /// where it crosses the lines of the grid, and each piece is tested in its own cell, so a
-    /// step never jumps a hole, however narrow, nor a point where the flow stops.
+    /// open, and the speed is zero nowhere the tests find it along it. The segment is cut where
+    /// it crosses the lines of the grid. At each crossing the cells on both sides of the line
+    /// must be open and the speed there not zero, taken on the line itself
+    /// ([`Field::clear_crossing`]), so no rounding of where the crossing lies lets a step past a
+    /// cell however narrow. Each piece between crossings is then tested in its own cell
+    /// ([`Field::clear_piece`]). A step never jumps a hole, nor a line where the flow stops.
     fn clear(&self, from: [f64; 2], to: [f64; 2]) -> bool {
+        // The grid is a rectangle: a segment between two points on it stays on it, and crosses
+        // only its inner lines.
+        if self.cell(from).is_none() || self.cell(to).is_none() {
+            return false;
+        }
+        let at = |t: f64| {
+            [
+                from[0] + (to[0] - from[0]) * t,
+                from[1] + (to[1] - from[1]) * t,
+            ]
+        };
         let mut cuts = vec![0.0, 1.0];
         for (axis, coordinates) in [self.grid.x, self.grid.y].into_iter().enumerate() {
             let (a, b) = (from[axis], to[axis]);
@@ -520,21 +587,53 @@ impl<'a> Field<'a> {
             let (low, high) = (a.min(b), a.max(b));
             let first = coordinates.partition_point(|&c| c <= low);
             let end = coordinates.partition_point(|&c| c < high).max(first);
-            cuts.extend(coordinates[first..end].iter().map(|&c| (c - a) / (b - a)));
+            for line in first..end {
+                let t = (coordinates[line] - a) / (b - a);
+                if !self.clear_crossing(at(t), axis, line) {
+                    return false;
+                }
+                cuts.push(t);
+            }
         }
         cuts.sort_by(f64::total_cmp);
         cuts.windows(2)
             .all(|pair| self.clear_piece(from, to, [pair[0], pair[1]]))
     }
 
+    /// Whether a line can cross the line `line` of the grid along `axis`, 0 for x and 1 for y,
+    /// at `point`: both cells beside it are open and the speed is not zero in either, at the
+    /// point moved exactly onto the line.
+    fn clear_crossing(&self, mut point: [f64; 2], axis: usize, line: usize) -> bool {
+        let coordinates = [self.grid.x, self.grid.y];
+        point[axis] = coordinates[axis][line];
+        let other = 1 - axis;
+        let Some((across, fraction)) = along(coordinates[other], point[other]) else {
+            return false;
+        };
+        [(line - 1, 1.0), (line, 0.0)]
+            .into_iter()
+            .all(|(beside, at)| {
+                let place = if axis == 0 {
+                    (beside, across, at, fraction)
+                } else {
+                    (across, beside, fraction, at)
+                };
+                self.is_open(place.0, place.1) && self.moves(point, place)
+            })
+    }
+
     /// Whether the piece `[start, end]` of the segment from `from` to `to`, which crosses no line
-    /// of the grid, lies in an open cell where the speed is zero nowhere along it.
+    /// of the grid, lies in an open cell where the tests find no zero of the speed.
     ///
-    /// Along a straight piece each component of the bilinear field is a quadratic in the
-    /// parameter, so the speed can only be zero where a component is: the piece is tested at its
-    /// ends, and at the roots and the turning point of each component's quadratic that lie
-    /// within it. A zero between grid points, where the field changes sign, and one at a grid
-    /// point or on a line of the grid, where it may not, are both found.
+    /// The piece is parametrized by its own fractions across the cell, each from 0 to 1, so
+    /// nothing grows with how narrow the cell is. Along it each component of the bilinear field
+    /// is a quadratic in the parameter, and the speed is tested at the ends of the piece and at
+    /// the roots and the turning point of each component's quadratic that lie within it: every
+    /// point where a component vanishes or turns. That finds a zero of the speed, where both
+    /// components vanish, between grid points where the field changes sign, and at a grid point
+    /// or on a line of the grid, where it may not. A point where the speed comes close to zero
+    /// between those points, without either component vanishing or turning there, is not looked
+    /// for. Anything that is not finite blocks the piece.
     fn clear_piece(&self, from: [f64; 2], to: [f64; 2], [start, end]: [f64; 2]) -> bool {
         let at = |t: f64| {
             [
@@ -548,47 +647,75 @@ impl<'a> Field<'a> {
         if !self.is_open(column, row) {
             return false;
         }
-        // The fractions across the cell along the piece: `tx = alpha + beta t`, and the same for
-        // `ty` with `gamma` and `delta`.
-        let local = |axis: usize, coordinates: &[f64], i: usize| {
-            let width = coordinates[i + 1] - coordinates[i];
-            (
-                (from[axis] - coordinates[i]) / width,
-                (to[axis] - from[axis]) / width,
-            )
+        let fraction = |coordinates: &[f64], i: usize, v: f64| {
+            ((v - coordinates[i]) / (coordinates[i + 1] - coordinates[i])).clamp(0.0, 1.0)
         };
-        let (alpha, beta) = local(0, self.grid.x, column);
-        let (gamma, delta) = local(1, self.grid.y, row);
+        let (first, last) = (at(start), at(end));
+        let [tx, ty] = [
+            [
+                fraction(self.grid.x, column, first[0]),
+                fraction(self.grid.x, column, last[0]),
+            ],
+            [
+                fraction(self.grid.y, row, first[1]),
+                fraction(self.grid.y, row, last[1]),
+            ],
+        ];
+        if !tx.iter().chain(&ty).all(|v| v.is_finite()) {
+            return false;
+        }
+        let ([x0, x1], [y0, y1]) = (tx, ty);
+        let (dx, dy) = (x1 - x0, y1 - y0);
         let corners = self.corners(column, row);
-        let mut candidates = vec![start, end];
-        for values in [self.grid.u, self.grid.v] {
+        let mut candidates = vec![0.0, 1.0];
+        for values in [&self.u, &self.v] {
             let [a, b, c, d] = corners.map(|i| values[i]);
             let largest = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
             if largest == 0.0 {
                 continue;
             }
             let [a, b, c, d] = [a, b, c, d].map(|value| value / largest);
-            // f = a + (b - a) tx + (c - a) ty + (a - b - c + d) tx ty.
+            // f = a + (b - a) tx + (c - a) ty + (a - b - c + d) tx ty, with tx = x0 + dx s and
+            // ty = y0 + dy s.
             let (linear_x, linear_y, cross) = (b - a, c - a, a - b - c + d);
             let quadratic = [
-                a + linear_x * alpha + linear_y * gamma + cross * alpha * gamma,
-                linear_x * beta + linear_y * delta + cross * (alpha * delta + beta * gamma),
-                cross * beta * delta,
+                a + linear_x * x0 + linear_y * y0 + cross * x0 * y0,
+                linear_x * dx + linear_y * dy + cross * (x0 * dy + dx * y0),
+                cross * dx * dy,
             ];
+            if !quadratic.iter().all(|v| v.is_finite()) {
+                return false;
+            }
             candidates.extend(
                 critical_points(quadratic)
                     .into_iter()
                     .flatten()
-                    .filter(|t| (start..=end).contains(t)),
+                    .filter(|s| (0.0..=1.0).contains(s)),
             );
         }
-        candidates.into_iter().all(|t| {
-            let point = at(t);
-            let tx = (alpha + beta * t).clamp(0.0, 1.0);
-            let ty = (gamma + delta * t).clamp(0.0, 1.0);
-            !self.is_still(self.velocity_in(point, (column, row, tx, ty)))
+        candidates.into_iter().all(|s| {
+            let point = at(start + (end - start) * s);
+            let place = (
+                column,
+                row,
+                (x0 + dx * s).clamp(0.0, 1.0),
+                (y0 + dy * s).clamp(0.0, 1.0),
+            );
+            self.moves(point, place)
         })
     }
+}
+
+/// The cell of `v` among the strictly increasing `values`, at least two, and the fraction of the
+/// way across it; `None` outside them. A value on a line between cells belongs to the cell after
+/// it, except on the last line.
+fn along(values: &[f64], v: f64) -> Option<(usize, f64)> {
+    let last = values.len() - 1;
+    if !(values[0]..=values[last]).contains(&v) {
+        return None;
+    }
+    let i = (values.partition_point(|&c| c <= v).max(1) - 1).min(last - 1);
+    Some((i, (v - values[i]) / (values[i + 1] - values[i])))
 }
 
 /// The roots and the turning point of `c0 + c1 t + c2 t²`, given as `[c0, c1, c2]`, where it
@@ -713,70 +840,6 @@ struct Tracer<'a> {
     max_length: f64,
 }
 
-/// One way of a line from its seed: its points, and whether it ended by closing an orbit, in
-/// which case the other way is not traced.
-struct Half {
-    /// The accepted points, from the seed outward.
-    traced: Vec<Traced>,
-    /// Whether the line turned once round and came back to its seed.
-    closed: bool,
-}
-
-/// How the direction of a half line has turned since its seed, to find a full turn without an
-/// angle: the line has turned once round when its direction, having pointed away from its first
-/// direction, comes back across it from the side opposite the one it first turned to.
-#[derive(Debug, Clone, Copy)]
-struct Turning {
-    /// The unit vector of the line at its seed, in steps.
-    first: [f64; 2],
-    /// Whether it first turned to the left of `first`; `None` while it has not turned.
-    left: Option<bool>,
-    /// Whether it has pointed more than a right angle away from `first` since the last turn.
-    away: bool,
-    /// The cross product of `first` and the last direction.
-    cross: f64,
-}
-
-impl Turning {
-    /// The turning of a line whose first direction is `first`.
-    fn new(first: [f64; 2]) -> Turning {
-        Turning {
-            first,
-            left: None,
-            away: false,
-            cross: 0.0,
-        }
-    }
-
-    /// Takes the next direction `unit`; whether the line has just completed a turn.
-    fn next(&mut self, unit: [f64; 2]) -> bool {
-        let [a, b] = self.first;
-        let cross = a * unit[1] - b * unit[0];
-        let dot = a * unit[0] + b * unit[1];
-        let before = self.cross;
-        self.cross = cross;
-        if self.left.is_none() && cross != 0.0 {
-            self.left = Some(cross > 0.0);
-        }
-        if dot < 0.0 {
-            self.away = true;
-        }
-        let Some(left) = self.left else {
-            return false;
-        };
-        let crossed = if left {
-            before < 0.0 && cross >= 0.0
-        } else {
-            before > 0.0 && cross <= 0.0
-        };
-        let turned = self.away && dot > 0.0 && crossed;
-        if turned {
-            self.away = false;
-        }
-        turned
-    }
-}
-
 impl Tracer<'_> {
     /// Traces `line` from `seed` one way, `sign` 1 downstream and -1 upstream, adding its points
     /// to the occupancy (see the module documentation for where it ends).
@@ -787,15 +850,13 @@ impl Tracer<'_> {
         line: u32,
         sign: f64,
         company: Company,
-    ) -> Half {
+    ) -> Vec<Traced> {
         let field = &self.field;
         let mut traced = Vec::new();
         let (mut point, mut probe) = (seed, start);
-        let origin = field.position(seed);
-        let mut at = origin;
+        let mut at = field.position(seed);
         let mut length = 0.0_f64;
         let mut step = MAX_STEP;
-        let mut turning = Turning::new([sign * start.unit[0], sign * start.unit[1]]);
         let along =
             |p: [f64; 2], slope: [f64; 2], by: f64| [p[0] + by * slope[0], p[1] + by * slope[1]];
         loop {
@@ -826,9 +887,17 @@ impl Tracer<'_> {
             let moved = distance(at, next_at);
             // A step that moves less than half its length turns back on itself: the line has run
             // into a point where the flow stops, and the step shrinks until the line ends.
-            if error > TOLERANCE || turn > MAX_TURN || moved < step / 2.0 {
+            if moved < step / 2.0 {
                 step /= 2.0;
                 if step < MIN_STEP {
+                    break;
+                }
+                continue;
+            }
+            // A step too inaccurate for the curve shrinks further, with the radius of the curve.
+            if error > TOLERANCE || turn > MAX_TURN {
+                step /= 2.0;
+                if step < MIN_CURVE_STEP {
                     break;
                 }
                 continue;
@@ -837,9 +906,17 @@ impl Tracer<'_> {
             if next_length.abs() > self.max_length {
                 break;
             }
+            // Its own points keep a line apart by a share of the radius of its curve, up to a
+            // step: an orbit or a spiral smaller than a step closes or ends at its own scale.
+            let scale = if turn > 0.0 {
+                (moved / turn).min(1.0)
+            } else {
+                1.0
+            };
+            let (near, gap) = (END_SPACING * scale, SELF_GAP * scale);
             let crowded = self.occupancy.any_near(next_at, END_SPACING, |entry| {
                 if entry.line == line {
-                    (entry.length - next_length).abs() > SELF_GAP
+                    (entry.length - next_length).abs() > gap && distance(entry.at, next_at) < near
                 } else {
                     company == Company::Others
                 }
@@ -849,35 +926,19 @@ impl Tracer<'_> {
             }
             self.occupancy.insert(next_at, line, next_length);
             traced.push((next, next_length, next_probe.value));
-            let unit = [sign * next_probe.unit[0], sign * next_probe.unit[1]];
-            if turning.next(unit) && distance(next_at, origin) < END_SPACING {
-                return Half {
-                    traced,
-                    closed: true,
-                };
-            }
             (point, probe, at, length) = (next, next_probe, next_at, next_length);
             if error < TOLERANCE / 4.0 && turn < MAX_TURN / 2.0 && step < MAX_STEP {
                 step *= 2.0;
             }
         }
-        Half {
-            traced,
-            closed: false,
-        }
+        traced
     }
 
-    /// The line `line` through `seed`, where the field is `start`, traced both ways; only
-    /// upstream when that closes an orbit.
+    /// The line `line` through `seed`, where the field is `start`, traced both ways.
     fn line(&mut self, seed: [f64; 2], start: Probe, line: u32, company: Company) -> Streamline {
         self.occupancy.insert(self.field.position(seed), line, 0.0);
         let upstream = self.half(seed, start, line, -1.0, company);
-        let downstream = if upstream.closed {
-            Vec::new()
-        } else {
-            self.half(seed, start, line, 1.0, company).traced
-        };
-        let upstream = upstream.traced;
+        let downstream = self.half(seed, start, line, 1.0, company);
         let first = upstream.last().map_or(0.0, |&(_, length, _)| length);
         let traced: Vec<Traced> = upstream
             .into_iter()
@@ -994,14 +1055,19 @@ pub(crate) fn through(
         .enumerate()
         .map(|(i, &start)| tracer.field.probe(start).map_err(|blocked| (i, blocked)))
         .collect::<Result<Vec<Probe>, _>>()?;
-    Ok(starts
+    starts
         .iter()
         .zip(probes)
-        .map(|(&start, probe)| {
+        .enumerate()
+        .map(|(i, (&start, probe))| {
             tracer.occupancy.truncate(0);
-            tracer.line(start, probe, 0, Company::Alone)
+            let line = tracer.line(start, probe, 0, Company::Alone);
+            if line.points().len() < 2 {
+                return Err((i, Blocked::Stuck));
+            }
+            Ok(line)
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
@@ -1037,30 +1103,6 @@ mod tests {
         assert_eq!(critical_points([1.0, 0.0, 1.0]), [None, None, Some(0.0)]);
         assert_eq!(critical_points([2.0, -4.0, 0.0]), [Some(0.5), None, None]);
         assert_eq!(critical_points([2.0, 0.0, 0.0]), [None, None, None]);
-    }
-
-    #[test]
-    fn a_turn_is_counted_once_round_and_not_on_the_way_back() {
-        let directions = |angles: &[f64]| -> Vec<[f64; 2]> {
-            angles.iter().map(|&a: &f64| [a.cos(), a.sin()]).collect()
-        };
-        let count = |angles: &[f64]| {
-            let mut turning = Turning::new([1.0, 0.0]);
-            directions(angles)
-                .into_iter()
-                .filter(|&unit| turning.next(unit))
-                .count()
-        };
-        let round: Vec<f64> = (1..=70).map(|i| f64::from(i) * 0.1).collect();
-        assert_eq!(count(&round), 1);
-        let clockwise: Vec<f64> = round.iter().map(|a| -a).collect();
-        assert_eq!(count(&clockwise), 1);
-        // Out to 2 radians and back the same way is no turn.
-        let back: Vec<f64> = (1..=20)
-            .chain((0..20).rev())
-            .map(|i| f64::from(i) * 0.1)
-            .collect();
-        assert_eq!(count(&back), 0);
     }
 
     #[test]

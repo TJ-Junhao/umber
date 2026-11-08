@@ -4291,11 +4291,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         grid or of a hole; where the speed is zero (at most 1e-6 of the largest speed at a grid
         point, measured in steps), whether the field changes sign there or not; where an
         automatic line would come within half a step of another; and where it would come within
-        half a step of itself, more than two steps back along it, or back to where it started
-        after one turn, so a closed orbit ends after one turn. No step jumps a hole, however
-        narrow. Automatic lines shorter than two steps are dropped. Nothing depends on the figure
-        size, and nothing is random: the same input draws the same
-        lines, point for point, on every platform.
+        half a step of itself, more than two steps back along it (both times the radius of its
+        curve, where that is below a step), so a closed orbit of any size ends after one turn.
+        No step jumps a hole, however narrow. Automatic lines shorter than two steps are
+        dropped. Nothing depends on the figure size, and nothing is random: the same input draws
+        the same lines, point for point, on every platform.
 
         ``starts`` draws exactly one line through each given point instead, both ways,
         regardless of the other lines; it ends by the same rules, except that it may come close to
@@ -4337,8 +4337,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 positive on a log axis, there are fewer than two along an axis, a component is
                 infinite or beyond 1e300 in magnitude, a ``ColorBy`` does not have the shape of
                 ``u``, or ``starts`` has lengths that differ, no points, or a point that is not
-                finite, lies outside the grid or in a hole, or where the speed is zero (the
-                message names the point).
+                finite, lies outside the grid or in a hole, where the speed is zero, or where
+                every step is blocked at once (the message names the point).
             StyleError: If ``density`` is not from 0.1 to 10, ``label`` is too long or holds a
                 line break or another control character, or a ``ColorBy`` does not suit the color
                 range set by ``clim()``.
