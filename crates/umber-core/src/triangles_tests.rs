@@ -264,6 +264,22 @@ fn delaunay_tells_a_range_too_wide_for_double_precision_from_one_line() {
 }
 
 #[test]
+fn a_scaling_that_keeps_every_bit_is_not_refused() {
+    // The largest magnitude is 1, so the coordinates are halved: 2^-1022 becomes the subnormal
+    // 2^-1023, exactly.
+    let tiny = f64::MIN_POSITIVE;
+    assert_eq!(
+        delaunay(&[tiny, 1.0, 0.0], &[0.0, 0.0, 1.0]).unwrap().len(),
+        1
+    );
+    let square = delaunay(&[tiny, 1.0, 1.0, tiny], &[0.0, 0.0, 1.0, 1.0]).unwrap();
+    assert_eq!(square.len(), 2);
+    // A coordinate whose low bits the halving would drop is refused.
+    let (message, _) = delaunay_error(&[tiny * 1.5 + 5e-324, 1.0, 0.0], &[0.0, 0.0, 1.0]);
+    assert!(message.contains("so wide a range of scales"), "{message}");
+}
+
+#[test]
 fn the_zero_area_test_is_exact_whatever_the_order_of_the_corners() {
     // Points 0, 1 and 2 lie exactly on one line, at scales where products underflow and a
     // scaled copy loses bits.

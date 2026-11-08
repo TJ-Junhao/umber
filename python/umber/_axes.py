@@ -4499,8 +4499,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         neighbours meet without a seam; the outer edge of the mesh, and the edge of a blank
         triangle, grow by 0.375 pt. Triangles are drawn by value, lowest first, so where
         triangles overlap (given triangles may, and a mesh may on a log axis) the higher value
-        is on top, whatever else the mesh holds. The triangles of one color are drawn as one
-        shape, and the same triangles in any order draw the same output. The mesh is always
+        is on top, whatever else the mesh holds. Triangles of one color that follow one another
+        in that order share one fill and one stroke, so a colormap that takes the same color at
+        two places apart along it draws that color as several; the same triangles in any order
+        draw the same output. The mesh is always
         drawn flat, as vector shapes. Automatic limits are the extent of the points, without
         padding.
 

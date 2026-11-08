@@ -145,6 +145,12 @@ def test_a_range_too_wide_for_double_precision_is_not_one_line() -> None:
         ub.delaunay([0.0, 2.0**900, 2.0**901], [0.0, 2.0**-900, 2.0**-899])
 
 
+def test_a_scaling_that_keeps_every_bit_is_not_refused() -> None:
+    tiny = 2.0**-1022
+    assert ub.delaunay([tiny, 1.0, 0.0], [0.0, 0.0, 1.0]).shape == (1, 3)
+    assert ub.delaunay([tiny, 1.0, 1.0, tiny], [0.0, 0.0, 1.0, 1.0]).shape == (2, 3)
+
+
 def test_no_area_is_decided_exactly_in_every_corner_order() -> None:
     big, small = 2.0**900, 2.0**-177
     x, y = [0.0, 3 * big / 8, big, big], [0.0, 9 * small, 24 * small, 1.0]

@@ -54,8 +54,14 @@ def delaunay(x: Values[float], y: Values[float]) -> IndexArray:
         DataError: If ``x`` and ``y`` differ in length, there are fewer than three points, a
             coordinate is NaN or infinite (there are no missing points: an index counts every
             point), a point repeats an earlier one (the message names both), all points lie on
-            one line, or two points lie too close to tell apart, within about 1e-15 of the
-            largest coordinate along both axes (the message names both).
+            one line (decided exactly), or two points lie too close to tell apart, within about
+            1e-15 of the largest coordinate along both axes (the message names both). It is
+            also raised, with a different message, for points that are not on one line but
+            whose coordinates spread over so wide a range of scales, such as x up to 2 and y up
+            to 1e-200, that they cannot be triangulated in double precision: the message names
+            both spans and the axis of the smaller one, and the hint suggests rescaling, such
+            as ``delaunay(x / np.ptp(x), y / np.ptp(y))``, and passing the result as
+            ``triangles=``.
 
     Example:
         >>> import numpy as np

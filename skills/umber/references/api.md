@@ -2372,8 +2372,10 @@ axis too. Each is filled flat and stroked with a 0.75 pt hairline in its own col
 neighbours meet without a seam; the outer edge of the mesh, and the edge of a blank
 triangle, grow by 0.375 pt. Triangles are drawn by value, lowest first, so where
 triangles overlap (given triangles may, and a mesh may on a log axis) the higher value
-is on top, whatever else the mesh holds. The triangles of one color are drawn as one
-shape, and the same triangles in any order draw the same output. The mesh is always
+is on top, whatever else the mesh holds. Triangles of one color that follow one another
+in that order share one fill and one stroke, so a colormap that takes the same color at
+two places apart along it draws that color as several; the same triangles in any order
+draw the same output. The mesh is always
 drawn flat, as vector shapes. Automatic limits are the extent of the points, without
 padding.
 
@@ -7277,8 +7279,14 @@ Raises:
     DataError: If ``x`` and ``y`` differ in length, there are fewer than three points, a
         coordinate is NaN or infinite (there are no missing points: an index counts every
         point), a point repeats an earlier one (the message names both), all points lie on
-        one line, or two points lie too close to tell apart, within about 1e-15 of the
-        largest coordinate along both axes (the message names both).
+        one line (decided exactly), or two points lie too close to tell apart, within about
+        1e-15 of the largest coordinate along both axes (the message names both). It is
+        also raised, with a different message, for points that are not on one line but
+        whose coordinates spread over so wide a range of scales, such as x up to 2 and y up
+        to 1e-200, that they cannot be triangulated in double precision: the message names
+        both spans and the axis of the smaller one, and the hint suggests rescaling, such
+        as ``delaunay(x / np.ptp(x), y / np.ptp(y))``, and passing the result as
+        ``triangles=``.
 
 Example:
 

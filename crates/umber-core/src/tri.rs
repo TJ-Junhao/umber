@@ -8,8 +8,9 @@
 //! fixed absolute tolerance, so the coordinates are multiplied by one power of two that brings
 //! the largest magnitude to between 0.5 and 1: that changes no comparison between coordinates,
 //! and every product only by an exact power of two, so the triangulation is that of the raw
-//! coordinates, at any scale, as long as no coordinate becomes subnormal, which would lose
-//! bits; such coordinates span too wide a range of scales and are refused. The result is then
+//! coordinates, at any scale, as long as the scaling rounds no coordinate, which only a
+//! coordinate that becomes subnormal and loses bits can make; such coordinates span too wide a
+//! range of scales and are refused. The result is then
 //! checked: every point used, every triangle turning the same way with an area, decided
 //! exactly, and as many triangles as a triangulation of the points has (`2n - 2 - h` for `n`
 //! points, `h` of them on the hull). Points so close that the library leaves one out (within
@@ -32,10 +33,15 @@
 //! exactly on the raw coordinates, so the answer never depends on the order of the corners.
 //! Shewchuk's `orient2d` is exact unless an intermediate value overflows or underflows. Where
 //! every coordinate of the three points is 0 or an integer multiple of 2^-400 below 2^400 in
-//! magnitude ([`Exact`]), every value it computes, the differences of coordinates, their
-//! products and the sums and errors of those, is a multiple of 2^-800 below 2^810: none
-//! underflows or overflows, so its sign is exact. Any other triple is decided in exact binary
-//! fractions ([`Dyadic`]).
+//! magnitude ([`Exact`]), its exact arithmetic stays on a lattice: the differences of
+//! coordinates and their rounding errors are multiples of 2^-400 below 2^401, and their
+//! products, the sums of those and the errors of both are multiples of 2^-800 below 2^810, so
+//! none of these underflows (a nonzero one is at least 2^-800) or overflows. Its error bounds
+//! are not on the lattice: each is a constant from about 2^-106 to 2^-51 times a sum of
+//! magnitudes of values on it, so it is either 0 or at least about 2^-910, far above the
+//! smallest normal `f64` (2^-1022), and below 2^812; none underflows or overflows, so each bound
+//! holds as Shewchuk proves it. So the sign is exact. Any other triple is decided
+//! in exact binary fractions ([`Dyadic`]).
 
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -337,8 +343,9 @@ fn check_all_used(
 }
 
 /// The coordinates multiplied by one power of two that brings the largest magnitude to between
-/// 0.5 and 1 (see the module documentation), `[x, y]` per point. Refuses coordinates that would
-/// become subnormal and lose bits ([`too_wide`]); no coordinate can overflow.
+/// 0.5 and 1 (see the module documentation), `[x, y]` per point. Refuses coordinates that the
+/// scaling would round, those whose scaled value, scaled back, is not the coordinate again
+/// ([`too_wide`]); a subnormal result that keeps every bit is kept. No coordinate can overflow.
 fn scaled(context: &'static str, x: &[f64], y: &[f64]) -> Result<Vec<[f64; 2]>> {
     let largest = x.iter().chain(y).fold(0.0_f64, |m, v| m.max(v.abs()));
     let exponent = binary_exponent(largest);
@@ -348,7 +355,7 @@ fn scaled(context: &'static str, x: &[f64], y: &[f64]) -> Result<Vec<[f64; 2]>> 
         let lost = [x0, y0]
             .iter()
             .zip(&point)
-            .any(|(&raw, &v)| raw != 0.0 && !v.is_normal());
+            .any(|(&raw, &v)| times_power_of_two(v, exponent) != raw);
         if lost {
             return Err(too_wide(context, x, y));
         }
