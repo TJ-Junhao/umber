@@ -587,8 +587,8 @@ impl<'a> Field<'a> {
             let (low, high) = (a.min(b), a.max(b));
             let first = coordinates.partition_point(|&c| c <= low);
             let end = coordinates.partition_point(|&c| c < high).max(first);
-            for line in first..end {
-                let t = (coordinates[line] - a) / (b - a);
+            for (line, &coordinate) in coordinates.iter().enumerate().take(end).skip(first) {
+                let t = (coordinate - a) / (b - a);
                 if !self.clear_crossing(at(t), axis, line) {
                     return false;
                 }
