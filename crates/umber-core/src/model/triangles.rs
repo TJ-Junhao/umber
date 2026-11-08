@@ -300,8 +300,12 @@ impl TripcolorMark {
 /// triangle in at most one straight piece; a point is high when its value is at or above the
 /// level. On a log axis they are linear along each edge as drawn, in the axis's log space, so
 /// every crossing lies on the edge between its points on the plot. A NaN at a point removes
-/// every triangle around it, which leaves a hole; the levels and the automatic color range come
-/// from the finite values of every point, whether a triangle uses it or not.
+/// every triangle around it, which leaves a hole. The automatic levels and the automatic color
+/// range come from the values the contour draws, those at the corners of the triangles whose
+/// three values are finite, as [`TripcolorMark`] takes its range from the triangles it draws; a
+/// point no such triangle uses is still checked, and still counts in the automatic limits.
+/// When no triangle is left, the contour draws nothing and maps no color, as a contour on a
+/// grid of NaN does.
 ///
 /// Each band above a level is the region where the values are at or above it, made of the
 /// parts of triangles that have an area: a triangle whose corners all lie on a level (a flat
@@ -332,6 +336,7 @@ impl TripcolorMark {
 pub struct TricontourMark {
     mesh: TriMesh,
     z: Arc<[f64]>,
+    drawn: Arc<[f64]>,
     spec: ContourSpec,
 }
 
@@ -372,14 +377,19 @@ impl TricontourMark {
             .with_parameter("z")
             .with_hint("pass one value of z per point, in the order of x and y."));
         }
-        let z: Arc<[f64]> = Arc::from(z);
+        let drawn: Arc<[f64]> = drawn_values(&mesh, z).into();
         let spec = ContourSpec::new(
             (TRICONTOUR_CONTEXT, figure, index),
-            &z,
+            (z, &drawn),
             |i| format!("z[{i}]"),
             options,
         )?;
-        Ok(TricontourMark { mesh, z, spec })
+        Ok(TricontourMark {
+            mesh,
+            z: Arc::from(z),
+            drawn,
+            spec,
+        })
     }
 
     /// The points and triangles.
@@ -388,15 +398,23 @@ impl TricontourMark {
         &self.mesh
     }
 
-    /// The value at each point of [`mesh`](Self::mesh), in its order: NaN for a point whose
-    /// triangles are left out.
+    /// The value at each point of [`mesh`](Self::mesh), in its order, as given: NaN removes the
+    /// triangles around its point.
     #[must_use]
     pub fn z(&self) -> &[f64] {
         &self.z
     }
 
-    /// The levels, increasing: those given, or the round values chosen for the finite values
-    /// (none when every value is NaN or all are equal), as for a contour on a grid.
+    /// The values the contour draws, one per point: those of [`z`](Self::z) at the corners of
+    /// the triangles whose three values are finite, NaN at every other point. The automatic
+    /// levels and the color mapping come from them.
+    pub(crate) fn drawn(&self) -> &[f64] {
+        &self.drawn
+    }
+
+    /// The levels, increasing: those given, or the round values chosen for the values the
+    /// contour draws (none when it draws no triangle or all its values are equal), as for a
+    /// contour on a grid.
     #[must_use]
     pub fn levels(&self) -> Vec<f64> {
         self.spec.levels()
@@ -413,6 +431,20 @@ impl TricontourMark {
     pub(crate) fn spec(&self) -> &ContourSpec {
         &self.spec
     }
+}
+
+/// The values of `z` at the corners of the triangles of `mesh` whose three values are finite,
+/// one per point, and NaN at every other point: what a contour of `z` on `mesh` draws.
+fn drawn_values(mesh: &TriMesh, z: &[f64]) -> Vec<f64> {
+    let mut drawn = vec![f64::NAN; z.len()];
+    for corners in mesh.triangles() {
+        if corners.iter().all(|&i| z[i].is_finite()) {
+            for &i in corners {
+                drawn[i] = z[i];
+            }
+        }
+    }
+    drawn
 }
 
 /// Checks that there are `count` values, one per point or per triangle of `mesh` as `on` says

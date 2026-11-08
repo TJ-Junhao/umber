@@ -252,3 +252,37 @@ def test_limits_are_the_extent_of_the_points_and_hold_equal_aspect() -> None:
     labels = [text.text for text in tags(ax, "text")]
     assert "0" in labels and "3" in labels
     assert ax.figure.to_png(dpi=72).startswith(b"\x89PNG")
+
+
+def test_points_no_triangle_draws_do_not_set_the_levels_or_the_colors() -> None:
+    x, y, z = [0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 1.0, 2.0, 1e6]
+    # With levels from the point no triangle uses, no line would cross the triangle.
+    red = axes().tricontour(x, y, z, triangles=[[0, 1, 2]], color=ub.Color.RED)
+    strokes = [
+        path for path in tags(red, "path") if (path.get("stroke") or "").upper() == "#D64933"
+    ]
+    assert strokes
+    # The colorbar spans the drawn values, 0 to 2, not the point's 1e6.
+    mapped = axes().tricontour(x, y, z, triangles=[[0, 1, 2]]).colorbar()
+
+    def number(text: str) -> float | None:
+        try:
+            return float(text.replace("\u2212", "-").replace(",", ""))
+        except ValueError:
+            return None
+
+    values = [number(node.text or "") for node in tags(mapped, "text")]
+    assert all(value is None or value <= 2.0 for value in values), values
+    # Every value is still checked.
+    with pytest.raises(ub.DataError, match=r"z\[3\] is inf"):
+        axes().tricontour(x, y, [0.0, 1.0, 2.0, np.inf], triangles=[[0, 1, 2]])
+
+
+def test_no_triangle_left_draws_nothing_and_no_colorbar() -> None:
+    gone = [0.0, 1.0, 2.0, 1.0, np.nan]
+    for style in ub.Contour:
+        ax = axes().tricontour(FAN_X, FAN_Y, gone, style=style)
+        svg = ax.figure.to_svg()
+        assert "linearGradient" not in svg and "evenodd" not in svg, style
+    empty = axes().contour([0, 1], [0, 1], [[np.nan, np.nan], [np.nan, np.nan]])
+    assert "linearGradient" not in empty.figure.to_svg()

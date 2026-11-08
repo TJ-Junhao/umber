@@ -2367,10 +2367,15 @@ field is linear along each edge as drawn, so every line meets the edges where
 leaves a hole. The output depends on the triangles, not on their order or winding.
 
 ``levels``, ``style``, ``cmap``, ``scale``, ``center``, ``color``, ``annotate`` and
-``format`` mean what they mean for ``contour()``: the same automatic levels from the
-finite values of every point, the same colors, colorbar and level labels, and the same
-darker or lighter lines where a level's color comes close to the background. Contours
-that share a colorbar, on a grid or on a mesh, need the same levels.
+``format`` mean what they mean for ``contour()``: the same automatic levels, colors,
+colorbar and level labels, and the same darker or lighter lines where a level's color
+comes close to the background. Contours that share a colorbar, on a grid or on a mesh,
+need the same levels. The automatic levels and color range come from the values that
+are drawn, those at the corners of triangles whose three values are finite, as
+``tripcolor()`` takes its range from the triangles it draws. A point that no drawn
+triangle uses still has its value checked and still counts in the automatic limits.
+When no triangle is left, nothing is drawn and no colorbar appears, as for
+``contour()`` on a grid of NaN.
 
 A point is above a level when its value is at or above it, so integer data often puts
 a level exactly on points. Each band above a level is the area where the field is at or

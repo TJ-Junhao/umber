@@ -236,7 +236,7 @@ impl ContourMark {
         let z: Arc<[f64]> = Arc::from(z);
         let spec = ContourSpec::new(
             (CONTEXT, figure, index),
-            &z,
+            (&z, &z),
             |i| format!("z[{}][{}]", i / columns, i % columns),
             options,
         )?;
@@ -357,8 +357,11 @@ impl ContourMark {
 
 impl ContourSpec {
     /// Validates the values `z` and the `options` of a contour, the call `context` on the axes
-    /// at `index` of `figure`, and resolves its levels. `name` names the value at an index in
-    /// messages. The checks run in this order, and the first failure is the error:
+    /// at `index` of `figure`, and resolves its levels. `drawn` holds the values the contour
+    /// draws, one per value of `z` and NaN for any it leaves out: the automatic levels and the
+    /// color mapping come from them, and on a grid they are `z` itself. `name` names the value
+    /// at an index in messages. The checks run in this order, and the first failure is the
+    /// error:
     ///
     /// 1. every value is NaN or finite, at most 1e300 in magnitude, and positive and at least
     ///    1e-300 on a log color scale (`Error::Data` about `z`);
@@ -374,7 +377,7 @@ impl ContourSpec {
     ///    `Error::Style`).
     pub(super) fn new(
         (context, figure, index): (&'static str, &Figure, usize),
-        z: &Arc<[f64]>,
+        (z, drawn): (&[f64], &Arc<[f64]>),
         name: impl Fn(usize) -> String,
         options: ContourOptions,
     ) -> Result<ContourSpec> {
@@ -391,14 +394,14 @@ impl ContourSpec {
         check_center(context, options.center, options.scale)?;
         if is_mapped(options.color) {
             let colors = ColorBy {
-                values: Arc::clone(z),
+                values: Arc::clone(drawn),
                 cmap: options.cmap.clone(),
                 scale: options.scale,
                 center: options.center,
             };
             check_mapping(context, figure, index, &colors)?;
         }
-        let levels = Levels::of(&options, z);
+        let levels = Levels::of(&options, drawn);
         Ok(ContourSpec { levels, options })
     }
 

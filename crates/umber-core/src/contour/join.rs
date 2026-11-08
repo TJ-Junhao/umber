@@ -25,7 +25,7 @@ pub(super) struct Chain {
 /// order starts a line that runs until it returns to its start, which closes it, or until no
 /// unused piece leaves where it ends.
 pub(super) fn lines<V: Copy + Eq + Hash>(pieces: &[(V, V)]) -> Vec<Chain> {
-    let leaving = Leaving::of(pieces);
+    let mut leaving = Leaving::of(pieces);
     // How many more pieces leave each vertex than reach it.
     let mut excess: HashMap<V, isize> = HashMap::with_capacity(pieces.len());
     for &(from, to) in pieces {
@@ -53,7 +53,7 @@ pub(super) fn lines<V: Copy + Eq + Hash>(pieces: &[(V, V)]) -> Vec<Chain> {
 /// joined into closed rings: each starts at the first unused piece in order and runs until it
 /// returns to its start.
 pub(super) fn rings<V: Copy + Eq + Hash>(pieces: &[(V, V)]) -> Vec<Vec<usize>> {
-    let leaving = Leaving::of(pieces);
+    let mut leaving = Leaving::of(pieces);
     let mut used = vec![false; pieces.len()];
     let mut rings = Vec::new();
     for first in 0..pieces.len() {
@@ -77,11 +77,14 @@ enum Closing {
     AtStart,
 }
 
-/// The pieces leaving each vertex, in order, as a list: the first one, and after each the next
-/// one leaving the same vertex.
+/// The pieces leaving each vertex, in order, as a list: a cursor at the first one that may be
+/// unused, and after each piece the next one leaving the same vertex. Pieces are only ever
+/// marked used, never unused again, so a cursor moved past used pieces still finds the first
+/// unused one in order, and each piece is passed over once in all: joining takes time in
+/// proportion to the number of pieces, however many leave one vertex.
 struct Leaving<V> {
-    /// The first piece leaving each vertex.
-    first: HashMap<V, usize>,
+    /// For each vertex, the first piece leaving it that is not known to be used.
+    cursor: HashMap<V, usize>,
     /// After each piece, the next one leaving the same vertex.
     after: Vec<Option<usize>>,
 }
@@ -96,14 +99,25 @@ impl<V: Copy + Eq + Hash> Leaving<V> {
                 *slot = Some(next);
             }
         }
-        Leaving { first, after }
+        Leaving {
+            cursor: first,
+            after,
+        }
     }
 
-    /// The first unused piece leaving `vertex`.
-    fn next_unused(&self, vertex: V, used: &[bool]) -> Option<usize> {
-        let mut next = self.first.get(&vertex).copied();
+    /// The first unused piece leaving `vertex`, with the vertex's cursor moved to it, or
+    /// removed when none is left.
+    fn next_unused(&mut self, vertex: V, used: &[bool]) -> Option<usize> {
+        let slot = self.cursor.get_mut(&vertex)?;
+        let mut next = Some(*slot);
         while let Some(index) = next.filter(|&index| used.get(index) != Some(&false)) {
             next = self.after.get(index).copied().flatten();
+        }
+        match next {
+            Some(index) => *slot = index,
+            None => {
+                self.cursor.remove(&vertex);
+            }
         }
         next
     }
@@ -112,7 +126,7 @@ impl<V: Copy + Eq + Hash> Leaving<V> {
     /// first unused piece leaving each end, marking each piece used, until none is left or, when
     /// `closing` says so, it returns to its start.
     fn follow(
-        &self,
+        &mut self,
         pieces: &[(V, V)],
         first: usize,
         closing: Closing,
@@ -146,7 +160,76 @@ impl<V: Copy + Eq + Hash> Leaving<V> {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+
+    /// The chains of `pieces` as joining found them before vertices kept a cursor: each lookup
+    /// scans the pieces leaving the vertex from the first, so `lines` and `rings` must agree
+    /// with it on every input.
+    fn rescanned(pieces: &[(u8, u8)], open_first: bool) -> Vec<Chain> {
+        let next_unused = |vertex: u8, used: &[bool]| {
+            (0..pieces.len()).find(|&i| !used[i] && pieces[i].0 == vertex)
+        };
+        let follow = |first: usize, closing: bool, used: &mut Vec<bool>| {
+            let (start, mut current, mut chain) = (pieces[first].0, first, Vec::new());
+            loop {
+                used[current] = true;
+                chain.push(current);
+                let to = pieces[current].1;
+                if closing && to == start {
+                    return Chain {
+                        pieces: chain,
+                        closed: true,
+                    };
+                }
+                match next_unused(to, used) {
+                    Some(next) => current = next,
+                    None => {
+                        return Chain {
+                            pieces: chain,
+                            closed: false,
+                        };
+                    }
+                }
+            }
+        };
+        let mut used = vec![false; pieces.len()];
+        let mut chains = Vec::new();
+        if open_first {
+            let mut excess: HashMap<u8, isize> = HashMap::new();
+            for &(from, to) in pieces {
+                *excess.entry(from).or_insert(0) += 1;
+                *excess.entry(to).or_insert(0) -= 1;
+            }
+            for first in 0..pieces.len() {
+                let from = pieces[first].0;
+                if !used[first] && excess[&from] > 0 {
+                    *excess.entry(from).or_insert(0) -= 1;
+                    chains.push(follow(first, false, &mut used));
+                }
+            }
+        }
+        for first in 0..pieces.len() {
+            if !used[first] {
+                chains.push(follow(first, true, &mut used));
+            }
+        }
+        chains
+    }
+
+    proptest! {
+        #[test]
+        fn a_cursor_per_vertex_joins_as_a_scan_from_the_first_piece_does(
+            pieces in prop::collection::vec((0_u8..6, 0_u8..6), 0..80),
+        ) {
+            // Few vertices and many pieces: vertices left and reached many times over.
+            prop_assert_eq!(lines(&pieces), rescanned(&pieces, true));
+            let rings: Vec<Chain> = rescanned(&pieces, false);
+            let expected: Vec<Vec<usize>> = rings.into_iter().map(|chain| chain.pieces).collect();
+            prop_assert_eq!(super::rings(&pieces), expected);
+        }
+    }
 
     #[test]
     fn open_lines_come_first_and_loops_close() {

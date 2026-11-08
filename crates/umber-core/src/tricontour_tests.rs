@@ -270,26 +270,80 @@ fn planned(figure: &Figure) -> (Resolved, Layout) {
 }
 
 #[test]
-fn levels_come_from_every_finite_value_as_for_contour() {
-    let (mut x, mut y) = fan();
-    // A point no triangle uses still counts, as it does in the limits.
-    x.push(3.0);
-    y.push(-1.0);
-    let mut z = PEAK.to_vec();
-    z.push(10.0);
+fn levels_and_colors_come_from_the_values_drawn() {
+    // A point that no triangle uses, with a value far from the others: it counts in the
+    // limits, but not in the levels or the colors, which come from what is drawn.
+    let (x, y) = ([0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 2.0]);
+    let z = [0.0, 1.0, 2.0, 1e6];
     let mut f = figure_of(LINEAR);
     f.single_axes_mut()
-        .tricontour(&x, &y, Triangles::Given(&[[0, 1, 4]]), &z, lines())
+        .tricontour(&x, &y, Triangles::Given(&[[0, 1, 2]]), &z, lines())
         .unwrap()
-        .contour(&[0.0, 1.0], &[0.0, 1.0], &[0.0, 1.0, 4.0, 10.0], lines())
+        .contour(&[0.0, 1.0], &[0.0, 1.0], &[0.0, 1.0, 2.0, 1.0], lines())
         .unwrap();
     let [Mark::Tricontour(mesh), Mark::Contour(grid)] = f.single_axes().marks() else {
         unreachable!()
     };
     assert_eq!(mesh.levels(), grid.levels());
-    assert!(mesh.levels().iter().any(|&level| level > 4.0));
+    assert!(
+        mesh.levels()
+            .iter()
+            .all(|&level| 0.0 < level && level < 2.0)
+    );
     assert_eq!(mesh.z(), z.as_slice());
     assert_eq!(mesh.options(), &lines());
+    let (resolved, _) = planned(&f);
+    assert_eq!(resolved.x.continuous().unwrap().domain(), (0.0, 2.0));
+    assert_eq!(resolved.color.unwrap().norm.range(), (0.0, 2.0));
+    assert!(!marks(&scene(&f)).is_empty());
+    // A value at a point whose triangles a NaN removes does not count either; every value is
+    // still checked.
+    let (x, y) = fan();
+    let removed = [0.0, f64::NAN, 2.0, 1.0, 4.0];
+    let mut f = figure_of(LINEAR);
+    f.single_axes_mut()
+        .tricontour(
+            &x,
+            &y,
+            Triangles::Given(&[[0, 1, 4], [2, 3, 4]]),
+            &removed,
+            lines(),
+        )
+        .unwrap();
+    let (resolved, _) = planned(&f);
+    // Only [2, 3, 4] is drawn: values 2, 1 and 4.
+    assert_eq!(resolved.color.unwrap().norm.range(), (1.0, 4.0));
+    let mut f = figure_of(LINEAR);
+    let error = rejected(
+        &mut f,
+        (&x, &y, Triangles::Given(&[[0, 1, 4]])),
+        &[0.0, 1.0, f64::INFINITY, 1.0, 4.0],
+        lines(),
+    );
+    assert_eq!(error.parameter(), Some("z"));
+    // No triangle left: no level, no color, nothing drawn, as for a contour on a grid of NaN.
+    for options in [lines(), styled(ContourStyle::Both)] {
+        let mut f = figure_of(LINEAR);
+        f.single_axes_mut()
+            .tricontour(&x, &y, Triangles::Given(&[[0, 1, 4]]), &removed, options)
+            .unwrap();
+        let [Mark::Tricontour(mark)] = f.single_axes().marks() else {
+            unreachable!()
+        };
+        assert!(mark.levels().is_empty());
+        let (resolved, layout) = planned(&f);
+        assert!(resolved.color.is_none() && layout.colorbar.is_none());
+        let drawn = scene(&f)
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Group { clip: Some(_), items } if !items.is_empty()));
+        assert!(!drawn);
+    }
+    let (mut x, mut y) = fan();
+    x.push(3.0);
+    y.push(-1.0);
+    let mut z = PEAK.to_vec();
+    z.push(10.0);
     // Given levels are kept; a log scale takes log ticks.
     let mut f = figure_of(LINEAR);
     let given = ContourOptions {

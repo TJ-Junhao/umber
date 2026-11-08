@@ -528,3 +528,47 @@ fn order_and_winding_of_the_triangles_do_not_matter() {
     assert_eq!(forward, backward);
     assert!(forward.lines.iter().any(|lines| !lines.is_empty()));
 }
+
+/// `count` points on the unit circle with values alternating 0 and 2, and a centre point of
+/// value 1, joined into the fan of triangles around the centre.
+fn fan(count: usize) -> (TriMesh, Vec<f64>) {
+    let (mut x, mut y, mut z) = (Vec::new(), Vec::new(), Vec::new());
+    for k in 0..count {
+        let angle = std::f64::consts::TAU * k as f64 / count as f64;
+        x.push(angle.cos());
+        y.push(angle.sin());
+        z.push(if k % 2 == 0 { 0.0 } else { 2.0 });
+    }
+    let centre = count as i64;
+    x.push(0.0);
+    y.push(0.0);
+    z.push(1.0);
+    let rows: Vec<[i64; 3]> = (0..count)
+        .map(|k| [k as i64, ((k + 1) % count) as i64, centre])
+        .collect();
+    (mesh(&x, &y, &rows), z)
+}
+
+#[test]
+fn a_point_on_the_level_shared_by_many_triangles_joins_every_line_through_it() {
+    // The centre lies on the level: every rim point above it sends a line in and out of it.
+    let (wheel, z) = fan(64);
+    assert_eq!(check_shapes(&wheel, &z, &[1.0]), Ok(()));
+    let drawn = shapes(&wheel, &z, &[1.0], ContourStyle::Both);
+    let centre = MeshPoint::Corner(64);
+    let through: usize = drawn.lines[0]
+        .iter()
+        .map(|line| line.points.iter().filter(|&&p| p == centre).count())
+        .sum();
+    // One line in and out per high rim point, and a closed line repeats its start.
+    assert!(through >= 32, "{through}");
+    // Joining takes time in proportion to the pieces, however many meet at the centre; a scan
+    // from the first piece leaving the centre at every step would take time in proportion to
+    // their square.
+    let (wheel, z) = fan(60_000);
+    let start = std::time::Instant::now();
+    let drawn = shapes(&wheel, &z, &[1.0], ContourStyle::Both);
+    let elapsed = start.elapsed();
+    assert!(!drawn.lines[0].is_empty());
+    assert!(elapsed.as_secs_f64() < 3.0, "{elapsed:?}");
+}

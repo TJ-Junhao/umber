@@ -4715,7 +4715,7 @@ fn resolve_panel_marks_from<'a>(
                     mark,
                     mapped: mark.spec().color_scale().map(|spec| MappedColors {
                         spec,
-                        values: mark.z(),
+                        values: mark.drawn(),
                     }),
                     // A color-mapped contour takes no palette slot.
                     color: match mark.options().color {
