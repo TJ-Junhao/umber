@@ -1603,10 +1603,12 @@ theme's font scale. A row of a few samples can have a spacing longer than the pl
 high: the longest arrow is then at most three quarters of the plot's shorter side, and
 shorter still where automatic limits could not hold it.
 
-An arrow is a filled shape: a shaft 1 pt wide and a head 5 pt long and 4 pt wide,
-neither of which grows with it, so a page of arrows looks even. An arrow shorter than
-its head shrinks, head and shaft together, so that its length stays true. A zero vector
-draws a dot as wide as the shaft: the sample exists, and nothing moves there.
+An arrow is a filled shape: from 15 pt long it has a shaft 1 pt wide and a head 5 pt long
+and 4 pt wide, neither of which grows with it, so a page of long arrows looks even. A
+shorter arrow shrinks as a whole by its length over 15 pt, head and shaft together, so its
+head is at most a third of it and its length stays true; the shaft stops at 0.5 pt, with a
+head twice as wide. A zero vector draws a dot 1 pt wide: the sample exists, and nothing
+moves there.
 
 Automatic limits hold whole arrows, as they hold whole bubbles, in log space on a log
 axis and in seconds on a time axis. Explicit limits are kept, and the plot clips the
@@ -2080,10 +2082,10 @@ regardless of the other lines; it ends by the same rules, except that it may com
 other lines.
 
 Each line at least one step long carries one arrow head at its middle, measured along the
-line, pointing downstream: the head of a ``quiver()`` arrow, 5 pt long and 4 pt wide, in
-the line's color. Lines are as wide as contour lines. Automatic limits are the outer
-coordinates of the grid, without padding, as for ``contour()``; a head near the edge is
-cut by the plot as the lines are.
+line, pointing downstream: the full-size head of a ``quiver()`` arrow, 5 pt long and 4 pt
+wide, in the line's color. Lines are as wide as contour lines. Automatic limits are the
+outer coordinates of the grid, without padding, as for ``contour()``; a head near the edge
+is cut by the plot as the lines are.
 
 Args:
     x: The x coordinates of the grid's columns, strictly increasing, at least two.

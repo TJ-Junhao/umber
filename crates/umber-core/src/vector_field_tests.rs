@@ -1034,13 +1034,13 @@ fn a_pivot_is_the_part_of_the_arrow_on_the_sample() {
 }
 
 #[test]
-fn a_head_is_fixed_in_size_and_a_short_arrow_shrinks_whole() {
+fn a_head_keeps_its_size_from_fifteen_points_and_a_short_arrow_shrinks_whole() {
     let mut f = linear();
     quiver(
         &mut f,
         &[0.0, 1.0, 2.0],
         &[0.0, 1.0, 2.0],
-        &[40.0, 10.0, 2.0],
+        &[40.0, 15.0, 6.0],
         &[0.0, 0.0, 0.0],
         scaled(1.0),
     );
@@ -1051,10 +1051,12 @@ fn a_head_is_fixed_in_size_and_a_short_arrow_shrinks_whole() {
     let head = |corners: &[Point]| f64::from((corners[3].x - corners[2].x).abs());
     assert!((head(&drawn[0]) - 5.0).abs() < 1e-3);
     assert!((head(&drawn[1]) - 5.0).abs() < 1e-3);
-    // Two points long: a head scaled to it, and no shaft.
-    assert_eq!(drawn[2].len(), 3);
-    assert!((length(&drawn[2]) - 2.0).abs() < 1e-3);
-    assert!((f64::from((drawn[2][0].y - drawn[2][2].y).abs()) - 1.6).abs() < 1e-3);
+    // Six points long: head and shaft scaled by 6 / 15, and the length exact.
+    assert_eq!(drawn[2].len(), 7);
+    assert!((length(&drawn[2]) - 6.0).abs() < 1e-3);
+    assert!((width(&drawn[2]) - 1.6).abs() < 1e-3);
+    assert!((head(&drawn[2]) - 2.0).abs() < 1e-3);
+    assert!((f64::from((drawn[2][0].y - drawn[2][6].y).abs()) - 0.5).abs() < 1e-3);
 }
 
 /// Every point of `paths`, on the page.
@@ -1268,6 +1270,28 @@ fn arrows_in_legend(scene: &Scene) -> Vec<Vec<Point>> {
             _ => None,
         })
         .collect()
+}
+
+#[test]
+fn a_short_key_arrow_shrinks_like_any_arrow_of_its_length() {
+    let mut f = linear();
+    let x = [0.0, 1.0, 2.0];
+    quiver(
+        &mut f,
+        &x,
+        &x,
+        &[10.0, 5.0, 2.0],
+        &[0.0; 3],
+        keyed(6.0, "6 m/s", scaled(1.0)),
+    );
+    let scene = scene(&f);
+    let drawn = arrows_in_legend(&scene);
+    assert_eq!(drawn.len(), 1);
+    let key = &drawn[0];
+    assert_eq!(key.len(), 7);
+    assert!((length(key) - 6.0).abs() < 1e-3);
+    assert!((f64::from(key[3].x - key[2].x) - 2.0).abs() < 1e-3);
+    assert!((f64::from(key[2].y - key[4].y).abs() - 1.6).abs() < 1e-3);
 }
 
 #[test]

@@ -108,7 +108,7 @@ impl Default for StreamplotOptions {
 /// point for point, on every platform, at any range of the data.
 ///
 /// A line at least one step long carries one arrow head at its middle, measured in steps,
-/// pointing downstream: the head of a quiver arrow, 5 pt long and 4 pt wide, in the line's
+/// pointing downstream: the full-size head of a quiver arrow, 5 pt long and 4 pt wide, in the line's
 /// color. Lines are as wide as contour lines. Lines of one color are one path, with round ends;
 /// mapped colors are drawn as pieces half a step long, each starting a quarter of a step after
 /// the one before, with flat ends, so each piece ends inside the next and no seam shows, and

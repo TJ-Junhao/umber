@@ -579,8 +579,8 @@ pub struct QuiverOptions {
     pub key: Option<ArrowKey>,
 }
 
-/// Arrows on a field: filled, of a fixed head, and with lengths exactly proportional to the
-/// magnitudes `sqrt(u² + v²)`, so a short arrow is never lengthened.
+/// Arrows on a field: filled, with a head that shrinks along with a short arrow, and with lengths
+/// exactly proportional to the magnitudes `sqrt(u² + v²)`, so a short arrow is never lengthened.
 ///
 /// [`ArrowLength::PtPerUnit`] gives the scale directly. [`ArrowLength::Auto`] makes the longest
 /// arrow as long as the typical spacing in points on the final plot: on a grid, the smaller of

@@ -1,19 +1,28 @@
-//! The shape of an arrow: a filled shaft and head whose sizes do not follow its length.
+//! The shape of an arrow: a filled shaft and head that keep their size on a long arrow and
+//! shrink with a short one.
 //!
-//! A shaft 1 pt wide ends in a head 5 pt long and 4 pt wide, whatever the arrow's length, so a
-//! page of arrows looks even. The length is exact: an arrow shorter than its head has no shaft
-//! and shrinks as a whole, its head scaled to its length, so that it is never lengthened. A
-//! zero vector is a dot as wide as the shaft: the sample exists, and nothing moves there.
+//! An arrow [`REFERENCE_LENGTH`] long or longer has a shaft 1 pt wide and a head 5 pt long and
+//! 4 pt wide, whatever its length, so a page of long arrows looks even. A shorter arrow shrinks
+//! as a whole by its length over [`REFERENCE_LENGTH`], head length, head width and shaft width
+//! together, so its head is at most a third of it, and the length is exact: it is never
+//! lengthened. The shrinking stops at a shaft [`MIN_SHAFT_WIDTH`] wide, one pixel at 144 dpi,
+//! and at a head twice as wide as that shaft, so that the tiniest arrow still reads as an arrow
+//! and its head is always wider than its shaft. A zero vector is a dot as wide as a full shaft:
+//! the sample exists, and nothing moves there.
 
 use super::{Reach, SCREEN_SCALES, direction, magnitude};
 use crate::{ArrowLength, Direction, Pivot};
 
-/// The width of a shaft, in points, and the diameter of the dot of a zero vector.
+/// The width of a full-size shaft, in points, and the diameter of the dot of a zero vector.
 pub(crate) const SHAFT_WIDTH: f64 = 1.0;
-/// The length of a head, in points.
+/// The length of a full-size head, in points.
 pub(crate) const HEAD_LENGTH: f64 = 5.0;
-/// The width of a head at its base, in points.
+/// The width of a full-size head at its base, in points.
 pub(crate) const HEAD_WIDTH: f64 = 4.0;
+/// The length, in points, from which an arrow has the full-size shaft and head.
+pub(crate) const REFERENCE_LENGTH: f64 = 15.0;
+/// The narrowest shaft, in points, of an arrow too short for its shaft to keep its proportion.
+pub(crate) const MIN_SHAFT_WIDTH: f64 = 0.5;
 
 /// How the arrows of one mark are measured on the plot. A layout reads it to hold the arrows and
 /// to size the key, and each layout of a figure with arrows leaves the next one a new frame
@@ -208,7 +217,8 @@ pub(crate) struct Outline {
 
 impl Outline {
     /// The outline of an arrow `length` pt long along the unit vector `direction`, the part
-    /// `pivot` names sitting on the sample.
+    /// `pivot` names sitting on the sample. An arrow shorter than [`REFERENCE_LENGTH`] has its
+    /// head and shaft scaled to it (see the module documentation).
     pub(crate) fn new(length: f64, [dx, dy]: [f64; 2], pivot: Pivot) -> Outline {
         let start = match pivot {
             Pivot::Tail => 0.0,
@@ -220,17 +230,11 @@ impl Outline {
             let along = start + along;
             [along * dx - across * dy, along * dy + across * dx]
         };
-        if length < HEAD_LENGTH {
-            let half = HEAD_WIDTH / 2.0 * (length / HEAD_LENGTH);
-            let corners = [at(0.0, half), at(length, 0.0), at(0.0, -half)];
-            let mut all = [[0.0; 2]; 7];
-            all[..3].copy_from_slice(&corners);
-            return Outline {
-                corners: all,
-                count: 3,
-            };
-        }
-        let (neck, shaft, head) = (length - HEAD_LENGTH, SHAFT_WIDTH / 2.0, HEAD_WIDTH / 2.0);
+        let scale = (length / REFERENCE_LENGTH).min(1.0);
+        let shaft = (SHAFT_WIDTH * scale).max(MIN_SHAFT_WIDTH) / 2.0;
+        let head_length = HEAD_LENGTH * scale;
+        let head = (HEAD_WIDTH * scale).max(4.0 * shaft) / 2.0;
+        let neck = length - head_length;
         Outline {
             corners: [
                 at(0.0, shaft),
@@ -401,8 +405,8 @@ mod tests {
     }
 
     #[test]
-    fn a_head_keeps_its_size_at_any_length() {
-        for length in [5.0, 20.0, 300.0] {
+    fn a_head_keeps_its_size_from_the_reference_length_on() {
+        for length in [15.0, 30.0, 300.0] {
             let outline = Outline::new(length, [1.0, 0.0], Pivot::Tail);
             let corners = outline.corners();
             assert_eq!(corners.len(), 7);
@@ -414,9 +418,37 @@ mod tests {
     }
 
     #[test]
-    fn an_arrow_shorter_than_its_head_shrinks_and_keeps_its_length() {
-        let outline = Outline::new(2.5, [1.0, 0.0], Pivot::Tail);
-        assert_eq!(outline.corners(), [[0.0, 1.0], [2.5, 0.0], [0.0, -1.0]]);
+    fn a_shorter_arrow_shrinks_whole_and_keeps_its_length() {
+        for length in [10.0, 5.0, 1.0] {
+            let outline = Outline::new(length, [1.0, 0.0], Pivot::Tail);
+            let corners = outline.corners();
+            assert_eq!(corners.len(), 7);
+            assert_eq!(corners[3], [length, 0.0]);
+            let head = corners[3][0] - corners[2][0];
+            assert!(head <= length / 3.0 + 1e-12, "{length}: {head}");
+            assert!(head > 0.0);
+            // The head is wider than the shaft.
+            assert!(corners[2][1] > corners[0][1], "{length}");
+            assert_eq!(corners[2][1], -corners[4][1]);
+        }
+        // Above the floor, everything is in proportion: 10 pt is two thirds of the full size.
+        let outline = Outline::new(10.0, [1.0, 0.0], Pivot::Tail);
+        let corners = outline.corners();
+        let third = 1.0 / 3.0;
+        assert!((corners[2][0] - (10.0 - 5.0 * 2.0 * third)).abs() < 1e-12);
+        assert!((corners[2][1] - 4.0 / 2.0 * 2.0 * third).abs() < 1e-12);
+        assert!((corners[0][1] - 0.5 * 2.0 * third).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_tiniest_arrow_keeps_a_shaft_of_a_pixel_and_a_head_twice_as_wide() {
+        let outline = Outline::new(1.0, [1.0, 0.0], Pivot::Tail);
+        let corners = outline.corners();
+        assert_eq!(corners[0][1], MIN_SHAFT_WIDTH / 2.0);
+        assert_eq!(corners[2][1], MIN_SHAFT_WIDTH);
+        // Nothing of an arrow of no length sticks out along its direction.
+        let none = Outline::new(0.0, [1.0, 0.0], Pivot::Tail);
+        assert!(none.corners().iter().all(|corner| corner[0] == 0.0));
     }
 
     #[test]
@@ -435,12 +467,12 @@ mod tests {
 
     #[test]
     fn the_reach_follows_the_corners() {
-        let reach = Outline::new(10.0, [1.0, 0.0], Pivot::Middle).reach();
+        let reach = Outline::new(20.0, [1.0, 0.0], Pivot::Middle).reach();
         assert_eq!(
             reach,
             Reach {
-                left: 5.0,
-                right: 5.0,
+                left: 10.0,
+                right: 10.0,
                 down: 2.0,
                 up: 2.0
             }
