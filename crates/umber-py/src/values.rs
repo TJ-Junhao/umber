@@ -130,6 +130,26 @@ pub(crate) fn times(
 /// aligned, and of format `q` or `l` (eight bytes) in native byte order, with or without `@` or
 /// `=`. Anything else is an internal `TypeError`.
 pub(crate) fn micros(obj: &Bound<'_, PyAny>) -> PyResult<Vec<i64>> {
+    int64s(obj)
+}
+
+/// Copies a flat int64 buffer of triangles, three point indices each, read as [`micros`] reads
+/// its buffer, into one row per triangle. A length that is not a multiple of three is an
+/// internal `TypeError`; the indices themselves are checked by the core.
+pub(crate) fn index_triples(obj: &Bound<'_, PyAny>) -> PyResult<Vec<[i64; 3]>> {
+    let flat = int64s(obj)?;
+    if flat.len() % 3 != 0 {
+        return Err(internal_type(format!(
+            "expected three indices per triangle, got {} indices",
+            flat.len()
+        )));
+    }
+    Ok(flat.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect())
+}
+
+/// Copies a one-dimensional, aligned int64 buffer in native byte order, as [`micros`]
+/// describes, into a vector, in logical order.
+fn int64s(obj: &Bound<'_, PyAny>) -> PyResult<Vec<i64>> {
     let unexpected = || {
         internal_type(format!(
             "expected a one-dimensional int64 buffer, got {}",

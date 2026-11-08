@@ -85,6 +85,7 @@ Data can be a list, a tuple, a NumPy array, or a pandas or polars Series. Missin
 | Mesh | `ax.mesh(x_edges, y_edges, values)` |
 | Contour | `ax.contour(x, y, z, style=ub.Contour.FILLED)`; `Contour.LINES` (default) or `Contour.BOTH` |
 | Vector field | `ax.quiver(x, y, u, v, key=(10, "10 m/s"))` for arrows, with a key at true length; `ax.barbs(x, y, u, v)` for wind barbs; `ax.streamplot(x, y, u, v)` for streamlines |
+| Triangle mesh | `ax.tripcolor(x, y, values)` colors the triangles that join scattered points, `ax.triplot(x, y)` draws their edges; `triangles=ub.delaunay(x, y)[keep]` cuts holes |
 | 2-D histogram, hexbin | `ax.hist2d(x, y, bins=40)`, `ax.hexbin(x, y, gridsize=30)` |
 | Color-mapped points | `ax.scatter(x, y, color=ub.ColorBy(values))` |
 | Pie, donut | `ub.pie(categories, values, hole=0.5, annotate=True)` or `fig.add_pie_axes().pie(...)` |

@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
     Align, ColorbarPosition, ContourStyle, Dash, Direction, FillStyle, GridLines, LegendMode,
-    LegendPosition, LegendStyle, Marker, Pivot, Place, Render, Share, Step, SvgText,
+    LegendPosition, LegendStyle, Marker, Pivot, Place, Render, Share, Step, SvgText, TriValues,
 };
 use umber_core::{HistStat, HistStyle};
 
@@ -182,6 +182,11 @@ int_enum!("Direction", Direction {
     "DATA" => Direction::Data = 1,
 });
 
+int_enum!("TriValues", TriValues {
+    "POINTS" => TriValues::Points = 0,
+    "TRIANGLES" => TriValues::Triangles = 1,
+});
+
 /// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
 pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
     Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
@@ -199,7 +204,7 @@ pub(crate) fn enum_value<E: IntEnum>(value: i64) -> PyResult<E> {
 
 /// Every bound enum that has a public Python enum: its Python name and its `(member name, value)`
 /// pairs. The Python-only `Auto` sentinel has no core enum table.
-const TABLES: [(&str, &[(&str, i64)]); 19] = [
+const TABLES: [(&str, &[(&str, i64)]); 20] = [
     (Dash::PY_NAME, Dash::MEMBERS),
     (Marker::PY_NAME, Marker::MEMBERS),
     (LegendStyle::PY_NAME, LegendStyle::MEMBERS),
@@ -218,6 +223,7 @@ const TABLES: [(&str, &[(&str, i64)]); 19] = [
     (ContourStyle::PY_NAME, ContourStyle::MEMBERS),
     (Pivot::PY_NAME, Pivot::MEMBERS),
     (Direction::PY_NAME, Direction::MEMBERS),
+    (TriValues::PY_NAME, TriValues::MEMBERS),
     (Place::PY_NAME, Place::MEMBERS),
 ];
 
@@ -273,6 +279,7 @@ mod tests {
         round_trips::<ContourStyle>();
         round_trips::<Pivot>();
         round_trips::<Direction>();
+        round_trips::<TriValues>();
         round_trips::<Place>();
     }
 
@@ -307,6 +314,7 @@ mod tests {
                 "Contour",
                 "Pivot",
                 "Direction",
+                "TriValues",
                 "Place"
             ]
         );

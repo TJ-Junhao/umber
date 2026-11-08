@@ -6,6 +6,7 @@ accepted = [
     "Zlib",
     "Unicode-3.0",
     "0BSD",
+    "ISC",
 ]
 ignore-dev-dependencies = true
 ignore-build-dependencies = true

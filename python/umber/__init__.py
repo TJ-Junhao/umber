@@ -37,6 +37,7 @@ from umber._enums import (
     Stat,
     Step,
     SvgText,
+    TriValues,
 )
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
@@ -50,6 +51,7 @@ from umber._series import Distribution, Series
 from umber._size import Size
 from umber._theme import Theme
 from umber._ticks import TickFormat
+from umber._tri import delaunay
 from umber._types import SupportsArray, Time, Values
 from umber._umber import MAX_BINS as _MAX_BINS
 from umber._umber import __version__
@@ -105,11 +107,13 @@ __all__ = [
     "Theme",
     "TickFormat",
     "Time",
+    "TriValues",
     "UmberError",
     "UsageError",
     "Values",
     "__version__",
     "bar",
+    "delaunay",
     "hist",
     "line",
     "pie",
@@ -170,11 +174,13 @@ _report_package_as_module(
     SvgText,
     Theme,
     TickFormat,
+    TriValues,
     DataError,
     StyleError,
     UmberError,
     UsageError,
     bar,
+    delaunay,
     hist,
     line,
     pie,

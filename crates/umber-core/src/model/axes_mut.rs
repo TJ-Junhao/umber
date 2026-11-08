@@ -35,6 +35,9 @@ use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::streamlines::{STREAMPLOT_CONTEXT, StreamplotMark, StreamplotOptions};
+use super::triangles::{
+    TRIPLOT_CONTEXT, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
+};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
     check_equal_aspect_axis, check_format_axis, check_highlight_axis, check_limits,
@@ -46,7 +49,7 @@ use super::validation::{check_band_axes, check_not_two_categories};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
     Align, ColorSpec, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
-    TickFormat,
+    TickFormat, Triangles,
 };
 
 /// Whether an axes draws its baseline, independently of any shared axis settings.
@@ -1241,6 +1244,91 @@ impl<'a> AxesMut<'a> {
             LabelSource::Options,
             [Mark::Streamplot(mark)],
         )?;
+        Ok(self)
+    }
+
+    /// Adds the edges of a triangle mesh: the points `(x[i], y[i])` joined by `triangles`, the
+    /// Delaunay triangulation of the points or the triangles given. [`TriplotMark`] states how
+    /// they are drawn, and [`TriMesh`](crate::TriMesh) how the points and triangles are
+    /// checked.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage`, naming `x` or `y`, unless both axes
+    /// are linear or log; `Error::Data` for points or triangles that
+    /// [`TriMesh`](crate::TriMesh) refuses; `Error::Style` for a label that is not one line.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, Triangles, TriplotOptions};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([0.0, 1.0, 1.0, 0.0, 0.5], [0.0, 0.0, 1.0, 1.0, 0.5]);
+    /// axes.triplot(&x, &y, Triangles::Auto, TriplotOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // An edge of three triangles is refused.
+    /// let fan = [[0, 1, 4], [0, 4, 1], [0, 1, 2]];
+    /// let err = axes.triplot(&x, &y, Triangles::Given(&fan), TriplotOptions::default());
+    /// assert_eq!(err.unwrap_err().parameter(), Some("triangles"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn triplot(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        triangles: Triangles<'_>,
+        options: TriplotOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.figure.panel(self.index);
+        let mark = TriplotMark::new((axes.x_scale(), axes.y_scale()), (x, y), triangles, options)?;
+        self.axes_mut()
+            .add_marks(TRIPLOT_CONTEXT, LabelSource::Options, [Mark::Triplot(mark)])?;
+        Ok(self)
+    }
+
+    /// Adds the triangles of a mesh, each filled with the color of one value on the axes' color
+    /// scale: the points `(x[i], y[i])` joined by `triangles`, as for [`AxesMut::triplot`], and
+    /// `values` one per point or one per triangle, as `options.on` says. [`TripcolorMark`]
+    /// states how the triangles are colored and drawn.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged, as [`TripcolorMark`] checks the call: `Error::Usage`
+    /// unless both axes are linear or log, or for a color mapping that differs from the axes'
+    /// other color-mapped marks; `Error::Data` for points, triangles or values; `Error::Style`
+    /// for a center or a color range that does not suit.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme, Triangles, TripcolorOptions, TriValues};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([0.0, 1.0, 1.0, 0.0], [0.0, 0.0, 1.0, 1.0]);
+    /// axes.tripcolor(&x, &y, Triangles::Auto, &[1.0, 2.0, 3.0, 4.0], TripcolorOptions::default())?;
+    ///
+    /// // Two triangles take two values.
+    /// let on = TripcolorOptions { on: TriValues::Triangles, ..TripcolorOptions::default() };
+    /// axes.tripcolor(&x, &y, Triangles::Auto, &[5.0, 6.0], on.clone())?;
+    /// let err = axes.tripcolor(&x, &y, Triangles::Auto, &[5.0, 6.0, 7.0], on);
+    /// assert_eq!(err.unwrap_err().parameter(), Some("values"));
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn tripcolor(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        triangles: Triangles<'_>,
+        values: &[f64],
+        options: TripcolorOptions,
+    ) -> Result<&mut Self> {
+        let mark = TripcolorMark::new(self.figure, self.index, (x, y), triangles, values, options)?;
+        self.axes_mut().marks.push(Mark::Tripcolor(mark));
         Ok(self)
     }
 

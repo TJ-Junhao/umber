@@ -187,6 +187,8 @@ pub(super) fn span_layer(
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -248,6 +250,8 @@ pub(super) fn rule_layer(
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }

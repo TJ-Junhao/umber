@@ -320,6 +320,10 @@ pub enum Mark {
     Barbs(super::field::BarbsMark),
     /// Streamlines through a vector field on a grid; NaN cuts the cells around it out.
     Streamplot(super::streamlines::StreamplotMark),
+    /// The edges of a triangle mesh, each once.
+    Triplot(super::triangles::TriplotMark),
+    /// The triangles of a mesh filled by value; NaN leaves a triangle blank.
+    Tripcolor(super::triangles::TripcolorMark),
     /// Short vertical event ticks in category rows.
     Events(super::EventsMark),
     /// Circular samples jittered within their category bands.
@@ -401,8 +405,10 @@ impl Mark {
             Mark::Quiver(m) => vec![m.key_text()],
             Mark::Barbs(m) => vec![m.options().label.as_str()],
             Mark::Streamplot(m) => vec![m.options().label.as_str()],
+            Mark::Triplot(m) => vec![m.options().label.as_str()],
             Mark::Heatmap(_)
             | Mark::Mesh(_)
+            | Mark::Tripcolor(_)
             | Mark::Hist2d(_)
             | Mark::Hexbin(_)
             | Mark::Contour(_)
@@ -415,6 +421,7 @@ impl Mark {
     pub(super) fn color_scale(&self) -> Option<ColorScaleSpec> {
         let color = match self {
             Mark::Mesh(mark) => return Some(ColorScaleSpec::of(&mark.colors)),
+            Mark::Tripcolor(mark) => return Some(ColorScaleSpec::of(&mark.colors)),
             Mark::Hist2d(mark) => return Some(mark.colors.clone()),
             Mark::Hexbin(mark) => return Some(mark.colors.clone()),
             Mark::Scatter(mark) => &mark.options.color,
@@ -440,7 +447,8 @@ impl Mark {
             | Mark::VSpan(_)
             | Mark::Band(_)
             | Mark::ErrorBars(_)
-            | Mark::Stem(_) => return None,
+            | Mark::Stem(_)
+            | Mark::Triplot(_) => return None,
             Mark::Heatmap(mark) => return Some(mark.color_scale()),
             Mark::Contour(mark) => return mark.color_scale(),
             Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => return None,

@@ -76,6 +76,7 @@ __all__ = [
     "grid_auto_size",
     "grid_cells",
     "pdf_pages",
+    "delaunay",
     "named_colors",
 ]
 
@@ -92,6 +93,9 @@ def enum_members() -> dict[str, list[tuple[str, int]]]: ...
 def grid_auto_size(rows: int, cols: int) -> tuple[float, float]: ...
 def grid_cells(rows: int, cols: int, count: int) -> list[tuple[int, int]]: ...
 def pdf_pages(figures: list[Figure], file: bool) -> bytes: ...
+
+# The Delaunay triangles of the points: int64 indices in native byte order, three per triangle.
+def delaunay(x: _FloatArray, y: _FloatArray) -> bytearray: ...
 
 # Named colors as (name, 0xRRGGBBAA), in the order BLACK, WHITE, GRAY, RED, ORANGE, YELLOW,
 # GREEN, TEAL, BLUE, PURPLE, PINK, BROWN.
@@ -155,6 +159,8 @@ def check_tick_format(format: _TickFormatArg) -> None: ...
 type _FloatArray = numpy.typing.NDArray[numpy.float64]
 # Time data: a one-dimensional int64 buffer of microseconds as described above.
 type _TimeArray = numpy.typing.NDArray[numpy.int64]
+# Triangles: a one-dimensional int64 buffer of point indices, three per triangle.
+type _IndexArray = numpy.typing.NDArray[numpy.int64]
 # x values: float data for a linear or log x axis, a list of names for a category x axis.
 type _AxisValues = _FloatArray | list[str]
 # Series values along either axis: float data, names, or times on a time axis.
@@ -939,6 +945,30 @@ class Figure:
         color: _ColorArg | ColorBy,
         starts: tuple[_FloatArray, _FloatArray] | None,
         arrows: bool,
+    ) -> None: ...
+    def triplot(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        triangles: _IndexArray | None,
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
+    def tripcolor(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: _FloatArray,
+        y: _FloatArray,
+        triangles: _IndexArray | None,
+        values: _FloatArray,
+        on: int,
+        cmap: Cmap | None,
+        scale: int,
+        base: float,
+        center: float | None,
     ) -> None: ...
     def contour(
         self,

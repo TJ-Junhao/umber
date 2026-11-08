@@ -359,6 +359,8 @@ impl Resolved {
                 | Mark::Quiver(_)
                 | Mark::Barbs(_)
                 | Mark::Streamplot(_)
+                | Mark::Triplot(_)
+                | Mark::Tripcolor(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
                 | Mark::Heatmap(_)
@@ -979,6 +981,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
         Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) | Mark::Streamplot(_) => &[],
+        Mark::Triplot(_) | Mark::Tripcolor(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
             ErrorBarOrientation::Vertical => mark.positions().categories(),
@@ -1018,8 +1021,8 @@ pub(crate) fn resolve(
     Resolved::new(x, y, None)
 }
 
-/// Whether `mark` fills cells, or follows the field of a grid, whose outer edges or coordinates
-/// are the limits of its axis, without padding.
+/// Whether `mark` fills cells, follows the field of a grid, or joins points into triangles,
+/// whose outer edges, coordinates or points are the limits of its axis, without padding.
 fn is_cell(mark: &ResolvedMark<'_>) -> bool {
     matches!(
         mark,
@@ -1028,6 +1031,8 @@ fn is_cell(mark: &ResolvedMark<'_>) -> bool {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
     )
 }
 
@@ -1734,6 +1739,26 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mapped values of a color-mapped mark; `None` for one line color.
         mapped: Option<MappedColors<'a>>,
     },
+    /// The edges of a triangle mesh.
+    Triplot {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated points, triangles and edges.
+        mark: &'a crate::model::TriplotMark,
+        /// The edge color.
+        color: Rgba,
+        /// The edge width, in points: half the automatic line width.
+        width: f32,
+    },
+    /// The triangles of a mesh, filled by value.
+    Tripcolor {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated points, triangles and values.
+        mark: &'a crate::model::TripcolorMark,
+        /// The color mapping.
+        mapped: MappedColors<'a>,
+    },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
         /// Drawn geometry for inside-legend scoring.
@@ -2116,6 +2141,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Quiver { geometry, .. }
             | ResolvedMark::Barbs { geometry, .. }
             | ResolvedMark::Streamplot { geometry, .. }
+            | ResolvedMark::Triplot { geometry, .. }
+            | ResolvedMark::Tripcolor { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2158,6 +2185,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Quiver { geometry, .. }
             | ResolvedMark::Barbs { geometry, .. }
             | ResolvedMark::Streamplot { geometry, .. }
+            | ResolvedMark::Triplot { geometry, .. }
+            | ResolvedMark::Tripcolor { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2211,6 +2240,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Barbs { mark, .. } => mark.field().kept_x().numbers(),
             // The outer coordinates of the grid, as for a contour.
             ResolvedMark::Streamplot { mark, .. } => mark.field().x(),
+            // Every point, whether a triangle uses it or not.
+            ResolvedMark::Triplot { mark, .. } => mark.mesh().x(),
+            ResolvedMark::Tripcolor { mark, .. } => mark.mesh().x(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
             // A heatmap's cells lie at categories, which have no numbers.
             ResolvedMark::Heatmap { .. } => &[],
@@ -2361,6 +2393,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -2420,6 +2454,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -2444,6 +2480,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mark, .. } => mark.x().categories(),
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2553,6 +2591,8 @@ impl<'a> ResolvedMark<'a> {
             },
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2625,6 +2665,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Quiver { mark, .. } => mark.field().kept_y().numbers(),
             ResolvedMark::Barbs { mark, .. } => mark.field().kept_y().numbers(),
             ResolvedMark::Streamplot { mark, .. } => mark.field().y(),
+            ResolvedMark::Triplot { mark, .. } => mark.mesh().y(),
+            ResolvedMark::Tripcolor { mark, .. } => mark.mesh().y(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
             ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.y().numbers(),
@@ -2730,6 +2772,8 @@ impl<'a> ResolvedMark<'a> {
             // even when explicit ticks are the only values on that axis.
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2771,7 +2815,9 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Contour { mark, .. } => crate::contour::line_width(mark.options().style),
             // Streamlines are as wide as the lines of a contour.
             ResolvedMark::Streamplot { .. } => Some(crate::contour::LINE_WIDTH),
+            ResolvedMark::Triplot { width, .. } => Some(width),
             ResolvedMark::Mesh { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Bubbles { .. }
@@ -2821,6 +2867,8 @@ impl<'a> ResolvedMark<'a> {
         match self {
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2890,6 +2938,7 @@ impl<'a> ResolvedMark<'a> {
             | Self::Box { .. }
             | Self::Violin { .. } => SwatchFill::Area,
             Self::Mesh { .. } | Self::Hist2d { .. } | Self::Hexbin { .. } => SwatchFill::Solid,
+            Self::Tripcolor { .. } => SwatchFill::Solid,
             // A contour has no legend entry; the colorbar explains its colors.
             Self::Contour { .. } => SwatchFill::Solid,
             Self::Hist {
@@ -2909,7 +2958,7 @@ impl<'a> ResolvedMark<'a> {
             | Self::Ecdf { .. }
             | Self::Kde { .. } => SwatchFill::Series,
             Self::Events { .. } | Self::Quiver { .. } | Self::Barbs { .. } => SwatchFill::Series,
-            Self::Streamplot { .. } => SwatchFill::Series,
+            Self::Streamplot { .. } | Self::Triplot { .. } => SwatchFill::Series,
             Self::Points { .. } => SwatchFill::Marker,
         }
     }
@@ -3079,8 +3128,19 @@ impl<'a> ResolvedMark<'a> {
                 .collect(),
             ResolvedMark::Contour { .. }
             | ResolvedMark::Mesh { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
+            ResolvedMark::Triplot {
+                mark, color, width, ..
+            } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width,
+                },
+            ),
             ResolvedMark::Hist {
                 ref layers,
                 style,
@@ -3337,8 +3397,21 @@ impl<'a> ResolvedMark<'a> {
                 .collect(),
             ResolvedMark::Contour { .. }
             | ResolvedMark::Mesh { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. } => Vec::new(),
+            // The edges of a mesh are read in the plot, as streamlines are.
+            &ResolvedMark::Triplot {
+                mark, color, width, ..
+            } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Rule {
+                    dash: Dash::Solid,
+                    width,
+                },
+                anchor: None,
+            }],
             // A step histogram is listed with a line swatch and, like a reference line, never takes
             // a direct label: its outline has no end to attach one to.
             ResolvedMark::Hist {
@@ -3479,6 +3552,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { orientation, .. } => Some(orientation),
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3556,6 +3631,8 @@ impl<'a> ResolvedMark<'a> {
             }
             ResolvedMark::Contour { .. }
             | ResolvedMark::Streamplot { .. }
+            | ResolvedMark::Triplot { .. }
+            | ResolvedMark::Tripcolor { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3587,7 +3664,9 @@ impl<'a> ResolvedMark<'a> {
     /// The spec and values of a color-mapped mark; `None` for a mark drawn in its own colors.
     pub(crate) fn color_values(&self) -> Option<(&ColorScaleSpec, &[f64])> {
         match self {
-            ResolvedMark::Mesh { mapped, .. } => Some((&mapped.spec, mapped.values)),
+            ResolvedMark::Mesh { mapped, .. } | ResolvedMark::Tripcolor { mapped, .. } => {
+                Some((&mapped.spec, mapped.values))
+            }
             ResolvedMark::Hist2d { mark, .. } => Some((&mark.colors, &mark.bins.counts)),
             ResolvedMark::Hexbin { mark, bins, .. } => Some((&mark.colors, bins.counts())),
             ResolvedMark::Scatter { mapped, .. }
@@ -3619,7 +3698,8 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Violin { .. }
             | ResolvedMark::ErrorBars { .. }
             | ResolvedMark::Ecdf { .. }
-            | ResolvedMark::Kde { .. } => None,
+            | ResolvedMark::Kde { .. }
+            | ResolvedMark::Triplot { .. } => None,
             ResolvedMark::Events { .. } | ResolvedMark::Points { .. } => None,
         }
     }
@@ -4229,6 +4309,9 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::Quiver(m) => uniform(m.key_text(), &m.options().color),
         Mark::Barbs(m) => uniform(&m.options().label, &m.options().color),
         Mark::Streamplot(m) => uniform(&m.options().label, &m.options().color),
+        Mark::Triplot(m) => vec![(&m.options().label, m.options().color)],
+        // A triangle mesh filled by value takes no palette color.
+        Mark::Tripcolor(_) => Vec::new(),
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         // A heatmap takes no palette color.
         Mark::Heatmap(_) => Vec::new(),
@@ -4416,6 +4499,17 @@ fn resolve_panel_marks_from<'a>(
                     mapped,
                 }
             }
+            Mark::Triplot(mark) => ResolvedMark::Triplot {
+                mark,
+                geometry: None,
+                color: color_of(mark.options().color, &mark.options().label),
+                width: crate::draw::triangles::triplot_width(theme),
+            },
+            Mark::Tripcolor(mark) => ResolvedMark::Tripcolor {
+                geometry: None,
+                mark,
+                mapped: MappedColors::of(&mark.colors),
+            },
             Mark::Heatmap(mark) => ResolvedMark::Heatmap {
                 mark,
                 geometry: None,

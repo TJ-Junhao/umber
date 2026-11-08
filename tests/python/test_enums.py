@@ -27,6 +27,7 @@ ENUMS = [
     ub.Contour,
     ub.Pivot,
     ub.Direction,
+    ub.TriValues,
     ub.Place,
 ]
 

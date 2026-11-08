@@ -46,6 +46,7 @@ mod step;
 mod streamlines;
 mod strip;
 mod ticks;
+mod triangles;
 mod validation;
 mod violin;
 pub use violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
@@ -99,6 +100,7 @@ pub use streamlines::{StreamStarts, StreamplotMark, StreamplotOptions};
 pub use strip::{StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub(crate) use ticks::AxisTicks;
 pub use ticks::{ExplicitTicks, TickHighlight};
+pub use triangles::{TriValues, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions};
 pub(crate) use validation::{MAX_FIGURE_IN, check_text};
 
 #[cfg(test)]
