@@ -50,7 +50,7 @@ pub(crate) fn triplot_width(theme: &Theme) -> f32 {
 }
 
 /// The axis-space point of each point of `mesh` on the axes `resolved`.
-fn axis_points(resolved: &Resolved, mesh: &TriMesh) -> Vec<AxisPoint> {
+pub(super) fn axis_points(resolved: &Resolved, mesh: &TriMesh) -> Vec<AxisPoint> {
     mesh.x()
         .iter()
         .zip(mesh.y())

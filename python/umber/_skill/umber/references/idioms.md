@@ -120,7 +120,7 @@ svg = ax.figure.to_svg()
 
 ## Triangle meshes
 
-For values at scattered points, such as weather stations or the nodes of a finite-element mesh, join the points into triangles: `ax.tripcolor(x, y, values)` fills each triangle with one color, and `ax.triplot(x, y)` draws its edges. Both triangulate the points with `ub.delaunay(x, y)` unless `triangles=` gives the triangles. Do not grid scattered data first to draw it with `mesh()` or `contour()`. Both need linear or log axes; automatic limits are the extent of the points, without padding.
+For values at scattered points, such as weather stations or the nodes of a finite-element mesh, join the points into triangles: `ax.tripcolor(x, y, values)` fills each triangle with one color, `ax.tricontour(x, y, values)` draws contours of the values, and `ax.triplot(x, y)` draws the edges. All three triangulate the points with `ub.delaunay(x, y)` unless `triangles=` gives the triangles. Do not grid scattered data first to draw it with `mesh()` or `contour()`. All need linear or log axes; automatic limits are the extent of the points, without padding.
 
 ```python
 rng = np.random.default_rng(0)
@@ -139,7 +139,29 @@ svg = ax.figure.to_svg()
 - **Colors.** `tripcolor()` shares the color scale of the axes with `mesh()` and `contour()`, so it takes `cmap=`, `scale=` and `center=` directly, and `ax.colorbar()` explains it. The triangles are flat, one color each.
 - **Edges.** `triplot()` draws each edge once at half the automatic line width and no points; add `ax.scatter(x, y)` for those. `label=` gives a line swatch.
 - **Units.** `delaunay()` works on the raw coordinates. For x and y in very different units, or points shown on a log axis, triangulate scaled coordinates, such as `ub.delaunay(np.log10(x), y)`, and pass the result as `triangles=`.
-- **mesh, contour or tripcolor.** Use `mesh()` for values on a rectangular grid of cells and `contour()` for a field sampled on a grid; use `tripcolor()` when the points are scattered or the mesh is made of triangles.
+- **mesh, contour or tripcolor.** Use `mesh()` for values on a rectangular grid of cells and `contour()` for a field sampled on a grid; use `tripcolor()` or `tricontour()` when the points are scattered or the mesh is made of triangles.
+
+### Contours of scattered data
+
+`ax.tricontour(x, y, z)` takes one value per point and the arguments of `contour()` with the same meanings: `levels=`, `style=ub.Contour.LINES`, `FILLED` or `BOTH`, `cmap=`, `scale=`, `center=`, `color=`, `annotate=` and `format=`. Within each triangle the field is linear between its corners. There is no `tricontourf`: pass `style=ub.Contour.FILLED`.
+
+```python
+rng = np.random.default_rng(1)
+x, y = rng.uniform(-2, 2, 500), rng.uniform(-2, 2, 500)
+z = np.exp(-(x**2) - y**2) + 0.2 * x
+ax = ub.Figure().add_axes().tricontour(x, y, z, annotate=True)
+tri = ub.delaunay(x, y)
+keep = np.hypot(x[tri].mean(axis=1), y[tri].mean(axis=1)) > 0.6
+holed = ub.Figure().add_axes().tricontour(x, y, z, triangles=tri[keep], style=ub.Contour.FILLED)
+holed.colorbar("Height").equal_aspect()
+svg = holed.figure.to_svg()
+```
+
+- **A mesh with a hole.** Filter the rows of `ub.delaunay(x, y)` and pass the rest as `triangles=`, as for `tripcolor()`. Lines end on the edge of the mesh and of each hole, and bands leave holes empty. A NaN in `z` removes every triangle around its point, which also makes a hole; infinite values raise `ub.DataError`.
+- **Smooth or flat.** `style=ub.Contour.FILLED` is the smooth alternative to `tripcolor()`: its bands follow the field across the triangles, where `tripcolor()` gives each triangle one color. Use `tripcolor()` when the value of each element is what matters, as for finite-element results with `on=ub.TriValues.TRIANGLES`.
+- **Levels on the values.** A point is above a level when its value is at or above it, so integer data often puts levels exactly on points. A triangle whose corners all lie on a level is in the band above it; an edge or a point on the level with lower values all around draws no line, since it bounds no area. Lines lie exactly where two bands meet.
+- **Log axes.** On a log axis the field is linear along each edge as drawn, so the lines meet the edges where `triplot()` draws them.
+- **contour or tricontour.** For values on a rectangular grid, use `contour(x, y, z)` with `z` shaped `(len(y), len(x))`: it needs no triangles. Contours on grids and meshes that share a colorbar need the same `levels`.
 
 ## Values next to points
 
@@ -200,7 +222,7 @@ svg = ax.figure.to_svg()
 
 ## Colors, colormaps and color scales
 
-`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `tripcolor`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
+`ub.Color.RED`, `ub.Color.hex("#2b6cb0")`, `ub.Color.rgb(...)`; the theme's palette is used when `color=` is left out. Color-mapped marks (`heatmap`, `mesh`, `contour`, `tripcolor`, `tricontour`, `hist2d`, `hexbin`, and `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` with `color=ub.ColorBy(values)`) share one color scale per axes: set `cmap=ub.Cmap.VIRIDIS` (or `MAGMA`, `CIVIDIS`, `BLUE_RED`, `ub.Cmap.from_colors([...])`); either `scale=ub.Scale.log()` for positive values or `center=0.0` (with the default linear scale) for a diverging map, not both; and `ax.clim(low, high)` for a fixed range. For `scatter`, `bubbles`, `quiver`, `barbs` and `streamplot` these options go inside `ub.ColorBy(values, cmap=..., scale=..., center=...)`. `ax.colorbar("Label")` shows it.
 
 ```python
 values = np.arange(12.0).reshape(3, 4) - 5.0

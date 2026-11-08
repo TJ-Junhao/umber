@@ -67,6 +67,10 @@
 //!   its points, triangles colored by values at the points with a colorbar on equal aspect,
 //!   triangles colored by their own values with some blank, and given triangles on a log x axis
 //!   with their edges over their colors (in `corpus/triangles.rs`).
+//! - Contours on triangle meshes: labelled lines over scattered points, filled bands with a
+//!   colorbar on an annulus with a hole on equal aspect, bands and lines with NaN points cutting
+//!   holes, given triangles on a log x axis, and integer values whose levels fall exactly on
+//!   points, edges and whole triangles (in `corpus/tricontour.rs`).
 //! - Values written next to scatter points: a dot-and-whisker chart and a matched-fold chart
 //!   placed automatically, and labels on fixed sides that grow the limits (in
 //!   `corpus/point_labels.rs`).
@@ -162,6 +166,7 @@ mod corpus {
     pub mod ticks;
     pub mod time;
     pub mod triangles;
+    pub mod tricontour;
     pub mod twin_y;
     pub mod value_column;
     pub mod vector_fields;
@@ -261,6 +266,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::vector_fields::cases(&lib, &mut sink);
     corpus::streamlines::cases(&lib, &mut sink);
     corpus::triangles::cases(&lib, &mut sink);
+    corpus::tricontour::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

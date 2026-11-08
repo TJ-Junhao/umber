@@ -189,6 +189,7 @@ pub(super) fn span_layer(
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -252,6 +253,7 @@ pub(super) fn rule_layer(
             | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Triplot { .. }
             | ResolvedMark::Tripcolor { .. }
+            | ResolvedMark::Tricontour { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }

@@ -283,7 +283,7 @@ fn colorbar_banded_for_filled() {
     let Mark::Contour(contour) = &f.single_axes().marks()[0] else {
         unreachable!()
     };
-    assert_eq!(labels, contour.labels_in(&TickFormat::default()));
+    assert_eq!(labels, contour.spec().labels_in(&TickFormat::default()));
 }
 
 #[test]
@@ -376,6 +376,7 @@ fn level_labels_sit_on_long_lines_and_break_them() {
     for (text, angle) in &labels {
         assert!(
             contour
+                .spec()
                 .labels_in(&TickFormat::default())
                 .iter()
                 .any(|label| label == text),

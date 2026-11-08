@@ -1,9 +1,18 @@
-//! Contours: the filled bands, the lines along the levels and the level labels on them.
+//! Contours, on a grid or on a triangle mesh: the filled bands, the lines along the levels and
+//! the level labels on them.
 //!
-//! The geometry comes in grid index space ([`crate::contour`]); a point maps onto the axes by
-//! interpolating, in axis space, between the coordinates of its column and of its row, so a
-//! cell is a rectangle on the plot. Bands and lines are clipped in axis space to the plot
-//! expanded by a margin, as lines are ([`LineClip`]), before they are mapped to plot points.
+//! The geometry comes in the field's own space ([`crate::contour`]), and one drawing serves
+//! both fields once each point is mapped onto the axes:
+//!
+//! - on a grid, a point of index space maps by interpolating, in data coordinates, between the
+//!   coordinates of its column and of its row, so a cell is a rectangle on the plot;
+//! - on a mesh, a point of the mesh maps as a data point does, and a crossing on an edge lies
+//!   at its fraction of the way between the ends of the edge in axis space: on a log axis the
+//!   field is linear along the edge as drawn, in the axis's log space, so the crossing lies on
+//!   the straight edge between its points on the plot, where neighbouring triangles meet.
+//!
+//! Bands and lines are clipped in axis space to the plot expanded by a margin, as lines are
+//! ([`LineClip`]), before they are mapped to plot points.
 //!
 //! The bands are filled in order, each over the bands before it, with the even-odd rule, so
 //! neighbouring bands meet without a seam and holes stay empty. The lines of
@@ -24,33 +33,39 @@ use super::clip::clip_ring;
 use super::contrast::Background;
 use super::line::{LineClip, stroke};
 use super::mapping::{AxisPoint, PlotPoint, axis_value, point};
+use super::triangles::axis_points;
 use crate::color_scale::ResolvedColorScale;
 use crate::contour::labels::{self, PagePoint, Placement};
-use crate::contour::{BOTH_LINE_WIDTH, ContourShapes, GridPoint, LINE_WIDTH};
+use crate::contour::{BOTH_LINE_WIDTH, ContourShapes, GridPoint, LINE_WIDTH, MeshPoint};
 use crate::layout::{Label, centered_tick_label};
+use crate::model::ContourSpec;
 use crate::resolve::{Resolved, ResolvedAxis};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle, TextItem};
 use crate::text::SceneFonts;
-use crate::{Alpha, ColorSpec, ContourMark, ContourStyle, Path, PathVerb, Point, Result, Rgba};
+use crate::{
+    Alpha, ColorSpec, ContourMark, ContourStyle, Path, PathVerb, Point, Result, Rgba,
+    TricontourMark,
+};
 
 /// The opacity of the lines of [`ContourStyle::Both`], in the theme's text color.
 const BOTH_LINE_OPACITY: f32 = 0.7;
 /// The length of line left out on each side of a level label, in points.
 const LABEL_GAP: f64 = 3.0;
 
-/// A resolved contour mark, as [`contour_items`] draws it.
+/// A resolved contour, on a grid or a mesh, as [`grid_contour_items`] and
+/// [`mesh_contour_items`] draw it.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Contour<'a> {
-    /// The mark.
-    pub(super) mark: &'a ContourMark,
+pub(super) struct Contour<'a, P> {
+    /// The levels and options of the mark.
+    pub(super) spec: &'a ContourSpec,
     /// Whether its colors come from the color scale; otherwise its lines take `color`.
     pub(super) mapped: bool,
     /// The color of its lines when they take one color.
     pub(super) color: Rgba,
     /// The labels of its levels, as `annotate` writes them.
     pub(super) labels: &'a [String],
-    /// Its lines and bands in grid index space.
-    pub(super) shapes: &'a ContourShapes,
+    /// Its lines and bands in the field's space, whose points are `P`.
+    pub(super) shapes: &'a ContourShapes<P>,
 }
 
 /// The color of the lines of a contour.
@@ -112,6 +127,19 @@ impl GridMap<'_> {
     }
 }
 
+/// The axis-space point of the point `p` of a mesh whose points lie at `points` in axis space:
+/// a crossing on an edge lies its fraction of the way between the ends of the edge, exactly at
+/// an end at 0 or 1.
+fn mesh_at(points: &[AxisPoint], p: MeshPoint) -> AxisPoint {
+    match p {
+        MeshPoint::Corner(i) => points[i],
+        MeshPoint::Edge { from, to, t } => {
+            let (a, b) = (points[from], points[to]);
+            AxisPoint::new(between(a.x, b.x, t), between(a.y, b.y, t))
+        }
+    }
+}
+
 /// The value at the fractional index `at` of `values`, at least two of them: interpolated
 /// linearly between the two values around it, exactly the value itself at a whole index.
 fn interpolated(values: &[f64], at: f64) -> f64 {
@@ -140,41 +168,82 @@ fn between(a: f64, b: f64, t: f64) -> f64 {
     }
 }
 
-/// The items of `contour` appended to `items`: its bands, when it is filled and the axes have a
-/// color scale; then its lines, colored by level on the color scale (none without one) and moved
-/// away from the background where they come close to it, or in their own color, or for
-/// [`ContourStyle::Both`] in the theme's text color; then its level labels, shaped with the
-/// scene's `fonts`.
+/// The items of the contour `contour` of the grid `mark` appended to `items`, as
+/// [`contour_items`] draws them.
 ///
 /// # Errors
 ///
 /// A level label that cannot be laid out fails as `fonts` reports it.
-pub(super) fn contour_items(
+pub(super) fn grid_contour_items(
     context: &MarkContext<'_>,
     fonts: &SceneFonts<'_>,
     resolved: &Resolved,
-    contour: Contour<'_>,
+    (mark, contour): (&ContourMark, Contour<'_, GridPoint>),
     items: &mut Vec<Item>,
 ) -> Result<()> {
-    let mark = contour.mark;
     let map = GridMap {
         columns: mark.x(),
         rows: mark.y(),
         x: &resolved.x,
         y: &resolved.y,
     };
-    let levels = mark.levels();
+    contour_items(context, fonts, resolved, contour, |p| map.at(p), items)
+}
+
+/// The items of the contour `contour` of the mesh `mark` appended to `items`, as
+/// [`contour_items`] draws them.
+///
+/// # Errors
+///
+/// A level label that cannot be laid out fails as `fonts` reports it.
+pub(super) fn mesh_contour_items(
+    context: &MarkContext<'_>,
+    fonts: &SceneFonts<'_>,
+    resolved: &Resolved,
+    (mark, contour): (&TricontourMark, Contour<'_, MeshPoint>),
+    items: &mut Vec<Item>,
+) -> Result<()> {
+    let points = axis_points(resolved, mark.mesh());
+    contour_items(
+        context,
+        fonts,
+        resolved,
+        contour,
+        |p| mesh_at(&points, p),
+        items,
+    )
+}
+
+/// The items of `contour` appended to `items`, each point of its shapes mapped to axis space by
+/// `at`: its bands, when it is filled and the axes have a color scale; then its lines, colored
+/// by level on the color scale (none without one) and moved away from the background where
+/// they come close to it, or in their own color, or for [`ContourStyle::Both`] in the theme's
+/// text color; then its level labels, shaped with the scene's `fonts`.
+///
+/// # Errors
+///
+/// A level label that cannot be laid out fails as `fonts` reports it.
+fn contour_items<P: Copy>(
+    context: &MarkContext<'_>,
+    fonts: &SceneFonts<'_>,
+    resolved: &Resolved,
+    contour: Contour<'_, P>,
+    at: impl Fn(P) -> AxisPoint,
+    items: &mut Vec<Item>,
+) -> Result<()> {
+    let spec = contour.spec;
+    let levels = spec.levels();
     if let Some(scale) = &resolved.color {
-        band_items(context, &map, contour.shapes, (&levels, scale), items);
+        band_items(context, &at, contour.shapes, (&levels, scale), items);
     }
-    let (width, line_color) = match mark.options().style {
+    let (width, line_color) = match spec.options().style {
         ContourStyle::Both => (
             BOTH_LINE_WIDTH,
             LineColor::One(context.theme.text_color().scale_alpha(BOTH_LINE_OPACITY)),
         ),
         ContourStyle::Lines | ContourStyle::Filled => (
             LINE_WIDTH,
-            match (contour.mapped, mark.options().color) {
+            match (contour.mapped, spec.options().color) {
                 (true, ColorSpec::Auto(alpha)) => LineColor::ByLevel {
                     scale: resolved.color.as_ref(),
                     alpha,
@@ -185,7 +254,7 @@ pub(super) fn contour_items(
         ),
     };
     // Without a format of its own, a contour on a colorbar writes its levels as the bar does.
-    let texts = match (&resolved.color, &mark.options().format) {
+    let texts = match (&resolved.color, &spec.options().format) {
         (Some(scale), None) if contour.mapped => scale
             .levels
             .as_ref()
@@ -201,7 +270,7 @@ pub(super) fn contour_items(
         let Some(color) = line_color.at(level) else {
             continue;
         };
-        let label = mark
+        let label = spec
             .options()
             .annotate
             .then(|| centered_tick_label(fonts, context.theme, text, (0.0, 0.0)))
@@ -213,8 +282,8 @@ pub(super) fn contour_items(
                 .points
                 .iter()
                 .map(|&p| {
-                    let at = map.at(p);
-                    (at.x, at.y)
+                    let point = at(p);
+                    (point.x, point.y)
                 })
                 .unzip();
             let pieces = super::clip::clip_polyline(&xs, &ys, &clip.bounds);
@@ -257,13 +326,13 @@ pub(super) fn contour_items(
     Ok(())
 }
 
-/// The bands of `shapes` appended to `items`, each filled in its color on `scale` between its
-/// lower level and the next of `levels` ([`ResolvedColorScale::band_color`]), clipped in axis
-/// space to the plot and a margin.
-fn band_items(
+/// The bands of `shapes` appended to `items`, each point mapped to axis space by `at`, each band
+/// filled in its color on `scale` between its lower level and the next of `levels`
+/// ([`ResolvedColorScale::band_color`]), clipped in axis space to the plot and a margin.
+fn band_items<P: Copy>(
     context: &MarkContext<'_>,
-    map: &GridMap<'_>,
-    shapes: &ContourShapes,
+    at: &impl Fn(P) -> AxisPoint,
+    shapes: &ContourShapes<P>,
     (levels, scale): (&[f64], &ResolvedColorScale),
     items: &mut Vec<Item>,
 ) {
@@ -273,7 +342,7 @@ fn band_items(
         let above = levels.get(index).copied();
         let mut path = Path::new();
         for ring in &band.rings {
-            let ring: Vec<AxisPoint> = ring.iter().map(|&p| map.at(p)).collect();
+            let ring: Vec<AxisPoint> = ring.iter().map(|&p| at(p)).collect();
             let clipped = clip_ring(&ring, &clip.bounds);
             let mut points = clipped.iter().map(|&p| clip.plot_point(p).to_scene());
             let Some(first) = points.next() else {

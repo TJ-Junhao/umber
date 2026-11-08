@@ -36,7 +36,7 @@ use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
 use super::streamlines::{STREAMPLOT_CONTEXT, StreamplotMark, StreamplotOptions};
 use super::triangles::{
-    TRIPLOT_CONTEXT, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
+    TRIPLOT_CONTEXT, TricontourMark, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
 };
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
@@ -1329,6 +1329,50 @@ impl<'a> AxesMut<'a> {
     ) -> Result<&mut Self> {
         let mark = TripcolorMark::new(self.figure, self.index, (x, y), triangles, values, options)?;
         self.axes_mut().marks.push(Mark::Tripcolor(mark));
+        Ok(self)
+    }
+
+    /// Adds the contours of values at the points of a triangle mesh: the points `(x[i], y[i])`
+    /// joined by `triangles`, as for [`AxesMut::triplot`], and `z` one value per point, drawn
+    /// with the levels, style, colors, colorbar and level labels of [`AxesMut::contour`].
+    /// [`TricontourMark`] states how the lines and bands are traced.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged, as [`TricontourMark`] checks the call: `Error::Usage`
+    /// unless both axes are linear or log; `Error::Data` for points or triangles that
+    /// [`TriMesh`](crate::TriMesh) refuses, for `z` without one value per point, and for a value
+    /// that is infinite, beyond 1e300 in magnitude, or not positive on a log color scale; then
+    /// the errors of [`AxesMut::contour`] for the levels and drawing options.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{ContourOptions, ContourStyle, Figure, ScaleKind, Theme, Triangles};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([0.0, 1.0, 1.0, 0.0, 0.5], [0.0, 0.0, 1.0, 1.0, 0.5]);
+    /// let z = [0.0, 1.0, 2.0, 1.0, 3.0];
+    /// let filled = ContourOptions { style: ContourStyle::Filled, ..ContourOptions::default() };
+    /// axes.tricontour(&x, &y, Triangles::Auto, &z, filled)?;
+    ///
+    /// // One value per point.
+    /// let err = axes.tricontour(&x, &y, Triangles::Auto, &z[..4], ContourOptions::default());
+    /// assert_eq!(err.unwrap_err().parameter(), Some("z"));
+    /// assert_eq!(axes.marks().len(), 1);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn tricontour(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        triangles: Triangles<'_>,
+        z: &[f64],
+        options: ContourOptions,
+    ) -> Result<&mut Self> {
+        let mark = TricontourMark::new(self.figure, self.index, (x, y), triangles, z, options)?;
+        self.axes_mut().marks.push(Mark::Tricontour(mark));
         Ok(self)
     }
 

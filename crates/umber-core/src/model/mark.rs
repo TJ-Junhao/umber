@@ -324,6 +324,9 @@ pub enum Mark {
     Triplot(super::triangles::TriplotMark),
     /// The triangles of a mesh filled by value; NaN leaves a triangle blank.
     Tripcolor(super::triangles::TripcolorMark),
+    /// Values at the points of a triangle mesh, drawn as lines along levels, filled bands
+    /// between them, or both; NaN removes the triangles around it.
+    Tricontour(super::triangles::TricontourMark),
     /// Short vertical event ticks in category rows.
     Events(super::EventsMark),
     /// Circular samples jittered within their category bands.
@@ -412,6 +415,7 @@ impl Mark {
             | Mark::Hist2d(_)
             | Mark::Hexbin(_)
             | Mark::Contour(_)
+            | Mark::Tricontour(_)
             | Mark::Events(_) => Vec::new(),
         }
     }
@@ -450,7 +454,8 @@ impl Mark {
             | Mark::Stem(_)
             | Mark::Triplot(_) => return None,
             Mark::Heatmap(mark) => return Some(mark.color_scale()),
-            Mark::Contour(mark) => return mark.color_scale(),
+            Mark::Contour(mark) => return mark.spec().color_scale(),
+            Mark::Tricontour(mark) => return mark.spec().color_scale(),
             Mark::Events(_) | Mark::Strip(_) | Mark::Swarm(_) => return None,
             Mark::GroupedHist(_) | Mark::Ecdf(_) | Mark::Kde(_) => return None,
         };
