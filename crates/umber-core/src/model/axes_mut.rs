@@ -34,6 +34,7 @@ use super::share::{ExplicitLimits, Setting, SharedAxis};
 use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
+use super::streamlines::{STREAMPLOT_CONTEXT, StreamplotMark, StreamplotOptions};
 use super::validation::{
     AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
     check_equal_aspect_axis, check_format_axis, check_highlight_axis, check_limits,
@@ -1186,6 +1187,60 @@ impl<'a> AxesMut<'a> {
         self.check_field_color(BARBS_CONTEXT, &mark.options().color, mark.field().len())?;
         self.axes_mut()
             .add_marks(BARBS_CONTEXT, LabelSource::Options, [Mark::Barbs(mark)])?;
+        Ok(self)
+    }
+
+    /// Adds streamlines through a vector field on a grid: `u` and `v` hold one row per y
+    /// coordinate, each with one value per x coordinate, as the values of
+    /// [`AxesMut::contour`] do. [`StreamplotMark`] states which lines are drawn and how.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: as [`StreamplotMark`] validates streamlines, then a
+    /// color mapping as [`AxesMut::scatter`] checks one, and `Error::Style` for a label that is
+    /// not one line.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, StreamStarts, StreamplotOptions, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// let (x, y) = ([-1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]);
+    /// // A rotation: u = -y, v = x.
+    /// let u = [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0];
+    /// let v = [-1.0, 0.0, 1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0];
+    /// let starts = StreamStarts::At { x: vec![0.5], y: vec![0.0] };
+    /// axes.streamplot(&x, &y, &u, &v, StreamplotOptions { starts, ..StreamplotOptions::default() })?;
+    /// assert_eq!(axes.marks().len(), 1);
+    ///
+    /// // A start outside the grid is refused.
+    /// let starts = StreamStarts::At { x: vec![2.0], y: vec![0.0] };
+    /// let err = axes.streamplot(&x, &y, &u, &v, StreamplotOptions { starts, ..StreamplotOptions::default() });
+    /// assert_eq!(err.unwrap_err().parameter(), Some("starts"));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn streamplot(
+        &mut self,
+        x: &[f64],
+        y: &[f64],
+        u: &[f64],
+        v: &[f64],
+        options: StreamplotOptions,
+    ) -> Result<&mut Self> {
+        let axes = self.axes_mut();
+        let mark = StreamplotMark::new((axes.x, axes.y), (x, y), (u, v), options)?;
+        self.check_field_color(
+            STREAMPLOT_CONTEXT,
+            &mark.options().color,
+            mark.field().len(),
+        )?;
+        self.axes_mut().add_marks(
+            STREAMPLOT_CONTEXT,
+            LabelSource::Options,
+            [Mark::Streamplot(mark)],
+        )?;
         Ok(self)
     }
 

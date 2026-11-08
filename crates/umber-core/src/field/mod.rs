@@ -1,8 +1,9 @@
-//! Vector fields: the geometry that arrows and wind barbs share, independent of any axes.
+//! Vector fields: the geometry that arrows and wind barbs share, independent of any axes, and
+//! the streamlines traced through a grid ([`stream`]).
 //!
-//! Everything here works in points, with y pointing up, relative to the sample a shape is drawn
+//! Arrows and barbs work in points, with y pointing up, relative to the sample a shape is drawn
 //! for; [`crate::draw`] places the shapes on the plot and [`crate::bubble_fit`] reads how far
-//! they reach.
+//! they reach. Streamlines work in data coordinates and in steps of the grid.
 //!
 //! Nothing here calls `sin`, `cos`, `atan2` or `hypot`. Those come from the platform's math
 //! library, whose results differ in the last bits from one platform to the next, and a shape
@@ -13,6 +14,7 @@
 pub(crate) mod arrow;
 pub(crate) mod barb;
 pub(crate) mod spacing;
+pub(crate) mod stream;
 
 /// The size of the components beyond which their squares would overflow or underflow: `2^500`.
 const SAFE_SQUARE: f64 = f64::from_bits((1023 + 500) << 52);

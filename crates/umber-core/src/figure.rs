@@ -63,6 +63,7 @@ pub use crate::model::{
 };
 pub use crate::model::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use crate::model::{StemMark, StemOptions};
+pub use crate::model::{StreamStarts, Streamline, StreamplotMark, StreamplotOptions};
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
 use crate::render::{

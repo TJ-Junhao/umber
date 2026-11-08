@@ -358,6 +358,7 @@ impl Resolved {
                 | Mark::Contour(_)
                 | Mark::Quiver(_)
                 | Mark::Barbs(_)
+                | Mark::Streamplot(_)
                 | Mark::Hist2d(_)
                 | Mark::Hexbin(_)
                 | Mark::Heatmap(_)
@@ -977,7 +978,7 @@ fn mark_categories(mark: &Mark) -> &[String] {
         Mark::Events(_) => &[],
         Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
         Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
-        Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) => &[],
+        Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) | Mark::Streamplot(_) => &[],
         Mark::Band(_) | Mark::StackedArea(_) => &[],
         Mark::ErrorBars(mark) => match mark.orientation() {
             ErrorBarOrientation::Vertical => mark.positions().categories(),
@@ -1017,7 +1018,8 @@ pub(crate) fn resolve(
     Resolved::new(x, y, None)
 }
 
-/// Whether `mark` fills cells, whose edges are the limits of its axis.
+/// Whether `mark` fills cells, or follows the field of a grid, whose outer edges or coordinates
+/// are the limits of its axis, without padding.
 fn is_cell(mark: &ResolvedMark<'_>) -> bool {
     matches!(
         mark,
@@ -1025,6 +1027,7 @@ fn is_cell(mark: &ResolvedMark<'_>) -> bool {
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
     )
 }
 
@@ -1720,6 +1723,17 @@ pub(crate) enum ResolvedMark<'a> {
         /// The length of a staff, in points.
         staff: f64,
     },
+    /// Streamlines through a vector field on a grid.
+    Streamplot {
+        /// Drawn geometry for inside-legend scoring.
+        geometry: Option<Box<crate::coverage::Geometry>>,
+        /// The validated field, options and lines.
+        mark: &'a crate::model::StreamplotMark,
+        /// The line color; the theme's text color for a color-mapped mark.
+        color: Rgba,
+        /// The mapped values of a color-mapped mark; `None` for one line color.
+        mapped: Option<MappedColors<'a>>,
+    },
     /// Bubbles sharing the largest size value across this axes.
     Bubbles {
         /// Drawn geometry for inside-legend scoring.
@@ -2101,6 +2115,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Quiver { geometry, .. }
             | ResolvedMark::Barbs { geometry, .. }
+            | ResolvedMark::Streamplot { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2142,6 +2157,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Bubbles { geometry, .. }
             | ResolvedMark::Quiver { geometry, .. }
             | ResolvedMark::Barbs { geometry, .. }
+            | ResolvedMark::Streamplot { geometry, .. }
             | ResolvedMark::Stem { geometry, .. }
             | ResolvedMark::Heatmap { geometry, .. }
             | ResolvedMark::Box { geometry, .. }
@@ -2193,6 +2209,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Bubbles { mark, .. } => mark.x(),
             ResolvedMark::Quiver { mark, .. } => mark.field().kept_x().numbers(),
             ResolvedMark::Barbs { mark, .. } => mark.field().kept_x().numbers(),
+            // The outer coordinates of the grid, as for a contour.
+            ResolvedMark::Streamplot { mark, .. } => mark.field().x(),
             ResolvedMark::Stem { mark, .. } => mark.x().numbers(),
             // A heatmap's cells lie at categories, which have no numbers.
             ResolvedMark::Heatmap { .. } => &[],
@@ -2342,6 +2360,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Bar { .. }
             | ResolvedMark::Grouped { .. }
             | ResolvedMark::Stacked { .. }
@@ -2400,6 +2419,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Band { .. }
             | ResolvedMark::StackedArea { .. }
             | ResolvedMark::Bar { .. }
@@ -2423,6 +2443,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Line { mark, .. } => mark.x().categories(),
             ResolvedMark::Scatter { mark, .. } => mark.x().categories(),
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2531,6 +2552,7 @@ impl<'a> ResolvedMark<'a> {
                 ErrorBarOrientation::Vertical => &[],
             },
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2602,6 +2624,7 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Bubbles { mark, .. } => mark.y(),
             ResolvedMark::Quiver { mark, .. } => mark.field().kept_y().numbers(),
             ResolvedMark::Barbs { mark, .. } => mark.field().kept_y().numbers(),
+            ResolvedMark::Streamplot { mark, .. } => mark.field().y(),
             ResolvedMark::Stem { mark, .. } => mark.y().numbers(),
             ResolvedMark::Heatmap { .. } => &[],
             ResolvedMark::Area { mark, .. } => mark.y().numbers(),
@@ -2706,6 +2729,7 @@ impl<'a> ResolvedMark<'a> {
             // With no finite y value, a stem does not change the y domain or its padding,
             // even when explicit ticks are the only values on that axis.
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2745,6 +2769,8 @@ impl<'a> ResolvedMark<'a> {
         match *self {
             // A contour's lines, drawn with lines or with both.
             ResolvedMark::Contour { mark, .. } => crate::contour::line_width(mark.options().style),
+            // Streamlines are as wide as the lines of a contour.
+            ResolvedMark::Streamplot { .. } => Some(crate::contour::LINE_WIDTH),
             ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2794,6 +2820,7 @@ impl<'a> ResolvedMark<'a> {
     pub fn is_reference(&self) -> bool {
         match self {
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -2882,6 +2909,7 @@ impl<'a> ResolvedMark<'a> {
             | Self::Ecdf { .. }
             | Self::Kde { .. } => SwatchFill::Series,
             Self::Events { .. } | Self::Quiver { .. } | Self::Barbs { .. } => SwatchFill::Series,
+            Self::Streamplot { .. } => SwatchFill::Series,
             Self::Points { .. } => SwatchFill::Marker,
         }
     }
@@ -2983,6 +3011,15 @@ impl<'a> ResolvedMark<'a> {
                 Swatch::Line {
                     dash: Dash::Solid,
                     width: (staff * crate::field::barb::STROKE) as f32,
+                },
+            ),
+            // A color-mapped mark has no label, and so no entry.
+            ResolvedMark::Streamplot { mark, color, .. } => one(
+                &mark.options().label,
+                color,
+                Swatch::Line {
+                    dash: Dash::Solid,
+                    width: crate::contour::LINE_WIDTH,
                 },
             ),
             // A heatmap has no legend entry; the colorbar explains its colors.
@@ -3357,6 +3394,16 @@ impl<'a> ResolvedMark<'a> {
                 },
                 anchor: None,
             }],
+            // Streamlines are read in the plot, as barbs are.
+            &ResolvedMark::Streamplot { mark, color, .. } => vec![SeriesKey {
+                label: &mark.options().label,
+                color,
+                kind: SeriesKind::Rule {
+                    dash: Dash::Solid,
+                    width: crate::contour::LINE_WIDTH,
+                },
+                anchor: None,
+            }],
             // Reference lines and spans have no anchor, and their kinds say that no direct
             // label ever goes to them (see `SeriesKind::takes_direct_label`).
             &ResolvedMark::HLine {
@@ -3431,6 +3478,7 @@ impl<'a> ResolvedMark<'a> {
             | ResolvedMark::Box { orientation, .. }
             | ResolvedMark::Violin { orientation, .. } => Some(orientation),
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3507,6 +3555,7 @@ impl<'a> ResolvedMark<'a> {
                 return DomainValues::Computed(Box::new(stacks.ends().chain(zeros)));
             }
             ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Mesh { .. }
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
@@ -3544,7 +3593,8 @@ impl<'a> ResolvedMark<'a> {
             ResolvedMark::Scatter { mapped, .. }
             | ResolvedMark::Bubbles { mapped, .. }
             | ResolvedMark::Quiver { mapped, .. }
-            | ResolvedMark::Barbs { mapped, .. } => {
+            | ResolvedMark::Barbs { mapped, .. }
+            | ResolvedMark::Streamplot { mapped, .. } => {
                 mapped.as_ref().map(|mapped| (&mapped.spec, mapped.values))
             }
             ResolvedMark::Heatmap { mapped, .. } => Some((&mapped.spec, mapped.values)),
@@ -4178,6 +4228,7 @@ fn color_sources(mark: &Mark) -> Vec<(&str, ColorSpec)> {
         Mark::Bubbles(m) => uniform(&m.options().label, &m.options().color),
         Mark::Quiver(m) => uniform(m.key_text(), &m.options().color),
         Mark::Barbs(m) => uniform(&m.options().label, &m.options().color),
+        Mark::Streamplot(m) => uniform(&m.options().label, &m.options().color),
         Mark::Stem(m) => vec![(&m.options().label, m.options().color)],
         // A heatmap takes no palette color.
         Mark::Heatmap(_) => Vec::new(),
@@ -4351,6 +4402,18 @@ fn resolve_panel_marks_from<'a>(
                     color,
                     mapped,
                     staff: crate::field::barb::staff_length(theme, mark.options().size),
+                }
+            }
+            Mark::Streamplot(mark) => {
+                let (color, mapped) = match &mark.options().color {
+                    PointColor::Uniform(spec) => (color_of(*spec, &mark.options().label), None),
+                    PointColor::By(by) => (theme.text_color(), Some(MappedColors::of(by))),
+                };
+                ResolvedMark::Streamplot {
+                    mark,
+                    geometry: None,
+                    color,
+                    mapped,
                 }
             }
             Mark::Heatmap(mark) => ResolvedMark::Heatmap {

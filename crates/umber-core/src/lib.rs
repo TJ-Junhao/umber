@@ -76,6 +76,8 @@
 //! - vector fields: [`FieldVectors`] with its [`FieldForm`], [`QuiverOptions`] with its
 //!   [`Pivot`], [`Direction`], [`ArrowLength`] and [`ArrowKey`], [`BarbOptions`], and the
 //!   read-only [`QuiverMark`], [`BarbsMark`] and [`VectorField`] payloads of [`Mark`];
+//!   streamlines: [`StreamplotOptions`] with its [`StreamStarts`], and the read-only
+//!   [`StreamplotMark`] payload of [`Mark`] with its [`Streamline`]s;
 //! - styling: [`Theme`] (presets, getters and `with_*` builders), [`Font`], [`Dash`],
 //!   [`Marker`], [`FillStyle`], [`GridLines`], [`Align`], [`LegendStyle`] and [`LegendPosition`];
 //! - colors: [`Rgba`], [`ColorSpec`] and [`Alpha`], the colormap [`Cmap`], and the color
@@ -161,6 +163,8 @@ pub mod size;
 mod stacking;
 mod stats;
 #[cfg(test)]
+mod streamplot_tests;
+#[cfg(test)]
 mod test_support;
 pub mod text;
 pub mod theme;
@@ -211,6 +215,7 @@ pub use figure::{
 };
 pub use figure::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use figure::{StemMark, StemOptions};
+pub use figure::{StreamStarts, Streamline, StreamplotMark, StreamplotOptions};
 pub use figure::{ViolinGroupMark, ViolinMark, ViolinOptions};
 pub use fonts::{BundledFont, Font, Weight};
 pub use geometry::{Path, PathVerb, Point};

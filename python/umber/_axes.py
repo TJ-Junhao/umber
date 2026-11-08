@@ -144,6 +144,9 @@ _FIELD_FORM_HINT: Final = (
     "pass one-dimensional u and v for points, or u and v shaped (len(y), len(x)) for a grid."
 )
 _AT_HINT: Final = "pass a tuple (x, y) of values of the axes, such as (2.0, 7.5)."
+_DENSITY_HINT: Final = "pass 1 for lines about a thirtieth of the grid apart, 2 for twice as many."
+_STARTS_HINT: Final = "pass a tuple (xs, ys) of the points to start lines at, or AUTO."
+_GRID_HINT: Final = "pass u and v shaped (len(y), len(x)), one row per y coordinate."
 _OFFSET_HINT: Final = "pass a tuple (dx, dy) of points, such as (0.0, 12.0)."
 _TEXT_AT_HINT: Final = "pass ub.InPlot(x, y), such as ub.InPlot(0.9, 0.9), or leave it out."
 
@@ -4259,6 +4262,136 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
             return self
 
+    def streamplot(
+        self: "Axes[float, float]",
+        x: Values[float],
+        y: Values[float],
+        u: object,
+        v: object,
+        *,
+        label: str = "",
+        density: float = 1.0,
+        color: Color | ColorBy = Color.AUTO,
+        starts: tuple[Values[float], Values[float]] | Auto = AUTO,
+        arrows: bool = True,
+    ) -> "Axes[float, float]":
+        """Add streamlines: lines that follow a vector field sampled on a grid.
+
+        ``u`` and ``v`` are shaped ``(len(y), len(x))``, one row per y coordinate, as ``z`` is for
+        ``contour()``; ``x`` and ``y`` are strictly increasing, at least two each, and need not be
+        evenly spaced. Within each cell the field is bilinear, and a line follows it in data
+        coordinates, so it is a true streamline on any axes. A NaN in ``u``, ``v`` or a
+        ``ColorBy`` makes the four cells around it a hole, as in ``contour()``.
+
+        The extent of the grid along each axis, on the axis scale (in logarithms on a log axis),
+        is divided into ``30 * density`` steps; on a wide plot the steps are longer in data units,
+        so lines look even on the screen. Automatic lines start from seeds tried in a fixed
+        order, ring by ring from the edge of the grid inward; a seed is used where no line comes
+        within 0.9 of a step, and its line is followed both ways. A line ends at the edge of the
+        grid or of a hole; where the speed is zero (at most 1e-6 of the largest speed at a grid
+        point, measured in steps); where an automatic line would come within half a step of
+        another; and where it would come within half a step of itself, more than two steps back
+        along it, so a closed orbit ends after one turn. Automatic lines shorter than two steps
+        are dropped.
+        Nothing depends on the figure size, and nothing is random: the same input draws the same
+        lines, point for point, on every platform.
+
+        ``starts`` draws exactly one line through each given point instead, both ways,
+        regardless of the other lines; it ends by the same rules, except that it may come close to
+        other lines.
+
+        Each line at least one step long carries one arrow head at its middle, measured along the
+        line, pointing downstream: the head of a ``quiver()`` arrow, 5 pt long and 4 pt wide, in
+        the line's color. Lines are as wide as contour lines. Automatic limits are the outer
+        coordinates of the grid, without padding, as for ``contour()``; a head near the edge is
+        cut by the plot as the lines are.
+
+        Args:
+            x: The x coordinates of the grid's columns, strictly increasing, at least two.
+            y: The y coordinates of the grid's rows, strictly increasing, at least two.
+            u: The component along x, as a two-dimensional array or a list of rows, shaped
+                ``(len(y), len(x))``: finite, at most 1e300 in magnitude, or NaN for a hole.
+            v: The component along y, of the shape of ``u``.
+            label: The legend label; empty skips this mark's legend entry. The entry is a line
+                swatch, in the row under every legend style. A ``ColorBy`` takes no label.
+            density: How close the automatic lines lie, from 0.1 to 10: ``1`` divides the grid
+                into 30 steps along each axis, ``2`` into 60.
+            color: The line color. ``Color.AUTO`` takes the next palette color. ``ColorBy`` maps
+                values shaped as ``u``, interpolated along each line, on the color scale of the
+                axes, and adds no legend entry. A mapped line is drawn as pieces half a step long,
+                each starting a quarter of a step after the one before, so no seam shows between
+                them; a color close to the background is darkened or lightened as a contour line
+                is.
+            starts: A tuple ``(xs, ys)`` of the points to draw one line through each, of equal
+                length; ``AUTO`` for automatic lines.
+            arrows: Whether lines carry an arrow head.
+
+        Returns:
+            These axes.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+            DataError: If ``x`` or ``y`` is two-dimensional, ``u`` and ``v`` are not shaped
+                ``(len(y), len(x))``, a coordinate is not finite, not strictly increasing or not
+                positive on a log axis, there are fewer than two along an axis, a component is
+                infinite or beyond 1e300 in magnitude, a ``ColorBy`` does not have the shape of
+                ``u``, or ``starts`` has lengths that differ, no points, or a point that is not
+                finite, lies outside the grid or in a hole, or where the speed is zero (the
+                message names the point).
+            StyleError: If ``density`` is not from 0.1 to 10, ``label`` is too long or holds a
+                line break or another control character, or a ``ColorBy`` does not suit the color
+                range set by ``clim()``.
+            UsageError: If an axis is not linear or log (type checkers refuse such axes), a
+                ``ColorBy`` comes with a label, or it differs in ``cmap``, ``scale`` or
+                ``center`` from the other color-mapped marks.
+
+        Example:
+            >>> import numpy as np
+            >>> import umber as ub
+            >>> x, y = np.linspace(-3, 3, 61), np.linspace(-2, 2, 41)
+            >>> u = 1 - 0.5 * np.cos(y[:, None]) + 0 * x
+            >>> v = 0.3 * np.sin(x[None, :]) + 0 * y[:, None]
+            >>> ax = ub.Figure().add_axes().streamplot(x, y, u, v, label="Flow")
+            >>> speed = ub.ColorBy(np.hypot(u, v))
+            >>> mapped = ub.Figure().add_axes().streamplot(x, y, u, v, density=2, color=speed)
+            >>> few = ub.Figure().add_axes().streamplot(x, y, u, v, starts=([-2, 0], [0, 1]))
+        """
+        with api_call():
+            context = "Axes.streamplot()"
+            check_floats_type(context, "x", x)
+            check_floats_type(context, "y", y)
+            check_floats_type(context, "u", u)
+            check_floats_type(context, "v", v)
+            _args.require_text(context, "label", label)
+            spacing = real(context, "density", density, expected="a float", hint=_DENSITY_HINT)
+            given = _starts_argument(context, starts)
+            drawn = _args.boolean(context, "arrows", arrows)
+            _numeric_cells(context, self, time=False)
+            field = _field(context, self, (x, y), (u, v))
+            if len(field.shape) != 2:
+                message = (
+                    "u and v have one dimension; streamlines need a grid, with u and v shaped "
+                    "(len(y), len(x))."
+                )
+                raise new_error(DataError, context, message, parameter="u", hint=_GRID_HINT)
+            spec = native_field_color(context, color, field.shape)
+            name = _args.text(context, "label", label, one_line="legend labels")
+            # Numeric axes only, so the coordinates are floats.
+            self._native.streamplot(
+                self._target,
+                self._col,
+                cast(FloatArray, field.x),
+                cast(FloatArray, field.y),
+                field.u,
+                field.v,
+                name,
+                spacing,
+                spec,
+                given,
+                drawn,
+            )
+            return self
+
 
 class _Field(NamedTuple):
     """The arrays of a vector field, ready for the native call."""
@@ -4302,6 +4435,21 @@ def _field(
     us = matrix(context, "u", u, shape, lengths=lengths, hint=_FIELD_FORM_HINT)
     vs = matrix(context, "v", v, shape, lengths=lengths, hint=_FIELD_FORM_HINT)
     return _Field(xs, ys, us, vs, shape)
+
+
+def _starts_argument(context: str, starts: object) -> tuple[FloatArray, FloatArray] | None:
+    """Check a ``starts`` argument and return its native form: ``None`` for ``AUTO``."""
+    if starts is AUTO:
+        return None
+    given = type_name(starts)
+    pair = cast(tuple[object, ...], starts) if isinstance(starts, tuple) else ()
+    if len(pair) != 2:
+        message = f"starts is {given}; starts must be a tuple (xs, ys), or AUTO."
+        raise new_error(TypeError, context, message, parameter="starts", hint=_STARTS_HINT)
+    xs, ys = pair
+    check_floats_type(context, "starts", xs)
+    check_floats_type(context, "starts", ys)
+    return floats(context, "starts", xs), floats(context, "starts", ys)
 
 
 def _key_argument(context: str, key: object) -> tuple[float, str] | None:

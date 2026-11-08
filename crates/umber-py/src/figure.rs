@@ -44,6 +44,7 @@ use umber_core::{
 };
 use umber_core::{ContourLevels, ContourOptions, ContourStyle, QuiverOptions};
 use umber_core::{ErrorRange, ScatterGroup};
+use umber_core::{StreamStarts, StreamplotOptions};
 
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
@@ -1725,6 +1726,44 @@ impl Figure {
         let vectors = field_vectors(u, v, grid)?;
         self.axes(row, col)?
             .barbs(x, y, vectors, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds streamlines through a vector field on a grid: `u` and `v` row by row, `starts` the x
+    /// and the y coordinates of the given starts (`None` for automatic seeds).
+    #[pyo3(signature = (row, col, x, y, u, v, label, density, color, starts, arrows))]
+    fn streamplot(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: &Bound<'_, PyAny>,
+        y: &Bound<'_, PyAny>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        label: String,
+        density: f64,
+        color: &Bound<'_, PyAny>,
+        starts: Option<(Bound<'_, PyAny>, Bound<'_, PyAny>)>,
+        arrows: bool,
+    ) -> PyResult<()> {
+        let starts = match starts {
+            None => StreamStarts::Auto,
+            Some((xs, ys)) => StreamStarts::At {
+                x: floats(&xs)?,
+                y: floats(&ys)?,
+            },
+        };
+        let options = StreamplotOptions {
+            label,
+            density,
+            color: point_color(color)?,
+            starts,
+            arrows,
+        };
+        let (x, y, u, v) = (floats(x)?, floats(y)?, floats(u)?, floats(v)?);
+        self.axes(row, col)?
+            .streamplot(&x, &y, &u, &v, options)
             .map(drop)
             .map_err(core_error)
     }

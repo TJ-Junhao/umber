@@ -186,6 +186,7 @@ pub(super) fn span_layer(
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HLine { .. }
             | ResolvedMark::VLine { .. }
@@ -246,6 +247,7 @@ pub(super) fn rule_layer(
             | ResolvedMark::Hist2d { .. }
             | ResolvedMark::Hexbin { .. }
             | ResolvedMark::Contour { .. }
+            | ResolvedMark::Streamplot { .. }
             | ResolvedMark::Step { .. }
             | ResolvedMark::HSpan { .. }
             | ResolvedMark::VSpan { .. }
