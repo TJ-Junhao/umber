@@ -344,3 +344,20 @@ def test_a_grid_contour_with_no_levels_that_draws_is_still_compared() -> None:
     ax.contour([0, 1], [0, 1], [[1.0, 1.0], [1.0, 1.0]])
     with pytest.raises(ub.StyleError, match="two contours of these axes have different levels"):
         ax.figure.to_svg()
+
+
+def test_an_empty_grid_contour_adds_nothing_to_the_color_range() -> None:
+    empty = [[100.0, 200.0], [np.nan, 300.0]]
+    variants: list[dict[str, Any]] = [{}, {"center": 2.0}, {"scale": ub.Scale.log()}]
+    for extra in variants:
+        alone = axes().mesh([0, 1, 2], [0, 1], [[1.0, 3.0]], **extra).colorbar()
+        ax = axes().mesh([0, 1, 2], [0, 1], [[1.0, 3.0]], **extra)
+        ax.contour([0, 1], [0, 1], empty, style=ub.Contour.FILLED, **extra).colorbar()
+        assert ax.figure.to_svg() == alone.figure.to_svg()
+    # One that draws something widens the range, as before.
+    wide = axes().mesh([0, 1, 2], [0, 1], [[1.0, 3.0]])
+    wide.contour([0, 1], [0, 1], [[100.0, 200.0], [250.0, 300.0]], style=ub.Contour.FILLED)
+    assert (
+        wide.figure.to_svg()
+        != axes().mesh([0, 1, 2], [0, 1], [[1.0, 3.0]]).colorbar().figure.to_svg()
+    )

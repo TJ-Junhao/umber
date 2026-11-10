@@ -130,8 +130,9 @@ impl Default for ContourOptions {
 /// [`ContourOptions`], and the options. The values are stored row by row, one row per y
 /// coordinate, each holding one value per x coordinate; a NaN value leaves the four cells
 /// around it out of every line and band. A contour draws something when some cell has four
-/// finite values; one that draws nothing still counts in the automatic limits, but takes no part in the colorbar: neither its levels
-/// nor its bands, nor the check that contours sharing the bar have the same levels.
+/// finite values; one that draws nothing still has its values checked and still counts in the
+/// automatic limits, but supplies no levels, no bands and no color range, and is left out of
+/// the check that contours sharing a colorbar have the same levels.
 /// Everything is validated together and never changes; clones share the data.
 ///
 /// # Examples
@@ -255,9 +256,9 @@ impl ContourMark {
     }
 
     /// Whether the contour draws anything: whether some cell has four finite values. One that
-    /// draws nothing still counts in the automatic limits, but takes no part in the colorbar:
-    /// neither its levels nor its bands, nor the check that contours sharing the bar have the
-    /// same levels. A contour on a triangle mesh has the same rule
+    /// draws nothing still has its values checked and still counts in the automatic limits, but
+    /// supplies no levels, no bands and no color range, and is left out of the check that
+    /// contours sharing a colorbar have the same levels. A contour on a triangle mesh has the same rule
     /// ([`TricontourMark`](super::TricontourMark)), on its triangles.
     pub(crate) fn draws(&self) -> bool {
         self.draws

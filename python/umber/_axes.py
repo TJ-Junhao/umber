@@ -3894,8 +3894,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         A contour draws something when some cell has four finite values. One that draws
         nothing, such as a field of NaN, still has its values checked and still counts in the
-        automatic limits, but takes no part in a colorbar that other marks draw: neither in its
-        levels and bands nor in the rule that contours sharing it need the same levels.
+        automatic limits, but supplies no levels, no bands and no color range, and is left out of
+        the rule that contours sharing a colorbar need the same levels.
 
         A line colored by its level whose color comes close to the background, such as the
         lines near the middle of a diverging colormap, is drawn darker on a light background

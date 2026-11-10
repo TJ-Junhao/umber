@@ -4696,7 +4696,8 @@ fn resolve_panel_marks_from<'a>(
                     mark,
                     mapped: mark.spec().color_scale().map(|spec| MappedColors {
                         spec,
-                        values: mark.z(),
+                        // A contour that draws nothing supplies no value to the color range.
+                        values: if mark.draws() { mark.z() } else { &[] },
                     }),
                     // A color-mapped contour takes no palette slot.
                     color: match mark.options().color {

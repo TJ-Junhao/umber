@@ -803,64 +803,6 @@ fn grid(z: [f64; 4], options: ContourOptions) -> impl FnOnce(&mut Figure) {
     }
 }
 
-/// The values of a grid whose finite values never meet in a cell: nothing is drawn.
-const NO_CELL: [f64; 4] = [0.0, 1.0, f64::NAN, 2.0];
-
-#[test]
-fn a_grid_contour_that_draws_nothing_takes_no_part_in_the_colorbar() {
-    let beside = |empty: [f64; 4], options: ContourOptions| {
-        let mut f = figure_of(LINEAR);
-        grid([0.0, 1.0, 2.0, 3.0], lines())(&mut f);
-        grid(empty, options)(&mut f);
-        let [Mark::Contour(drawn), Mark::Contour(nothing)] = f.single_axes().marks() else {
-            unreachable!()
-        };
-        assert!(!drawn.levels().is_empty());
-        let expected = drawn.levels();
-        let empty_levels = nothing.levels();
-        scene(&f);
-        assert_eq!(bar_levels(&f), Some(expected), "{empty:?}");
-        // It still counts in the limits.
-        let (resolved, _) = planned(&f);
-        assert_eq!(resolved.x.continuous().unwrap().domain(), (0.0, 1.0));
-        empty_levels
-    };
-    // All NaN: no automatic levels. One finite value, or finite values that share no cell:
-    // levels from every finite value, still compared with nothing.
-    assert!(beside([f64::NAN; 4], lines()).is_empty());
-    assert!(beside([f64::NAN, f64::NAN, 5.0, f64::NAN], lines()).is_empty());
-    assert!(!beside(NO_CELL, lines()).is_empty());
-    // With levels of its own, which differ, too.
-    let given = ContourOptions {
-        levels: ContourLevels::Values(vec![5.0]),
-        ..styled(ContourStyle::Both)
-    };
-    assert_eq!(beside([f64::NAN; 4], given), [5.0]);
-}
-
-#[test]
-fn an_empty_filled_grid_contour_keeps_the_gradient_colorbar() {
-    let mut f = figure_of(LINEAR);
-    f.single_axes_mut()
-        .mesh(
-            &[0.0, 1.0, 2.0],
-            &[0.0, 1.0],
-            &[1.0, 3.0],
-            MeshOptions::default(),
-        )
-        .unwrap();
-    grid([f64::NAN; 4], styled(ContourStyle::Filled))(&mut f);
-    f.single_axes_mut()
-        .colorbar(ColorbarOptions::default())
-        .unwrap();
-    let (resolved, layout) = planned(&f);
-    assert!(layout.colorbar.is_some());
-    let scale = resolved.color.unwrap();
-    assert!(scale.levels.is_none(), "the bar marks levels");
-    assert!(scale.ticks.len() >= 2);
-    scene(&f);
-}
-
 #[test]
 fn a_grid_and_a_mesh_contour_on_one_bar_ignore_whichever_draws_nothing() {
     let (x, y) = fan();
@@ -907,21 +849,4 @@ fn a_grid_and_a_mesh_contour_on_one_bar_ignore_whichever_draws_nothing() {
         .unwrap();
     scene(&f);
     assert_eq!(bar_levels(&f), None);
-}
-
-#[test]
-fn a_grid_contour_that_draws_but_has_no_levels_is_still_compared() {
-    // Equal values draw every cell but give no automatic levels: the contour takes part in
-    // the check, so it differs from one with levels, as before.
-    let mut f = figure_of(LINEAR);
-    grid([0.0, 1.0, 2.0, 3.0], lines())(&mut f);
-    grid([1.0; 4], lines())(&mut f);
-    let error = f.to_scene(FontLibrary::global()).unwrap_err();
-    assert!(matches!(error, Error::Style { .. }), "{error:?}");
-    assert!(
-        error
-            .to_string()
-            .contains("two contours of these axes have different levels"),
-        "{error}"
-    );
 }

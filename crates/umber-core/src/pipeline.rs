@@ -231,7 +231,7 @@ fn check_equal_aspect(figure: &Figure, context: &'static str) -> Result<()> {
 /// have the same levels, so the bar explains every one of them: `Error::Style` under `context`
 /// naming the panels of the first two whose levels differ. It reads the levels the model
 /// resolved, before any contour geometry is built. A contour that draws nothing, on a grid or on
-/// a mesh, takes no part, as it takes no part in the bar.
+/// a mesh, takes no part, as it supplies nothing to the bar.
 fn check_contour_levels(
     figure: &Figure,
     groups: &ShareGroups,
