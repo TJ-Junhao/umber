@@ -344,37 +344,12 @@ fn filled(theme: Theme, style: ContourStyle) -> Figure {
 fn labels_on_bands_take_the_text_or_background_color_that_reads_on_both() {
     for theme in [Theme::pigment(), Theme::midnight()] {
         let f = filled(theme.clone(), ContourStyle::Both);
-        let (resolved, _) = plan_figure(&f, (0, 0), FontLibrary::global());
-        let scale = resolved.color.unwrap();
-        let levels: Vec<f64> = (1..10).map(|k| f64::from(k) / 10.0).collect();
         let (text, background) = (theme.text_color(), theme.background());
         let drawn = scene(&f);
         let found = labels(&drawn);
         assert!(found.len() >= 5, "{found:?}");
-        let mut colors = Vec::new();
-        for label in &found {
-            let index = levels
-                .iter()
-                .position(|&level| format!("{level:.1}") == label.text)
-                .unwrap();
-            let bands = [
-                scale.band_color(index.checked_sub(1).map(|i| levels[i]), Some(levels[index])),
-                scale.band_color(Some(levels[index]), levels.get(index + 1).copied()),
-            ];
-            let least = |color: Rgba| {
-                bands
-                    .iter()
-                    .map(|&band| contrast_ratio(color, band))
-                    .fold(f64::INFINITY, f64::min)
-            };
-            if label.color == text {
-                assert!(least(text) >= least(background), "{label:?}");
-            } else {
-                assert_eq!(label.color, background, "{label:?}");
-                assert!(least(background) > least(text), "{label:?}");
-            }
-            colors.push(label.color);
-        }
+        assert_read_on_the_bands_under_them(&drawn, &theme);
+        let colors: Vec<Rgba> = found.iter().map(|label| label.color).collect();
         // The bump's top bands are light in one theme and dark in the other: both colors occur.
         assert!(colors.contains(&text), "{colors:?}");
         assert!(colors.contains(&background), "{colors:?}");
@@ -553,6 +528,7 @@ fn a_label_with_nothing_painted_above_it_takes_the_color_of_the_band_below() {
     // Against the unpainted light band too, the background would have been chosen.
     let above = scale.band_color(Some(1.0), None);
     assert_eq!(label_color(&theme, &[below, above]), theme.background());
+    assert_read_on_the_bands_under_them(&scene(&f), &theme);
 }
 
 #[test]
@@ -587,4 +563,193 @@ fn a_label_at_the_lowest_level_counts_both_painted_bands_beside_it() {
     );
     assert!(low_colors.iter().all(|&c| c == lowest), "{found:?}");
     assert!(top_colors.iter().all(|&c| c == top), "{found:?}");
+}
+
+/// The rings of a fill, as points.
+type Rings = Vec<Vec<(f64, f64)>>;
+
+/// The fills among the marks of `scene`, in painting order: the rings of each and its color.
+fn fills(scene: &Scene) -> Vec<(Rings, Rgba)> {
+    marks(scene)
+        .iter()
+        .filter_map(|item| match item {
+            Item::Fill {
+                path,
+                paint: crate::scene::Paint::Solid(color),
+                ..
+            } => {
+                let mut rings: Rings = Vec::new();
+                for verb in path.verbs() {
+                    match *verb {
+                        PathVerb::MoveTo(p) => rings.push(vec![(f64::from(p.x), f64::from(p.y))]),
+                        PathVerb::LineTo(p) => {
+                            if let Some(last) = rings.last_mut() {
+                                last.push((f64::from(p.x), f64::from(p.y)));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some((rings, *color))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The colors painted under the ink of `label`, drawn among the `fills`: at each of a 7 × 3 grid
+/// of points over its bounds, the color of the last fill that holds the point by the even-odd
+/// rule.
+fn painted_under(fills: &[(Rings, Rgba)], label: &Drawn) -> Vec<Rgba> {
+    let [left, top, right, bottom] = label.bounds;
+    let mut colors: Vec<Rgba> = Vec::new();
+    for i in 0..7 {
+        for j in 0..3 {
+            let point = (
+                left + (f64::from(i) + 0.5) / 7.0 * (right - left),
+                top + (f64::from(j) + 0.5) / 3.0 * (bottom - top),
+            );
+            let painted = fills
+                .iter()
+                .rev()
+                .find(|(rings, _)| inside_even_odd(rings, point))
+                .map(|&(_, color)| color);
+            if let Some(color) = painted.filter(|color| !colors.contains(color)) {
+                colors.push(color);
+            }
+        }
+    }
+    colors
+}
+
+/// Asserts that each label of `scene`, drawn in `theme`, takes the color that reads on the bands
+/// painted under its ink: exactly the one [`label_color`] gives for them when one band shows
+/// there, else one no worse on them than the other choice.
+fn assert_read_on_the_bands_under_them(scene: &Scene, theme: &Theme) {
+    let fills = fills(scene);
+    let (text, background) = (theme.text_color(), theme.background());
+    for label in labels(scene) {
+        let under = painted_under(&fills, &label);
+        assert!(!under.is_empty(), "{label:?}");
+        if let [only] = under.as_slice() {
+            assert_eq!(label.color, label_color(theme, &[*only]), "{label:?}");
+        } else {
+            let least = |color: Rgba| {
+                under
+                    .iter()
+                    .map(|&band| contrast_ratio(color, band))
+                    .fold(f64::INFINITY, f64::min)
+            };
+            let other = if label.color == text {
+                background
+            } else {
+                text
+            };
+            assert!(
+                least(label.color) >= least(other) - 1e-9,
+                "{label:?} on {under:?}"
+            );
+        }
+    }
+}
+
+/// The figure of a filled contour with lines and labels at level 1 of the field `z` on the
+/// grid `x` by `[0, 1]`, both rows the same, on Midnight.
+fn hills(x: &[f64], row: &[f64]) -> Figure {
+    let z: Vec<f64> = row.iter().chain(row).copied().collect();
+    let mut f = figure(Theme::midnight());
+    f.single_axes_mut()
+        .contour(
+            x,
+            &[0.0, 1.0],
+            &z,
+            ContourOptions {
+                levels: ContourLevels::Values(vec![1.0]),
+                style: ContourStyle::Both,
+                annotate: true,
+                ..ContourOptions::default()
+            },
+        )
+        .unwrap();
+    f
+}
+
+#[test]
+fn a_band_beyond_the_plot_area_does_not_color_a_label() {
+    // A ridge reaching 1 at x = 1 and a hill reaching 2 at x = 3, cut by an x limit just short
+    // of the hill's band at x = 2.5: the band from 1 up is drawn only beyond the plot, inside
+    // the clip's margin, so the ridge's label shows on the dark band below alone and takes the
+    // light text color.
+    let mut f = hills(&[0.0, 1.0, 2.0, 3.0, 4.0], &[0.0, 1.0, 0.0, 2.0, 0.0]);
+    f.single_axes_mut().xlim(0.0, 2.495).unwrap();
+    let drawn = scene(&f);
+    let found = labels(&drawn);
+    assert!(!found.is_empty());
+    let theme = Theme::midnight();
+    for label in &found {
+        assert_eq!(label.color, theme.text_color(), "{label:?}");
+    }
+    assert_read_on_the_bands_under_them(&drawn, &theme);
+}
+
+#[test]
+fn a_band_elsewhere_in_the_field_does_not_color_a_label() {
+    // Without limits the hill's band is painted, far from the ridge: the ridge's label still
+    // shows on the dark band alone.
+    let f = hills(&[0.0, 1.0, 2.0, 3.0, 4.0], &[0.0, 1.0, 0.0, 2.0, 0.0]);
+    let drawn = scene(&f);
+    let plot = plot(&f);
+    let ridge = plot.x + plot.width / 4.0;
+    let theme = Theme::midnight();
+    let found = labels(&drawn);
+    let on_ridge: Vec<&Drawn> = found
+        .iter()
+        .filter(|label| ((label.bounds[0] + label.bounds[2]) / 2.0 - ridge).abs() < 10.0)
+        .collect();
+    assert!(!on_ridge.is_empty(), "{found:?}");
+    for label in on_ridge {
+        assert_eq!(label.color, theme.text_color(), "{label:?}");
+    }
+    // The hill's labels lie across the dark band and the light one above it.
+    assert!(found.len() > 1, "{found:?}");
+    assert_read_on_the_bands_under_them(&drawn, &theme);
+}
+
+#[test]
+fn a_band_whose_lobes_cancel_in_area_still_colors_a_label() {
+    // Two triangles a log x axis turns into a ring whose lobes run opposite ways round: their
+    // signed areas cancel, yet the even-odd rule paints them, and the label reads on what is
+    // painted under it.
+    let ten: f64 = 10.0;
+    let x = [1.0, 100.0, ten.sqrt(), ten.powf(1.7)];
+    let y = [0.0, 1.0, 0.5, 0.65];
+    let mut f = Figure::new(20.0, 20.0, Theme::midnight()).unwrap();
+    f.add_axes(ScaleKind::Log { base: LogBase::TEN }, ScaleKind::Linear)
+        .unwrap()
+        .tricontour(
+            &x,
+            &y,
+            Triangles::Given(&[[0, 1, 3], [3, 1, 2]]),
+            &[0.0, 1.0, 1.0, 1.0],
+            ContourOptions {
+                levels: ContourLevels::Values(vec![0.25]),
+                style: ContourStyle::Both,
+                annotate: true,
+                ..ContourOptions::default()
+            },
+        )
+        .unwrap();
+    let drawn = scene(&f);
+    let found = labels(&drawn);
+    assert!(!found.is_empty());
+    let theme = Theme::midnight();
+    assert_read_on_the_bands_under_them(&drawn, &theme);
+    for label in &found {
+        let under = painted_under(&fills(&drawn), label);
+        let least = under
+            .iter()
+            .map(|&band| contrast_ratio(label.color, band))
+            .fold(f64::INFINITY, f64::min);
+        assert!(least > 1.5, "{label:?} on {under:?}: {least}");
+    }
 }

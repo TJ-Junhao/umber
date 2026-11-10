@@ -707,10 +707,11 @@ and of its edge, with 3 pt kept clear around it. It sits at the middle of its li
 it fits there; otherwise it takes the first place that fits among those a quarter of
 its width apart along the line, nearest the middle first and up to eight label widths
 away on either side. A line with no such place is drawn whole, without a label. On the
-bands of ``Contour.BOTH`` a label lies across the band below its level and the band
-above it, and is written in the theme's text color or its background color, whichever
-has the higher contrast ratio against the less contrasting of the two bands (the text
-color on a tie); the labels of ``Contour.LINES`` are in the theme's text color.
+bands of ``Contour.BOTH`` a label is written in the theme's text color or its background
+color, whichever has the higher contrast ratio against the least contrasting of the
+bands painted under its text (the text color on a tie): the bands seen at a grid of 9 by
+5 points over the text, so a band hidden under a later one or beyond the plot area does
+not count. The labels of ``Contour.LINES`` are in the theme's text color.
 
 A field that changes from cell to cell, such as noise or a checkerboard, makes many short
 lines and many small bands, so vector output grows very large and slow to write and to
@@ -2389,7 +2390,7 @@ comes close to the background. A level label lies wholly inside the plot area an
 mesh, clear of its holes and of its edge, at the middle of its line or else at the
 nearest place along it that fits, and a line with no such place has no label; on the
 bands of ``Contour.BOTH`` it is written in the theme's text or background color,
-whichever reads better on both bands it lies across, as for ``contour()``. Contours that
+whichever reads better on the bands painted under it, as for ``contour()``. Contours that
 share a colorbar, on a grid or on a mesh, need the same levels. The automatic levels and
 color range come from the values that are drawn, those at the corners of triangles whose
 three values are finite, as ``tripcolor()`` takes its range from the triangles it draws.

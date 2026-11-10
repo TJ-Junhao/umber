@@ -15,6 +15,7 @@
 //! is started where [`rotated_ring`] starts it, so its middle is the side opposite that start.
 
 use std::iter;
+use std::ops::ControlFlow;
 
 /// How many times as long as its label a line must be to carry it.
 pub(crate) const MIN_LENGTH_FACTOR: f64 = 3.0;
@@ -25,7 +26,7 @@ pub(crate) const MAX_STEPS: u32 = 32;
 /// How far a label's box is widened on every side before it is tested against its room, in
 /// points, so that rounding never lets a box that touches an edge pass.
 const SLACK: f64 = 1e-6;
-/// The largest number of boundary edges in a leaf of the tree of a [`Room`].
+/// The largest number of boundary edges in a leaf of the tree of a [`Region`].
 const LEAF_EDGES: usize = 8;
 
 /// A point on the page, in points, `y` down.
@@ -211,24 +212,63 @@ pub(crate) fn rotated_ring(ring: &[PagePoint], turns: usize) -> Vec<PagePoint> {
 /// or reaches past the plot area, pass; a centre exactly on the boundary puts an edge through
 /// the box. A boundary point that is not finite leaves no room at all.
 ///
-/// **The cost.** The boundary edges are kept in a tree of bounding boxes, split at the median
-/// of the longer side of each node down to leaves of at most eight edges, built once per
-/// contour in `O(e log e)` for `e` edges. A test visits the nodes whose bounds meet the box's
-/// bounds or the ray, `O(log e + k)` for the `k` edges whose bounds meet them, so placing every
-/// label of a contour costs `O(labels × (2 × 32 + 1) × (log e + k))`.
+/// **The cost.** The field is a [`Region`], its boundary edges in a tree of bounding boxes
+/// built once per contour in `O(e log e)` for `e` edges. A test visits the nodes whose bounds
+/// meet the box's bounds, stopping at the first edge that touches the box, and those whose
+/// bounds meet the ray, `O(log e + k)` for the `k` edges whose bounds meet them, so placing
+/// every label of a contour costs `O(labels × (2 × 32 + 1) × (log e + k))`.
 #[derive(Debug, Clone)]
 pub(crate) struct Room {
     /// The plot area.
     plot: Bounds,
-    /// The boundary edges of the field, in the order of the tree's leaves.
+    /// The field.
+    field: Region,
+}
+
+/// A region of the page bounded by closed rings and filled with the even-odd rule, as a band
+/// or the whole field of a contour is: its boundary edges kept in a tree of bounding boxes,
+/// split at the median of the longer side of each node down to leaves of at most
+/// [`LEAF_EDGES`] edges, so that the edges near a box or along a ray are found in
+/// `O(log e + k)` for `e` edges and the `k` edges whose bounds meet the box or the ray.
+#[derive(Debug, Clone)]
+pub(crate) struct Region {
+    /// The boundary edges, in the order of the tree's leaves.
     edges: Vec<Edge>,
     /// The tree over `edges`, its root first; empty without edges.
     nodes: Vec<Node>,
-    /// Whether every point of the boundary is finite; otherwise no label fits.
+    /// Whether every point of the boundary is finite; a region with a point that is not holds
+    /// no point and touches every box.
     finite: bool,
 }
 
-/// An edge of a field's boundary on the page.
+/// The bands of a filled contour on the page, in the order they are painted, each over the ones
+/// before it, and which of them a label shows on.
+///
+/// **The rule.** A band is under a label when it is the band painted at one of the label's
+/// sample points: the centres of a grid of [`SAMPLE_COLUMNS`] × [`SAMPLE_ROWS`] equal cells over
+/// the box of its text, turned with it. The band painted at a point is the last, in painting
+/// order, whose region holds the point by the even-odd rule ([`Region::holds_point`]), so a band
+/// covered there by a later one, a band beyond the plot area or cut off by limits, and a part of
+/// a band that cancels itself out under the even-odd rule do not count. The samples lie inside
+/// the plot area, since the label does. The rule never counts a band that is not painted under
+/// the text; a band showing under the text only in a sliver narrower than the spacing of the
+/// samples may go uncounted.
+///
+/// **The cost.** Each region's tree is built once per contour, `O(e log e)` for its `e` edges;
+/// each label then tests at most `SAMPLE_COLUMNS × SAMPLE_ROWS × bands` points, each in
+/// `O(log e + k)`, so `O(labels × (log e + k))` for a fixed number of bands.
+#[derive(Debug, Clone)]
+pub(crate) struct Bands {
+    /// The regions of the bands, in painting order.
+    regions: Vec<Region>,
+}
+
+/// The number of columns of sample points along a label's text ([`Bands`]).
+pub(crate) const SAMPLE_COLUMNS: u32 = 9;
+/// The number of rows of sample points across a label's text ([`Bands`]).
+pub(crate) const SAMPLE_ROWS: u32 = 5;
+
+/// An edge of a region's boundary on the page.
 #[derive(Debug, Clone, Copy)]
 struct Edge {
     /// One end.
@@ -250,7 +290,7 @@ struct Bounds {
     bottom: f64,
 }
 
-/// A node of the tree of a [`Room`].
+/// A node of the tree of a [`Region`].
 #[derive(Debug, Clone, Copy)]
 struct Node {
     /// The bounds of every edge below the node.
@@ -259,10 +299,10 @@ struct Node {
     below: Below,
 }
 
-/// What lies below a node of the tree of a [`Room`].
+/// What lies below a node of the tree of a [`Region`].
 #[derive(Debug, Clone, Copy)]
 enum Below {
-    /// The edges from `start` to `end` of the room's edges: a leaf.
+    /// The edges from `start` to `end` of the region's edges: a leaf.
     Edges {
         /// The first edge.
         start: usize,
@@ -364,6 +404,40 @@ impl Room {
     /// repeated, filled with the even-odd rule.
     pub(crate) fn new(plot: (f64, f64, f64, f64), rings: &[Vec<PagePoint>]) -> Room {
         let (left, top, right, bottom) = plot;
+        Room {
+            plot: Bounds {
+                left,
+                top,
+                right,
+                bottom,
+            },
+            field: Region::new(rings),
+        }
+    }
+
+    /// Whether a label's box `bounds`, in its own frame, at `placement` fits in the room: its
+    /// corners lie in the plot area, no edge of the field's boundary meets it, the box first
+    /// widened by a millionth of a point, and its centre lies inside the field (see [`Room`]).
+    pub(crate) fn holds(&self, placement: Placement, bounds: LabelBox) -> bool {
+        let bounds = bounds.widened(SLACK);
+        let corners = placement.corners(bounds);
+        corners.iter().all(|&corner| self.plot.holds(corner))
+            && !self.field.touches(placement, bounds).0
+            && self.field.holds_point(placement.center)
+    }
+
+    /// The number of boundary edges the test of whether the box `bounds` at `placement`
+    /// touches the field's boundary looks at before it answers.
+    #[cfg(test)]
+    pub(crate) fn edges_looked_at(&self, placement: Placement, bounds: LabelBox) -> usize {
+        self.field.touches(placement, bounds.widened(SLACK)).1
+    }
+}
+
+impl Region {
+    /// The region bounded by `rings`, each a closed ring on the page without its first point
+    /// repeated, filled with the even-odd rule.
+    pub(crate) fn new(rings: &[Vec<PagePoint>]) -> Region {
         let mut edges: Vec<Edge> = rings
             .iter()
             .flat_map(|ring| {
@@ -381,44 +455,46 @@ impl Room {
         if finite && !edges.is_empty() {
             build(&mut edges, 0, &mut nodes);
         }
-        Room {
-            plot: Bounds {
-                left,
-                top,
-                right,
-                bottom,
-            },
+        Region {
             edges,
             nodes,
             finite,
         }
     }
 
-    /// Whether a label's box `bounds`, in its own frame, at `placement` fits in the room: its
-    /// corners lie in the plot area, no edge of the field's boundary meets it, the box first
-    /// widened by a millionth of a point, and its centre lies inside the field (see [`Room`]).
-    pub(crate) fn holds(&self, placement: Placement, bounds: LabelBox) -> bool {
-        let bounds = bounds.widened(SLACK);
-        let corners = placement.corners(bounds);
-        if !self.finite || !corners.iter().all(|&corner| self.plot.holds(corner)) {
-            return false;
+    /// Whether an edge of the boundary meets the box `bounds`, in its own frame, at `placement`,
+    /// on its border or inside, and the number of edges looked at: the search stops at the first
+    /// edge that meets it.
+    fn touches(&self, placement: Placement, bounds: LabelBox) -> (bool, usize) {
+        if !self.finite {
+            return (true, 0);
         }
-        let around = Bounds::of(&corners);
-        let mut touched = false;
-        self.visit(
+        let around = Bounds::of(&placement.corners(bounds));
+        let mut looked = 0;
+        let found = self.visit(
             |node| node.meets(around),
-            |edge| touched |= edge.bounds().meets(around) && edge.meets(placement, bounds),
+            |edge| {
+                looked += 1;
+                if edge.bounds().meets(around) && edge.meets(placement, bounds) {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            },
         );
-        !touched && self.inside(placement.center)
+        (found.is_break(), looked)
     }
 
-    /// Whether `(x, y)` lies inside the field by the even-odd rule: whether a ray from it to the
-    /// right crosses the boundary an odd number of times. An edge is crossed when one of its
+    /// Whether `(x, y)` lies inside the region by the even-odd rule: whether a ray from it to
+    /// the right crosses the boundary an odd number of times. An edge is crossed when one of its
     /// ends lies below the ray's line (`y` greater) and the other does not, at a point right of
     /// `(x, y)`, so a ray through a corner of the boundary counts it once.
-    fn inside(&self, (x, y): PagePoint) -> bool {
+    pub(crate) fn holds_point(&self, (x, y): PagePoint) -> bool {
+        if !self.finite {
+            return false;
+        }
         let mut odd = false;
-        self.visit(
+        let _ = self.visit(
             |node| node.top <= y && y <= node.bottom && x <= node.right,
             |edge| {
                 let (from, to) = (edge.from, edge.to);
@@ -428,14 +504,19 @@ impl Room {
                         odd = !odd;
                     }
                 }
+                ControlFlow::Continue(())
             },
         );
         odd
     }
 
     /// Calls `each` with every edge in a leaf of the tree reached through nodes whose bounds
-    /// are `wanted`, in a fixed order.
-    fn visit(&self, wanted: impl Fn(Bounds) -> bool, mut each: impl FnMut(Edge)) {
+    /// are `wanted`, in a fixed order, until `each` breaks; whether it broke.
+    fn visit(
+        &self,
+        wanted: impl Fn(Bounds) -> bool,
+        mut each: impl FnMut(Edge) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
         let mut pending: Vec<usize> = Vec::new();
         if !self.nodes.is_empty() {
             pending.push(0);
@@ -451,15 +532,54 @@ impl Room {
                 Below::Nodes(first, second) => pending.extend([first, second]),
                 Below::Edges { start, end } => {
                     for &edge in self.edges.get(start..end).unwrap_or(&[]) {
-                        each(edge);
+                        each(edge)?;
                     }
                 }
             }
         }
+        ControlFlow::Continue(())
     }
 }
 
-/// The tree over `edges`, which start at the index `offset` of the room's edges, appended to
+impl Bands {
+    /// The bands whose regions are bounded by `rings`, one list of closed rings per band, in
+    /// painting order.
+    pub(crate) fn new(rings: &[Vec<Vec<PagePoint>>]) -> Bands {
+        Bands {
+            regions: rings.iter().map(|band| Region::new(band)).collect(),
+        }
+    }
+
+    /// The bands under a label whose text has the box `text`, in its own frame, at `placement`
+    /// (see [`Bands`]): their indices in painting order, each once, increasing.
+    pub(crate) fn under(&self, placement: Placement, text: LabelBox) -> Vec<usize> {
+        let mut shown = vec![false; self.regions.len()];
+        for column in 0..SAMPLE_COLUMNS {
+            for row in 0..SAMPLE_ROWS {
+                let along = (f64::from(column) + 0.5) / f64::from(SAMPLE_COLUMNS);
+                let across = (f64::from(row) + 0.5) / f64::from(SAMPLE_ROWS);
+                let point = placement.to_page((
+                    text.left + along * (text.right - text.left),
+                    text.top + across * (text.bottom - text.top),
+                ));
+                let painted = self
+                    .regions
+                    .iter()
+                    .rposition(|region| region.holds_point(point));
+                if let Some(slot) = painted.and_then(|band| shown.get_mut(band)) {
+                    *slot = true;
+                }
+            }
+        }
+        shown
+            .iter()
+            .enumerate()
+            .filter_map(|(band, &shown)| shown.then_some(band))
+            .collect()
+    }
+}
+
+/// The tree over `edges`, which start at the index `offset` of the region's edges, appended to
 /// `nodes`, its edges reordered to its leaves: the index of its root. A node of more than
 /// [`LEAF_EDGES`] edges splits them at the median of their middles along the longer side of
 /// its bounds.

@@ -1,7 +1,7 @@
 //! Level labels on lines: the middle first, the positions tried after it, the room they must
 //! fit in and its tree of boundary edges.
 
-use super::labels::{self, LabelBox, MAX_STEPS, PagePoint, Placement, Room, STEP_FACTOR};
+use super::labels::{self, Bands, LabelBox, MAX_STEPS, PagePoint, Placement, Room, STEP_FACTOR};
 
 /// The box of a label `width` pt wide and 10 pt high, centred.
 fn sized(width: f64) -> LabelBox {
@@ -320,4 +320,80 @@ fn placing_a_label_gives_the_same_answer_every_time() {
             first
         );
     }
+}
+
+#[test]
+fn the_boundary_test_stops_at_the_first_edge_that_touches_the_box() {
+    // 2,500 holes of a hundredth of a point inside a 10-pt box: 10,004 edges in all, of which
+    // the test looks at a handful before it finds one that touches the box.
+    let mut rings = vec![rectangle(-1000.0, -1000.0, 1000.0, 1000.0)];
+    for i in 0..50 {
+        for j in 0..50 {
+            let (x, y) = (-4.9 + f64::from(i) * 0.2, -4.9 + f64::from(j) * 0.2);
+            rings.push(rectangle(x, y, x + 0.01, y + 0.01));
+        }
+    }
+    let room = Room::new((-1000.0, -1000.0, 1000.0, 1000.0), &rings);
+    let placement = Placement {
+        center: (0.0, 0.0),
+        angle: 0.0,
+    };
+    let bounds = sized(10.0);
+    assert!(!room.holds(placement, bounds));
+    let looked = room.edges_looked_at(placement, bounds);
+    assert!((1..=64).contains(&looked), "{looked} edges");
+    // Clear of every hole, the test looks only at the few edges in leaves near the box.
+    let clear = Placement {
+        center: (500.0, 500.0),
+        angle: 0.0,
+    };
+    assert!(room.holds(clear, bounds));
+    assert!(room.edges_looked_at(clear, bounds) <= 64);
+}
+
+#[test]
+fn the_bands_under_a_label_are_those_painted_under_its_text() {
+    let at = |x: f64, y: f64| Placement {
+        center: (x, y),
+        angle: 0.0,
+    };
+    let text = sized(20.0);
+    // The whole field, and over its right half the band above it.
+    let bands = Bands::new(&[
+        vec![rectangle(0.0, 0.0, 100.0, 100.0)],
+        vec![rectangle(50.0, 0.0, 100.0, 100.0)],
+    ]);
+    assert_eq!(bands.under(at(50.0, 50.0), text), [0, 1]);
+    assert_eq!(bands.under(at(20.0, 50.0), text), [0]);
+    // Where the later band covers the first, only the later one shows.
+    assert_eq!(bands.under(at(80.0, 50.0), text), [1]);
+    // Outside every band, none.
+    assert!(bands.under(at(500.0, 50.0), text).is_empty());
+    // A band whose rings cancel out under the even-odd rule paints nothing there.
+    let cancelled = Bands::new(&[
+        vec![rectangle(0.0, 0.0, 100.0, 100.0)],
+        vec![
+            rectangle(50.0, 0.0, 100.0, 100.0),
+            rectangle(50.0, 0.0, 100.0, 100.0),
+        ],
+    ]);
+    assert_eq!(cancelled.under(at(80.0, 50.0), text), [0]);
+    // A bow tie, whose two lobes run opposite ways round so that their signed areas cancel,
+    // still paints both by the even-odd rule.
+    let bow = Bands::new(&[
+        vec![rectangle(0.0, 0.0, 100.0, 100.0)],
+        vec![vec![
+            (50.0, 0.0),
+            (100.0, 100.0),
+            (100.0, 0.0),
+            (50.0, 100.0),
+        ]],
+    ]);
+    assert_eq!(bow.under(at(90.0, 50.0), text), [1]);
+    // A turned label samples along its own frame.
+    let turned = Placement {
+        center: (50.0, 20.0),
+        angle: 90.0,
+    };
+    assert_eq!(bands.under(turned, text), [0, 1]);
 }

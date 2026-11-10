@@ -4179,13 +4179,12 @@ impl<'a> AxesMut<'a> {
     /// line, nearest the middle first and up to eight label widths away on either side; a line
     /// with no such place is drawn whole without a label. On the bands of
     /// [`ContourStyle::Both`](crate::ContourStyle::Both) a label is written in the theme's text
-    /// color or its background color, whichever has the higher contrast ratio against the less
-    /// contrasting of the two bands it lies across (the text color on a tie); other labels take
-    /// the text color. Points between grid coordinates are interpolated in the data, then placed on
-    /// the axes, so on a log axis too a line crosses a cell side where the data does. Automatic
-    /// limits are the
-    /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
-    /// alone draws no baseline.
+    /// color or its background color, whichever has the higher contrast ratio against the least
+    /// contrasting of the bands painted under its text, as seen at a grid of 9 × 5 points over
+    /// it (the text color on a tie); other labels take the text color. Points between grid
+    /// coordinates are interpolated in the data, then placed on the axes, so on a log axis too a
+    /// line crosses a cell side where the data does. Automatic limits are the outer coordinates,
+    /// without padding, as for [`AxesMut::mesh`]; by default a contour alone draws no baseline.
     ///
     /// A field that changes from cell to cell, such as noise or a checkerboard, makes many
     /// short lines and many small bands: vector output then grows very large and slow to write

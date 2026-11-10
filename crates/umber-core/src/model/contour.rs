@@ -104,7 +104,7 @@ pub struct ContourOptions {
     /// contours take [`ColorSpec::AUTO`] only.
     pub color: ColorSpec,
     /// Whether each line long enough to hold it carries its level's value, placed wholly inside
-    /// the plot area and the field and colored to read on the bands it lies across, as
+    /// the plot area and the field and colored to read on the bands painted under it, as
     /// [`AxesMut::contour`](super::AxesMut::contour) describes.
     pub annotate: bool,
     /// The format of the level values that `annotate` writes; `None` writes each level as the
