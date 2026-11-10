@@ -34,11 +34,6 @@ use crate::scene::{
 /// The miter limit of every stroke, as in the PNG and SVG backends.
 const MITER_LIMIT: f32 = 4.0;
 
-/// How far inside its pixel edges the image of marks is placed, in its own pixels (see
-/// `Page::raster`): more than the rounding of the numbers written, at most 0.0005 pt or 1/60 of
-/// a pixel at 2,400 dpi, so that no written edge rounds onto a pixel edge.
-const INSET_PIXELS: f32 = 1.0 / 32.0;
-
 /// The page content being written, with the resources it uses.
 pub(super) struct Page<'f, 's> {
     content: Content,
@@ -404,19 +399,7 @@ impl<'f, 's> Page<'f, 's> {
         let encoded = EncodedImage::marks((columns, rows), &image.rgba);
         drop(image.rgba);
         let name = self.resources.xobject(XObject::Marks(encoded));
-        // Poppler and xpdf widen an image to every device pixel its edges touch: written on its
-        // pixel edges, an image drawn at its own resolution would be widened by one pixel and
-        // resampled. Written 1/32 pixel inside them, it is drawn pixel for pixel, and at any
-        // other resolution the inset is too small to see.
-        let inset = f64::from(INSET_PIXELS) * 72.0 / f64::from(self.raster_dpi);
-        let rect = image.rect;
-        let inside = Rect {
-            x: (f64::from(rect.x) + inset) as f32,
-            y: (f64::from(rect.y) + inset) as f32,
-            width: (f64::from(rect.width) - 2.0 * inset) as f32,
-            height: (f64::from(rect.height) - 2.0 * inset) as f32,
-        };
-        self.place_image(&inside, &name);
+        self.place_image(&image.rect, &name);
         Ok(())
     }
 

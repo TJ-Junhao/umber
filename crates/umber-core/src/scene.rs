@@ -371,13 +371,16 @@ pub enum Item {
     /// The image covers `rect` widened to whole pixels of the grid the PNG backend draws on at
     /// that resolution, and cut to the scene, and holds the items as the PNG backend draws them
     /// there, on a transparent background: pixel `(i, j)` of the image is pixel
-    /// `(left + i, top + j)` of a PNG of the items alone, where `left` and `top` are the image's
-    /// first column and row on that grid. The image keeps the items' place among the other
+    /// `(left + i, top + j)` of a PNG of the items alone (but for the color of a fully
+    /// transparent pixel), where `left` and `top` are the image's first column and row on that
+    /// grid. The image keeps the items' place among the other
     /// items and the clip of its groups; what the items draw outside the image is lost, so
     /// `rect` should hold everything visible of them, such as the plot area a group clips them
     /// to. The SVG backend writes the image as an `<image>` holding a PNG, the PDF backend as an
     /// image XObject with a soft mask for its transparency; both let viewers smooth it, as its
-    /// pixels sample shapes. An image of no visible pixel is left out, as is the item when
+    /// pixels sample shapes, and both give its fully transparent pixels the color of the nearest
+    /// drawn pixel, as viewers smooth the colors and the transparency apart. An image of no
+    /// visible pixel is left out, as is the item when
     /// `rect` is not finite, not positive in size or beyond the renderers' coordinate limit.
     ///
     /// The PNG backend draws the items as a group without a clip, so PNG output is the same

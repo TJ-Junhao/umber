@@ -154,6 +154,19 @@ pub struct Raster {
     rgb: Vec<u8>,
 }
 
+impl Raster {
+    /// The width and height in pixels.
+    pub fn size(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
+
+    /// The RGB of the pixel at column `x`, row `y`.
+    pub fn at(&self, x: usize, y: usize) -> [u8; 3] {
+        let i = (y * self.width + x) * 3;
+        [self.rgb[i], self.rgb[i + 1], self.rgb[i + 2]]
+    }
+}
+
 /// The first page rasterized by `pdftoppm` at `dpi`, as RGB.
 pub fn poppler_raster(path: &FsPath, dpi: u32) -> Raster {
     poppler_page_raster(path, dpi, 1)

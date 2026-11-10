@@ -110,17 +110,6 @@ impl DeviceOrigin {
     /// The origin of a pixmap that holds the whole scene.
     const SCENE: DeviceOrigin = DeviceOrigin { x: 0, y: 0 };
 
-    /// The pixmap coordinate of the scene point `points` along x, at `scale`.
-    fn x(self, scale: DeviceScale, points: f32) -> DevicePixels {
-        // A whole number of pixels is subtracted exactly, so the sub-pixel phase is kept.
-        DevicePixels(scale.to_device(points).0 - self.x as f32)
-    }
-
-    /// The pixmap coordinate of the scene point `points` along y, at `scale`.
-    fn y(self, scale: DeviceScale, points: f32) -> DevicePixels {
-        DevicePixels(scale.to_device(points).0 - self.y as f32)
-    }
-
     /// The transform from scene points to the pixmap at `scale`. For [`DeviceOrigin::SCENE`]
     /// it is the scale alone.
     fn root(self, scale: DeviceScale) -> sk::Transform {
@@ -1302,8 +1291,12 @@ fn place_markers<K: SpriteKind>(
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
             continue;
         };
-        let (x, px) = split_phase(origin.x(scale, p.x));
-        let (y, py) = split_phase(origin.y(scale, p.y));
+        // The phase is split on the device grid and the origin taken from the whole pixel, so
+        // a marker falls on the same pixel and phase as in a PNG, wherever the pixmap starts:
+        // the rounding of `split_phase` depends on the sign of its coordinate.
+        let (x, px) = split_phase(scale.to_device(p.x));
+        let (y, py) = split_phase(scale.to_device(p.y));
+        let (x, y) = (x - origin.x, y - origin.y);
         let (left, top) = (x - sprites.origin.0, y - sprites.origin.1);
         let (w, h) = (sprites.size.0 as i32, sprites.size.1 as i32);
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {

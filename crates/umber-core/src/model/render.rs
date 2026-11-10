@@ -87,10 +87,10 @@ impl Render {
 /// clip of the marks (the plot area, widened beside it for lines as that clip is) in whole
 /// pixels, and that clip cuts it exactly where it cuts vector shapes; marks are always clipped
 /// to it, so no part of the mark is lost. The image is transparent where the mark draws
-/// nothing, so marks below it show through. It holds what the PNG backend draws for the mark at
-/// that resolution, pixel for pixel on the pixel grid of a PNG of the figure, so a viewer that
-/// draws it at that resolution shows what the PNG does. PNG output does not change: a raster
-/// mark is drawn as a vector one. Everything else stays vector: the axes, text, legends and
+/// nothing, so marks below it show through, and its transparent pixels hold the color of the
+/// nearest drawn pixel, so viewers that smooth it draw no dark edges. It holds what the PNG
+/// backend draws for the mark at that resolution, pixel for pixel on the pixel grid of a PNG of
+/// the figure. PNG output does not change: a raster mark is drawn as a vector one. Everything else stays vector: the axes, text, legends and
 /// colorbars, the other marks, and the mark's own value labels and error bars. There is no
 /// automatic choice: a mark is an image only when its options ask for one.
 ///

@@ -71,11 +71,9 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 ///
 /// The items of an [`Item::Raster`] are drawn by the PNG backend at `raster_dpi`, over the whole
 /// pixels they cover, into one image XObject in their place, with a soft mask for the pixels
-/// that are not opaque and `/Interpolate true`, so viewers may smooth it. The image is placed
-/// 1/32 of a pixel inside its pixel edges: Poppler and xpdf widen an image to every device pixel
-/// its edges touch, and so draw it pixel for pixel at its own resolution only when its edges
-/// lie inside the pixels. `raster_dpi` changes nothing else: a scene without such an item gives
-/// the same bytes at every `raster_dpi`.
+/// that are not opaque and `/Interpolate true`, so viewers may smooth it. Its edges are written
+/// on its pixel edges, where the vector shapes beside it end. `raster_dpi` changes nothing else:
+/// a scene without such an item gives the same bytes at every `raster_dpi`.
 ///
 /// # Errors
 ///
