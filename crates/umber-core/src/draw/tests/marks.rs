@@ -1,7 +1,7 @@
 //! The marks group: its clip, mark order and resolved colors, determinism.
 
 use super::{line_figure, mark_group, nums, plot_of};
-use crate::model::{Figure, LineOptions, ScatterOptions};
+use crate::model::{AreaOptions, Figure, LineOptions, ScatterOptions};
 use crate::scene::{Item, Rect};
 use crate::test_support::scene::assert_scene_bounded;
 use crate::{FontLibrary, Rgba, ScaleKind, SizeSpec, Theme};
@@ -98,7 +98,10 @@ fn clip_widening_follows_the_widest_drawn_line_of_any_width() {
         .area(
             nums(&[0.0, 1.0]),
             &[0.5, 0.5],
-            line(SizeSpec::pt(9.0).unwrap()),
+            AreaOptions {
+                width: SizeSpec::pt(9.0).unwrap(),
+                ..AreaOptions::default()
+            },
         )
         .unwrap()
         .line(
@@ -159,6 +162,10 @@ fn thin_lines_and_areas_next_to_a_thick_line_reach_the_widened_clip() {
         let mut a = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         a.xlim(0.0, 1.0).unwrap().ylim(0.0, 1.0).unwrap();
         if area {
+            let thin = AreaOptions {
+                width: thin.width,
+                ..AreaOptions::default()
+            };
             a.area(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();
         } else {
             a.line(nums(&[-1.0, 2.0]), &[0.25, 0.25], thin).unwrap();

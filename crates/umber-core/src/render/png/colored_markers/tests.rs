@@ -1,8 +1,9 @@
 use super::{Cached, MIN_BATCH_ITEMS, draw, draw_run};
 use crate::figure::{AxisData, ScatterOptions};
 use crate::render::png::{
-    Canvas, ClipRect, DeviceScale, FORCE_THREADS, Marker, MarkersView, SpriteKind, Sprites,
-    Surface, color, convert_path, draw_markers, normalize_path, prepare_stroke, solid_paint,
+    Canvas, ClipRect, DeviceOrigin, DeviceScale, FORCE_THREADS, Marker, MarkersView, SpriteKind,
+    Sprites, Surface, color, convert_path, draw_markers, normalize_path, prepare_stroke,
+    solid_paint,
 };
 use crate::{
     Figure, FontLibrary, Item, LineCap, LineJoin, Marker as Shape, Path, Point, Rgba, ScaleKind,
@@ -43,12 +44,7 @@ fn with_surface(dpi: u32, clipped: bool, draw: impl FnOnce(&mut Surface<'_>)) ->
     let scale = DeviceScale::new(dpi);
     let mut pixmap = sk::Pixmap::new(240, 180).unwrap();
     pixmap.fill(color(Rgba::opaque(241, 233, 220)));
-    let mut canvas = Canvas {
-        pixmap,
-        scale,
-        root: sk::Transform::from_scale(scale.get(), scale.get()),
-        mask: None,
-    };
+    let mut canvas = Canvas::new(pixmap, scale, DeviceOrigin::SCENE);
     if clipped {
         assert!(canvas.use_clip(Some(ClipRect {
             left: 12.3,
@@ -60,6 +56,7 @@ fn with_surface(dpi: u32, clipped: bool, draw: impl FnOnce(&mut Surface<'_>)) ->
     draw(&mut Surface {
         pixmap: &mut canvas.pixmap,
         scale,
+        origin: DeviceOrigin::SCENE,
         root: canvas.root,
         clip: canvas.mask.as_ref().map(|(rect, mask)| (mask, *rect)),
     });

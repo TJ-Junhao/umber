@@ -31,13 +31,19 @@ fn grouped_xy_calls_are_atomic() {
             .unwrap();
         for bad in [true, false] {
             let result = match method {
-                "line" => axes.grouped_line(groups(bad), Dash::Solid, SizeSpec::Auto),
+                "line" => axes.grouped_line(
+                    groups(bad),
+                    Dash::Solid,
+                    SizeSpec::Auto,
+                    umber_core::MarkRender::Vector,
+                ),
                 "scatter" => axes.grouped_scatter(
                     scatter_groups(groups(bad)),
                     Marker::Circle,
                     SizeSpec::Auto,
                     umber_core::PointLabels::default(),
                     false,
+                    umber_core::MarkRender::Vector,
                 ),
                 "step" => axes.grouped_step(groups(bad), Step::Post, Dash::Solid, SizeSpec::Auto),
                 "area" => axes.grouped_area(groups(bad), Dash::Solid, SizeSpec::Auto),
@@ -99,8 +105,8 @@ fn grouped_ecdf_is_atomic_and_matches_separate_calls() {
         .unwrap();
     }
     assert_eq!(
-        figure.to_svg(umber_core::SvgText::Editable).unwrap(),
-        expected.to_svg(umber_core::SvgText::Editable).unwrap()
+        figure.to_svg(umber_core::SvgText::Editable, 300).unwrap(),
+        expected.to_svg(umber_core::SvgText::Editable, 300).unwrap()
     );
 }
 

@@ -64,10 +64,18 @@ def native_figure() -> _umber.Figure:
     fig.subtitle(0, 0, "Two regions", NO_SIZE)
     fig.xlabel(0, 0, "Year", NO_SIZE)
     fig.ylabel(0, 0, "Revenue", NO_SIZE)
-    fig.line(0, 0, floats(2020, 2021, 2022, 2023), floats(1, 2, 4, 8), "North", AUTO, 0, NO_SIZE)
+    fig.line(0, 0, floats(2020, 2021, 2022, 2023), floats(1, 2, 4, 8), "North", AUTO, 0, NO_SIZE, 0)
     teal = (2, 0x2E8B8BCC, 1.0)
     fig.line(
-        0, 0, floats(2020, 2021, 2022, 2023), floats(3, 3.5, np.nan, 6), "South", teal, 1, NO_SIZE
+        0,
+        0,
+        floats(2020, 2021, 2022, 2023),
+        floats(3, 3.5, np.nan, 6),
+        "South",
+        teal,
+        1,
+        NO_SIZE,
+        0,
     )
     fig.scatter(
         0,
@@ -80,6 +88,7 @@ def native_figure() -> _umber.Figure:
         NO_SIZE,
         *NO_POINT_LABELS,
         *NO_OWN_MARKS,
+        0,
     )
     fig.xlim(0, 0, 2019.5, 2023.5)
     fig.ylim(0, 0, 0.5, 16.0)
@@ -94,9 +103,9 @@ def category_figures() -> tuple[ub.Figure, _umber.Figure]:
     )
     native = _umber.Figure(4.0, 3.0, _umber.Theme.midnight(), *ONE_CELL)
     native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
-    native.line(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, NO_SIZE)
+    native.line(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, NO_SIZE, 0)
     native.scatter(
-        0, 0, ["Q2", "Q4"], floats(2, 4), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        0, 0, ["Q2", "Q4"], floats(2, 4), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS, 0
     )
     return fig, native
 
@@ -105,14 +114,14 @@ def test_png_and_svg_bytes_match_the_native_figure() -> None:
     fig, native = facade_figure(), native_figure()
     assert fig.to_png(dpi=72) == native.to_png(72)
     assert fig.to_png() == native.to_png(200)
-    assert fig.to_svg() == native.to_svg(OUTLINES)
-    assert fig.to_svg(text=ub.SvgText.EDITABLE) == native.to_svg(EDITABLE)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)
+    assert fig.to_svg(text=ub.SvgText.EDITABLE) == native.to_svg(EDITABLE, 300)
 
 
 def test_category_axes_match_the_native_figure() -> None:
     fig, native = category_figures()
     assert fig.to_png(dpi=60) == native.to_png(60)
-    assert fig.to_svg() == native.to_svg(OUTLINES)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)
 
 
 def test_saved_files_match_the_native_figure(tmp_path: Path) -> None:
@@ -120,14 +129,16 @@ def test_saved_files_match_the_native_figure(tmp_path: Path) -> None:
     fig.save_png(tmp_path / "chart.png", dpi=90)
     fig.save_svg(tmp_path / "chart.svg", text=ub.SvgText.EDITABLE)
     assert (tmp_path / "chart.png").read_bytes() == native.png_for_file(90)
-    assert (tmp_path / "chart.svg").read_bytes() == native.svg_for_file(EDITABLE).encode("utf-8")
+    assert (tmp_path / "chart.svg").read_bytes() == native.svg_for_file(EDITABLE, 300).encode(
+        "utf-8"
+    )
 
 
 def test_an_empty_figure_matches_the_native_figure() -> None:
     fig = ub.Figure(2, 1.5, theme=ub.Theme.PIGMENT)
     native = _umber.Figure(2.0, 1.5, _umber.Theme.pigment(), *ONE_CELL)
     assert fig.to_png(dpi=50) == native.to_png(50)
-    assert fig.to_svg() == native.to_svg(OUTLINES)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)
 
 
 def test_a_copy_renders_as_the_original() -> None:
@@ -135,4 +146,4 @@ def test_a_copy_renders_as_the_original() -> None:
 
     fig = facade_figure()
     assert copy.copy(fig).to_png(dpi=50) == native_figure().to_png(50)
-    assert copy.deepcopy(fig).to_svg() == native_figure().to_svg(OUTLINES)
+    assert copy.deepcopy(fig).to_svg() == native_figure().to_svg(OUTLINES, 300)

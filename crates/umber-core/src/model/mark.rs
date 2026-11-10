@@ -11,6 +11,7 @@ use super::error_bars::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, Erro
 use super::heatmap::HeatmapMark;
 use super::hist::HistMark;
 use super::point_labels::PointLabels;
+use super::render::MarkRender;
 use super::rule::{HLineMark, SpanMark, VLineMark};
 use super::stacked_area::StackedAreaMark;
 use super::stem::StemMark;
@@ -46,6 +47,9 @@ pub struct LineOptions {
     pub dash: Dash,
     /// The line width; [`SizeSpec::Auto`] for the theme's line width. Dashes scale with it.
     pub width: SizeSpec,
+    /// Whether SVG and PDF output draw the line as vector shapes or as one image (see
+    /// [`MarkRender`]); vector shapes by default.
+    pub render: MarkRender,
 }
 
 impl Default for LineOptions {
@@ -55,12 +59,13 @@ impl Default for LineOptions {
             color: ColorSpec::AUTO,
             dash: Dash::Solid,
             width: SizeSpec::Auto,
+            render: MarkRender::Vector,
         }
     }
 }
 
-/// Options of an area mark: the options of the line that bounds it, so an area takes exactly
-/// the label, color, dash and width of a line.
+/// Options of an area mark: the label, color, dash and width of the line that bounds it, which
+/// the area takes exactly as a line does. An area is always drawn as vector shapes.
 ///
 /// # Examples
 ///
@@ -72,7 +77,41 @@ impl Default for LineOptions {
 /// assert_eq!((options.color, options.dash), (ColorSpec::AUTO, Dash::Solid));
 /// assert!(options.label.is_empty());
 /// ```
-pub type AreaOptions = LineOptions;
+#[derive(Debug, Clone, PartialEq)]
+pub struct AreaOptions {
+    /// The legend label; empty for none.
+    pub label: String,
+    /// The color of the line, and of the fill at the area opacity.
+    pub color: ColorSpec,
+    /// The dash style of the line.
+    pub dash: Dash,
+    /// The line width; [`SizeSpec::Auto`] for the theme's line width. Dashes scale with it.
+    pub width: SizeSpec,
+}
+
+impl Default for AreaOptions {
+    fn default() -> Self {
+        AreaOptions {
+            label: String::new(),
+            color: ColorSpec::AUTO,
+            dash: Dash::Solid,
+            width: SizeSpec::Auto,
+        }
+    }
+}
+
+impl AreaOptions {
+    /// The options of the line that bounds the area: these, drawn as vector shapes.
+    fn line(&self) -> LineOptions {
+        LineOptions {
+            label: self.label.clone(),
+            color: self.color,
+            dash: self.dash,
+            width: self.width,
+            render: MarkRender::Vector,
+        }
+    }
+}
 
 /// Options of a scatter mark.
 ///
@@ -115,6 +154,11 @@ pub struct ScatterOptions {
     pub y_error: Option<ErrorRange>,
     /// Whether a line joins the points in input order.
     pub connect: bool,
+    /// Whether SVG and PDF output draw the markers, and the line that joins them, as vector
+    /// shapes or as one image (see [`MarkRender`]); vector shapes by default. The value labels
+    /// and error bars stay vector shapes. With error bars and a joining line, the line and the
+    /// markers are two images, under and over the bars.
+    pub render: MarkRender,
 }
 
 impl Default for ScatterOptions {
@@ -128,6 +172,7 @@ impl Default for ScatterOptions {
             x_error: None,
             y_error: None,
             connect: false,
+            render: MarkRender::Vector,
         }
     }
 }
@@ -373,7 +418,11 @@ impl Mark {
     /// An area under a validated series.
     pub(super) fn area(series: XySeries, options: AreaOptions) -> Mark {
         Mark::Area(AreaMark {
-            line: LineMark { series, options },
+            line: LineMark {
+                series,
+                options: options.line(),
+            },
+            options,
         })
     }
 
@@ -841,11 +890,12 @@ impl fmt::Debug for ScatterMark {
 /// ```compile_fail,E0451
 /// use umber_core::figure::{AreaMark, Mark};
 ///
-/// let mark = Mark::Area(AreaMark { line: unreachable!() });
+/// let mark = Mark::Area(AreaMark { line: unreachable!(), options: unreachable!() });
 /// ```
 #[derive(Clone, PartialEq)]
 pub struct AreaMark {
     line: LineMark,
+    options: AreaOptions,
 }
 
 impl AreaMark {
@@ -864,7 +914,7 @@ impl AreaMark {
     /// Label, color, dash and width of the line that bounds the area.
     #[must_use]
     pub fn options(&self) -> &AreaOptions {
-        self.line.options()
+        &self.options
     }
 
     /// The line that bounds the area, which is drawn and labelled as a line mark is.

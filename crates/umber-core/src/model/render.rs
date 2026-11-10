@@ -1,5 +1,7 @@
-//! How the cells of heatmaps, 2-D histograms and meshes are drawn: as vector shapes or as one
-//! image.
+//! How marks are drawn: the cells of heatmaps, 2-D histograms and meshes as vector shapes or as
+//! one image with a pixel per cell ([`Render`]), and scatters, lines and triangle meshes filled
+//! by value as vector shapes or, in SVG and PDF output, as one image at the export's raster
+//! resolution ([`MarkRender`]).
 
 /// The fewest cells of a mark's grid (rows times columns) that [`Render::Auto`] draws as an
 /// image.
@@ -73,6 +75,52 @@ impl Render {
             Render::Auto => evenly_spaced && cells >= AUTO_RASTER_CELLS,
         }
     }
+}
+
+/// How a scatter, a line or a triangle mesh filled by value (tripcolor) is drawn in SVG and PDF
+/// output: as vector shapes, the default, or as one image.
+///
+/// [`MarkRender::Raster`] is for marks so dense that vector files grow slow to open, such as a
+/// scatter of a million points or a long noisy line. In SVG and PDF output such a mark is drawn
+/// into one image at the raster resolution the export is given (`raster_dpi`, 300 in the Python
+/// package), and the image takes the mark's place among the other marks. The image covers the
+/// clip of the marks (the plot area, widened beside it for lines as that clip is) in whole
+/// pixels, and that clip cuts it exactly where it cuts vector shapes; marks are always clipped
+/// to it, so no part of the mark is lost. The image is transparent where the mark draws
+/// nothing, so marks below it show through. It holds what the PNG backend draws for the mark at
+/// that resolution, pixel for pixel on the pixel grid of a PNG of the figure, so a viewer that
+/// draws it at that resolution shows what the PNG does. PNG output does not change: a raster
+/// mark is drawn as a vector one. Everything else stays vector: the axes, text, legends and
+/// colorbars, the other marks, and the mark's own value labels and error bars. There is no
+/// automatic choice: a mark is an image only when its options ask for one.
+///
+/// Unlike [`Render`] for grids of cells, the image does not stand for cells: its pixels sample
+/// shapes, so viewers may smooth it when they scale it.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::figure::{AxisData, ScatterOptions};
+/// use umber_core::{Figure, MarkRender, ScaleKind, Theme};
+///
+/// assert_eq!(MarkRender::default(), MarkRender::Vector);
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let options = ScatterOptions { render: MarkRender::Raster, ..ScatterOptions::default() };
+/// figure
+///     .add_axes(ScaleKind::Linear, ScaleKind::Linear)?
+///     .scatter(AxisData::Numbers(vec![0.0, 1.0]), &[1.0, 2.0], options)?;
+/// let pdf = figure.to_pdf(300)?;
+/// assert!(String::from_utf8_lossy(&pdf).contains("/Subtype /Image"));
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MarkRender {
+    /// Vector shapes in every output.
+    #[default]
+    Vector,
+    /// One image in SVG and PDF output, at the export's raster resolution; vector shapes in PNG
+    /// output, which is the same image.
+    Raster,
 }
 
 #[cfg(test)]

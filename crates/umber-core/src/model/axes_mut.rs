@@ -4234,17 +4234,18 @@ impl<'a> AxesMut<'a> {
     /// Adds one line per named pair of coordinate columns, in the given order.
     /// Each group takes the next palette color. The rules of [`AxesMut::line_shared`]
     /// apply to every group; no mark is added unless all groups are valid.
-    /// An empty list of groups is `Error::Data`.
+    /// An empty list of groups is `Error::Data`. Every group is drawn as `render` says, each
+    /// as an image of its own with [`MarkRender::Raster`](crate::MarkRender::Raster).
     ///
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{AxisData, Dash, Figure, ScaleKind, SizeSpec, Theme};
+    /// use umber_core::{AxisData, Dash, Figure, MarkRender, ScaleKind, SizeSpec, Theme};
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let groups = vec![("North".into(), AxisData::Numbers(vec![0.0, 1.0]),
     ///     AxisData::Numbers(vec![2.0, 3.0]))];
-    /// axes.grouped_line(groups, Dash::Solid, SizeSpec::Auto)?;
+    /// axes.grouped_line(groups, Dash::Solid, SizeSpec::Auto, MarkRender::Vector)?;
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -4253,6 +4254,7 @@ impl<'a> AxesMut<'a> {
         groups: Vec<(String, AxisData, AxisData)>,
         dash: crate::Dash,
         width: crate::SizeSpec,
+        render: crate::MarkRender,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.line()";
         check_series_y(CONTEXT, self.y)?;
@@ -4263,6 +4265,7 @@ impl<'a> AxesMut<'a> {
                     label,
                     dash,
                     width,
+                    render,
                     ..LineOptions::default()
                 },
             ))
@@ -4308,9 +4311,10 @@ impl<'a> AxesMut<'a> {
 
     /// Adds one scatter per group, in order with palette colors.
     /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
-    /// All groups use the same marker, size and value labels, and with `connect` each group's
-    /// line joins only its own points. Each group's labels, error bars and line take its color.
-    /// A failed call adds nothing.
+    /// All groups use the same marker, size, value labels and `render`, and with `connect` each
+    /// group's line joins only its own points. Each group's labels, error bars and line take its
+    /// color, and with [`MarkRender::Raster`](crate::MarkRender::Raster) each group is an image
+    /// of its own. A failed call adds nothing.
     ///
     /// # Errors
     ///
@@ -4319,7 +4323,10 @@ impl<'a> AxesMut<'a> {
     /// # Examples
     ///
     /// ```
-    /// use umber_core::{AxisData, Figure, Marker, PointLabels, ScaleKind, ScatterGroup, SizeSpec, Theme};
+    /// use umber_core::{
+    ///     AxisData, Figure, MarkRender, Marker, PointLabels, ScaleKind, ScatterGroup, SizeSpec,
+    ///     Theme,
+    /// };
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
     /// let groups = vec![ScatterGroup::new(
@@ -4327,7 +4334,8 @@ impl<'a> AxesMut<'a> {
     ///     AxisData::Numbers(vec![0.0, 1.0]),
     ///     AxisData::Numbers(vec![2.0, 3.0]),
     /// )];
-    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, PointLabels::default(), true)?;
+    /// let labels = PointLabels::default();
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, labels, true, MarkRender::Vector)?;
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -4338,6 +4346,7 @@ impl<'a> AxesMut<'a> {
         size: crate::SizeSpec,
         labels: PointLabels,
         connect: bool,
+        render: crate::MarkRender,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
         check_not_two_categories(CONTEXT, self.x, self.y)?;
@@ -4372,6 +4381,7 @@ impl<'a> AxesMut<'a> {
                         x_error,
                         y_error,
                         connect,
+                        render,
                         ..ScatterOptions::default()
                     },
                 )

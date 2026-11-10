@@ -186,6 +186,7 @@ fn groups_and_color_maps_color_their_own_bars_and_lines() {
             SizeSpec::Auto,
             PointLabels::default(),
             true,
+            umber_core::MarkRender::Vector,
         )
         .unwrap();
     let scene = render(&f);
@@ -703,10 +704,10 @@ fn png_svg_and_pdf_draw_the_own_bars_and_line() {
     let scene = render(&f);
     let color = stroke_items(&scene)[0].1.color;
     let hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-    let svg = f.to_svg(SvgText::Editable).unwrap();
+    let svg = f.to_svg(SvgText::Editable, 300).unwrap();
     assert!(svg.matches(&hex).count() >= 2, "{hex} in {svg}");
     assert!(f.to_png(72).unwrap().starts_with(b"\x89PNG"));
-    assert!(f.to_pdf().unwrap().starts_with(b"%PDF"));
+    assert!(f.to_pdf(300).unwrap().starts_with(b"%PDF"));
     // All three come from one scene, which draws the line and one bar.
     let strokes = stroke_items(&scene);
     assert_eq!((contours(strokes[0].0), contours(strokes[1].0)), (1, 3));

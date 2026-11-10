@@ -30,6 +30,7 @@ def add(fig: _umber.Figure, row: int, col: int) -> None:
         AUTO,
         0,
         NO_SIZE,
+        0,
     )
 
 
@@ -62,18 +63,18 @@ def test_group_setters_propagate_and_conflicts_are_atomic(operation: int) -> Non
     add(fig, 1, 1)
     set_value(fig, 1, 1, operation, False)
     add(fig, 0, 0)
-    before = fig.to_svg(EDITABLE)
+    before = fig.to_svg(EDITABLE, 300)
     copy = fig.clone()
     set_value(copy, 1, 1, operation, True)
-    assert fig.to_svg(EDITABLE) == before
-    assert copy.to_svg(EDITABLE) != before
+    assert fig.to_svg(EDITABLE, 300) == before
+    assert copy.to_svg(EDITABLE, 300) != before
     with pytest.raises(ub.UsageError) as caught:
         set_value(fig, 0, 0, operation, True)
     assert "shared with row 1, col 1" in str(caught.value)
     assert vars(caught.value)["_umber_hint"] == "set it once for the group, or share fewer axes."
-    assert fig.to_svg(EDITABLE) == before
+    assert fig.to_svg(EDITABLE, 300) == before
     set_value(fig, 0, 0, operation, False)
-    assert fig.to_svg(EDITABLE) == before
+    assert fig.to_svg(EDITABLE, 300) == before
 
 
 @pytest.mark.parametrize("share_x", [NONE, ROW, COL, ALL])
@@ -86,7 +87,7 @@ def test_all_modes_render_with_only_outer_tick_labels(share_x: int, share_y: int
         fig.yticks_labeled(row, col, np.array([1.0, 3.0]), ["LOWY", "HIGHY"])
         fig.xlabel(row, col, "Time", NO_SIZE)
         fig.ylabel(row, col, "Level", NO_SIZE)
-    root = ElementTree.fromstring(fig.to_svg(EDITABLE))
+    root = ElementTree.fromstring(fig.to_svg(EDITABLE, 300))
     texts = ["".join(node.itertext()) for node in root.iter("{http://www.w3.org/2000/svg}text")]
     assert texts.count("LOWX") == (2 if share_x in (COL, ALL) else 4)
     assert texts.count("LOWY") == (2 if share_y in (ROW, ALL) else 4)
@@ -107,7 +108,7 @@ def test_mixed_spans_keep_labels_on_each_panel(dimension: str, reverse: bool) ->
         fig.add_axes(1, row, 1, col, row_span, col_span, LINEAR, 10.0, LINEAR, 10.0)
         fig.xticks_labeled(row, col, np.array([0.0, 1.0]), ["LOWX", "HIGHX"])
         fig.yticks_labeled(row, col, np.array([0.0, 1.0]), ["LOWY", "HIGHY"])
-    root = ElementTree.fromstring(fig.to_svg(EDITABLE))
+    root = ElementTree.fromstring(fig.to_svg(EDITABLE, 300))
     texts = ["".join(node.itertext()) for node in root.iter("{http://www.w3.org/2000/svg}text")]
     for label in ("LOWX", "HIGHX") if dimension == "x" else ("LOWY", "HIGHY"):
         assert texts.count(label) == len(places)
@@ -116,7 +117,7 @@ def test_mixed_spans_keep_labels_on_each_panel(dimension: str, reverse: bool) ->
 def test_mixed_scales_and_cross_group_spans_surface_as_usage_errors() -> None:
     fig = figure(ROW, NONE)
     add(fig, 0, 0)
-    before = fig.to_svg(EDITABLE)
+    before = fig.to_svg(EDITABLE, 300)
     with pytest.raises(ub.UsageError) as caught:
         fig.add_axes(1, 0, 1, 1, 1, 1, CATEGORY, 10.0, LINEAR, 10.0)
     assert str(caught.value) == (
@@ -124,11 +125,11 @@ def test_mixed_scales_and_cross_group_spans_surface_as_usage_errors() -> None:
         "shares its x axis and has Scale.linear()."
     )
     assert vars(caught.value)["_umber_parameter"] == "x"
-    assert fig.to_svg(EDITABLE) == before
+    assert fig.to_svg(EDITABLE, 300) == before
     with pytest.raises(ub.UsageError) as caught:
         fig.add_axes(1, 0, 1, 1, 2, 1, LINEAR, 10.0, LINEAR, 10.0)
     assert str(caught.value) == (
         "Figure.add_axes(): the axes spans rows 0 to 1, which share x in different groups."
     )
     assert vars(caught.value)["_umber_parameter"] == "row_span"
-    assert fig.to_svg(EDITABLE) == before
+    assert fig.to_svg(EDITABLE, 300) == before

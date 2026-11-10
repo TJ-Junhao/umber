@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 from umber import _args, _umber
-from umber._args import type_name
+from umber._args import integer, type_name
 from umber._axes import Axes
 from umber._errors import DataError, new_error
 from umber._figure import Figure, native
@@ -60,24 +60,27 @@ def _native(context: str, figures: object) -> list[_umber.Figure]:
     return pages
 
 
-def to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> bytes:
+def to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes], *, raster_dpi: int = 300) -> bytes:
     """Render several figures as one PDF with embedded fonts.
 
     Each figure is one page at its own size, in list order, and draws what ``Figure.to_pdf()``
-    draws for it. A font used on several pages is embedded once. The same figure may appear
-    more than once. Every figure is rendered before anything is returned.
+    draws for it at ``raster_dpi``. A font used on several pages is embedded once. The same
+    figure may appear more than once. Every figure is rendered before anything is returned.
 
     Args:
         figures: The figures, one per page; a list or tuple with at least one item. An axes
             stands for its figure.
+        raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from 10
+            to 2400 and 300 by default, on every page; see ``Figure.to_pdf()``.
 
     Returns:
         The PDF file contents.
 
     Raises:
-        TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, or an item is
-            not a figure or the axes of one.
+        TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, an item is
+            not a figure or the axes of one, or ``raster_dpi`` is not an int.
         DataError: If ``figures`` is empty.
+        StyleError: If ``raster_dpi`` is out of range.
         DataError, StyleError: If a figure cannot be rendered (see ``Figure.to_pdf()``). The
             error keeps the class the figure's own render raises, and its message begins with
             ``figures[i]: ``, where ``i`` counts from 0.
@@ -91,11 +94,16 @@ def to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> bytes:
         2
     """
     with api_call():
-        return _umber.pdf_pages(_native("to_pdf()", figures), False)
+        pages = _native("to_pdf()", figures)
+        resolution = integer("to_pdf()", "raster_dpi", raster_dpi)
+        return _umber.pdf_pages(pages, False, resolution)
 
 
 def save_pdf(
-    path: str | os.PathLike[str], figures: Sequence[Figure | Axes[Any, Any] | PieAxes]
+    path: str | os.PathLike[str],
+    figures: Sequence[Figure | Axes[Any, Any] | PieAxes],
+    *,
+    raster_dpi: int = 300,
 ) -> None:
     """Render several figures as one PDF document and write it to ``path``.
 
@@ -105,12 +113,15 @@ def save_pdf(
     Args:
         path: The file to write; an existing file is replaced.
         figures: The figures, one per page; a list or tuple with at least one item.
+        raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from 10
+            to 2400 and 300 by default; see ``Figure.to_pdf()``.
 
     Raises:
         TypeError: If ``path`` is not a ``str`` or a path-like object returning a string,
-            ``figures`` is a single ``Figure`` or not a list or tuple, or an item is not a
-            figure or the axes of one.
+            ``figures`` is a single ``Figure`` or not a list or tuple, an item is not a
+            figure or the axes of one, or ``raster_dpi`` is not an int.
         DataError: If ``figures`` is empty.
+        StyleError: If ``raster_dpi`` is out of range.
         DataError, StyleError: If a figure cannot be rendered. The error keeps the class the
             figure's own render raises, and its message begins with ``figures[i]: ``, where
             ``i`` counts from 0.
@@ -125,5 +136,7 @@ def save_pdf(
     with api_call():
         _args.require_path("save_pdf()", "path", path)
         target = _args.path("save_pdf()", "path", path)
-        pdf = _umber.pdf_pages(_native("save_pdf()", figures), True)
+        pages = _native("save_pdf()", figures)
+        resolution = integer("save_pdf()", "raster_dpi", raster_dpi)
+        pdf = _umber.pdf_pages(pages, True, resolution)
         Path(target).write_bytes(pdf)

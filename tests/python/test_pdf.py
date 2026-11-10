@@ -109,5 +109,5 @@ def test_pdf_render_errors_use_the_call_context(tmp_path: Path) -> None:
 def test_pdf_bytes_match_the_native_figure() -> None:
     native = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), 1, 1, 0, 0, 0, 0)
     pdf = ub.Figure(3, 2).to_pdf()
-    assert native.to_pdf() == pdf
-    assert native.pdf_for_file() == pdf
+    assert native.to_pdf(300) == pdf
+    assert native.pdf_for_file(300) == pdf

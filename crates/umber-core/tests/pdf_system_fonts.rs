@@ -113,8 +113,8 @@ fn child(dir: &FsPath) {
     let figure_scene = figure.to_scene(&library).unwrap();
 
     let before = [
-        render_pdf(&scene).unwrap(),
-        render_pdf(&figure_scene).unwrap(),
+        render_pdf(&scene, 300).unwrap(),
+        render_pdf(&figure_scene, 300).unwrap(),
     ];
     for pdf in &before {
         assert!(
@@ -125,13 +125,13 @@ fn child(dir: &FsPath) {
     // Overwritten in place with a different font.
     std::fs::write(&font_file, fixture("outline-variable.ttf")).unwrap();
     let replaced = [
-        render_pdf(&scene).unwrap(),
-        render_pdf(&figure_scene).unwrap(),
+        render_pdf(&scene, 300).unwrap(),
+        render_pdf(&figure_scene, 300).unwrap(),
     ];
     std::fs::remove_file(&font_file).unwrap();
     let removed = [
-        render_pdf(&scene).unwrap(),
-        render_pdf(&figure_scene).unwrap(),
+        render_pdf(&scene, 300).unwrap(),
+        render_pdf(&figure_scene, 300).unwrap(),
     ];
     assert!(
         before == replaced,

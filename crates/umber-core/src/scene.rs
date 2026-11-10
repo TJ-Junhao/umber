@@ -365,6 +365,29 @@ pub enum Item {
         /// The items in the group.
         items: Vec<Item>,
     },
+    /// Items that SVG and PDF output draw as one image, at the raster resolution their render
+    /// call is given: a mark drawn with [`MarkRender::Raster`](crate::MarkRender::Raster).
+    ///
+    /// The image covers `rect` widened to whole pixels of the grid the PNG backend draws on at
+    /// that resolution, and cut to the scene, and holds the items as the PNG backend draws them
+    /// there, on a transparent background: pixel `(i, j)` of the image is pixel
+    /// `(left + i, top + j)` of a PNG of the items alone, where `left` and `top` are the image's
+    /// first column and row on that grid. The image keeps the items' place among the other
+    /// items and the clip of its groups; what the items draw outside the image is lost, so
+    /// `rect` should hold everything visible of them, such as the plot area a group clips them
+    /// to. The SVG backend writes the image as an `<image>` holding a PNG, the PDF backend as an
+    /// image XObject with a soft mask for its transparency; both let viewers smooth it, as its
+    /// pixels sample shapes. An image of no visible pixel is left out, as is the item when
+    /// `rect` is not finite, not positive in size or beyond the renderers' coordinate limit.
+    ///
+    /// The PNG backend draws the items as a group without a clip, so PNG output is the same
+    /// with and without this item around them.
+    Raster {
+        /// The rectangle the image covers, in points, before it is widened to whole pixels.
+        rect: Rect,
+        /// The items, drawn in order.
+        items: Vec<Item>,
+    },
 }
 
 /// A figure as a list of drawing primitives.
@@ -398,7 +421,7 @@ impl Drop for Scene {
     fn drop(&mut self) {
         let mut stack = std::mem::take(&mut self.items);
         while let Some(item) = stack.pop() {
-            if let Item::Group { items, .. } = item {
+            if let Item::Group { items, .. } | Item::Raster { items, .. } = item {
                 stack.extend(items);
             }
         }
@@ -464,7 +487,7 @@ impl Scene {
     }
 
     /// Number of leaf items (fills, strokes, markers, text and images), counted through
-    /// groups.
+    /// groups and through the items drawn as one image ([`Item::Raster`]).
     ///
     /// # Examples
     ///
@@ -482,7 +505,7 @@ impl Scene {
             items
                 .iter()
                 .map(|item| match item {
-                    Item::Group { items, .. } => count(items),
+                    Item::Group { items, .. } | Item::Raster { items, .. } => count(items),
                     _ => 1,
                 })
                 .sum()

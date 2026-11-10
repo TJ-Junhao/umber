@@ -698,45 +698,63 @@ class Figure:
             resolution = integer("Figure.to_png()", "dpi", dpi)
             return self._native.to_png(resolution)
 
-    def to_svg(self, *, text: SvgText = SvgText.OUTLINES) -> str:
+    def to_svg(self, *, text: SvgText = SvgText.OUTLINES, raster_dpi: int = 300) -> str:
         """Render the figure as an SVG document.
 
         Args:
             text: How text is written. ``SvgText.OUTLINES`` draws it as paths, which look the
                 same everywhere; ``SvgText.EDITABLE`` keeps it as text elements.
+            raster_dpi: The resolution, from 10 to 2400 pixels per inch and 300 by default, of
+                the marks drawn with ``render=Render.RASTER``, each one image. It changes
+                nothing else: a figure without such a mark gives the same document at every
+                ``raster_dpi``.
 
         Returns:
             The SVG document.
 
         Raises:
-            TypeError: If ``text`` is not an ``SvgText``.
-            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, or bubbles are too large for the plot of an axis with
-                automatic limits.
+            TypeError: If ``text`` is not an ``SvgText`` or ``raster_dpi`` is not an int.
+            StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, or the image of a mark would be
+                larger than a PNG may be (32,767 pixels on a side, 2**26 pixels in all).
 
         Example:
             >>> import umber as ub
             >>> svg = ub.Figure().to_svg(text=ub.SvgText.EDITABLE)
             >>> svg.startswith("<svg")
             True
+            >>> dense = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], render=ub.Render.RASTER)
+            >>> svg = dense.figure.to_svg(raster_dpi=150)
+            >>> svg.count("<image")
+            1
         """
         with api_call():
             mode = instance("Figure.to_svg()", "text", text, SvgText, _SVG_TEXT_HINT)
-            return self._native.to_svg(mode.value)
+            resolution = integer("Figure.to_svg()", "raster_dpi", raster_dpi)
+            return self._native.to_svg(mode.value, resolution)
 
-    def to_pdf(self) -> bytes:
+    def to_pdf(self, *, raster_dpi: int = 300) -> bytes:
         """Render the figure as a single-page PDF with embedded fonts.
 
         The page has the figure's size in points (72 points per inch). Lines, fills and text
-        stay vector; raster cell grids remain images. Text can be selected and searched.
+        stay vector; raster cell grids remain images, and so do the marks drawn with
+        ``render=Render.RASTER``, at ``raster_dpi``. Text can be selected and searched.
+
+        Args:
+            raster_dpi: The resolution, from 10 to 2400 pixels per inch and 300 by default, of
+                the marks drawn with ``render=Render.RASTER``. It changes nothing else: a
+                figure without such a mark gives the same bytes at every ``raster_dpi``.
 
         Returns:
             The PDF file contents.
 
         Raises:
-            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, bubbles are too large for the plot of an axis with
-                automatic limits, or a font cannot render the requested text.
+            TypeError: If ``raster_dpi`` is not an int.
+            StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, a font cannot render the requested
+                text, or the image of a mark would be larger than a PNG may be.
 
         Example:
             >>> import umber as ub
@@ -745,7 +763,8 @@ class Figure:
             True
         """
         with api_call():
-            return self._native.to_pdf()
+            resolution = integer("Figure.to_pdf()", "raster_dpi", raster_dpi)
+            return self._native.to_pdf(resolution)
 
     def save_png(self, path: str | os.PathLike[str], *, dpi: int = 200) -> None:
         """Render the figure as a PNG image and write it to ``path``.
@@ -772,19 +791,28 @@ class Figure:
             target = _args.path("Figure.save_png()", "path", path)
             Path(target).write_bytes(self._native.png_for_file(resolution))
 
-    def save_svg(self, path: str | os.PathLike[str], *, text: SvgText = SvgText.OUTLINES) -> None:
+    def save_svg(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        text: SvgText = SvgText.OUTLINES,
+        raster_dpi: int = 300,
+    ) -> None:
         """Render the figure as an SVG document and write it to ``path`` in UTF-8.
 
         Args:
             path: The file to write; an existing file is replaced.
             text: How text is written; see ``to_svg()``.
+            raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from
+                10 to 2400 and 300 by default; see ``to_svg()``.
 
         Raises:
-            TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
-                an ``SvgText``.
-            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, or bubbles are too large for the plot of an axis with
-                automatic limits.
+            TypeError: If ``path`` is not a ``str`` or path-like object, ``text`` is not an
+                ``SvgText`` or ``raster_dpi`` is not an int.
+            StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, or the image of a mark would be
+                larger than a PNG may be.
             OSError: If the file cannot be written.
 
         Example:
@@ -794,22 +822,27 @@ class Figure:
         with api_call():
             _args.require_path("Figure.save_svg()", "path", path)
             mode = instance("Figure.save_svg()", "text", text, SvgText, _SVG_TEXT_HINT)
+            resolution = integer("Figure.save_svg()", "raster_dpi", raster_dpi)
             target = _args.path("Figure.save_svg()", "path", path)
-            svg = self._native.svg_for_file(mode.value)
+            svg = self._native.svg_for_file(mode.value, resolution)
             # ``newline=""`` writes the document's line ends as they are, on every platform.
             Path(target).write_text(svg, encoding="utf-8", newline="")
 
-    def save_pdf(self, path: str | os.PathLike[str]) -> None:
+    def save_pdf(self, path: str | os.PathLike[str], *, raster_dpi: int = 300) -> None:
         """Render the figure as a PDF document and write it to ``path``.
 
         Args:
             path: The file to write; an existing file is replaced.
+            raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from
+                10 to 2400 and 300 by default; see ``to_pdf()``.
 
         Raises:
-            TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
-            StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-                cannot fit their room, bubbles are too large for the plot of an axis with
-                automatic limits, or a font cannot render the requested text.
+            TypeError: If ``path`` is not a ``str`` or a path-like object returning a string,
+                or ``raster_dpi`` is not an int.
+            StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+                axis labels or x tick labels cannot fit their room, bubbles are too large for
+                the plot of an axis with automatic limits, a font cannot render the requested
+                text, or the image of a mark would be larger than a PNG may be.
             OSError: If the file cannot be written.
 
         Example:
@@ -820,8 +853,9 @@ class Figure:
         """
         with api_call():
             _args.require_path("Figure.save_pdf()", "path", path)
+            resolution = integer("Figure.save_pdf()", "raster_dpi", raster_dpi)
             target = _args.path("Figure.save_pdf()", "path", path)
-            Path(target).write_bytes(self._native.pdf_for_file())
+            Path(target).write_bytes(self._native.pdf_for_file(resolution))
 
     def __copy__(self) -> Self:
         with api_call():

@@ -95,14 +95,14 @@ fn streamlines_agree_in_png_svg_and_pdf() {
             let figure = figure(theme.clone(), mapped, (41, 1.0));
             let scene = figure.to_scene(FontLibrary::global()).unwrap();
             for text in [SvgText::Editable, SvgText::Outlines] {
-                let svg = figure.to_svg(text).unwrap();
+                let svg = figure.to_svg(text, 300).unwrap();
                 assert!(svg.contains("<path"), "{name} {mapped}");
             }
             let dpi = 144;
             let png = figure.to_png(dpi).unwrap();
             assert!(image::decode_rgba8(&png).is_ok(), "{name} {mapped}");
-            let pdf = figure.to_pdf().unwrap();
-            assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+            let pdf = figure.to_pdf(300).unwrap();
+            assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
             if poppler {
                 let dir = pdf_check::scratch(&format!("streamlines-{name}-{mapped}"));
                 let path = pdf_check::write(&dir, "streamlines.pdf", &pdf);
@@ -120,8 +120,8 @@ fn a_dense_grid_in_one_color_is_two_items() {
     assert!(matches!(items[0], Item::Stroke { .. }));
     assert!(matches!(items[1], Item::Fill { .. }));
     for text in [SvgText::Editable, SvgText::Outlines] {
-        assert!(figure.to_svg(text).is_ok());
+        assert!(figure.to_svg(text, 300).is_ok());
     }
     assert!(figure.to_png(72).is_ok());
-    assert!(figure.to_pdf().is_ok());
+    assert!(figure.to_pdf(300).is_ok());
 }

@@ -60,6 +60,17 @@ fn check_items(items: &[Item]) {
                     y: rect.y + rect.height,
                 });
             }
+            Item::Raster { rect, items } => {
+                check(Point {
+                    x: rect.x,
+                    y: rect.y,
+                });
+                check(Point {
+                    x: rect.x + rect.width,
+                    y: rect.y + rect.height,
+                });
+                check_items(items);
+            }
             Item::Group { clip, items } => {
                 if let Some(r) = clip {
                     check(Point { x: r.x, y: r.y });

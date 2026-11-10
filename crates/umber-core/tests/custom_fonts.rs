@@ -130,7 +130,10 @@ fn bold_fallback_title_matches_regular_at_the_title_size() {
             render_png(&regular, 96).unwrap()
         );
         for mode in [SvgText::Outlines, SvgText::Editable] {
-            assert_eq!(render_svg(&bold, mode), render_svg(&regular, mode));
+            assert_eq!(
+                render_svg(&bold, mode, 300).unwrap(),
+                render_svg(&regular, mode, 300).unwrap()
+            );
         }
     }
 }

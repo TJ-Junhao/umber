@@ -263,7 +263,7 @@ fn mismatched_cmap_rejected_atomically() {
             mapped(by(&[0.0, 1.0], Cmap::viridis())),
         )
         .unwrap();
-    let before = f.to_svg(SvgText::Editable).unwrap();
+    let before = f.to_svg(SvgText::Editable, 300).unwrap();
     let marks = f.single_axes().marks().to_vec();
 
     let err = f
@@ -329,7 +329,7 @@ fn mismatched_cmap_rejected_atomically() {
         .unwrap();
 
     assert_eq!(f.single_axes().marks(), marks);
-    assert_eq!(f.to_svg(SvgText::Editable).unwrap(), before);
+    assert_eq!(f.to_svg(SvgText::Editable, 300).unwrap(), before);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn clim_conflicts_are_rejected_atomically() {
     f.single_axes_mut()
         .scatter(nums(&[1.0, 2.0]), &[1.0, 2.0], mapped(centered))
         .unwrap();
-    let before = f.to_svg(SvgText::Editable).unwrap();
+    let before = f.to_svg(SvgText::Editable, 300).unwrap();
     let err = f.single_axes_mut().clim(6.0, 10.0).unwrap_err();
     assert!(matches!(err, Error::Style { .. }));
     assert_eq!(
@@ -353,12 +353,12 @@ fn clim_conflicts_are_rejected_atomically() {
     let err = f.single_axes_mut().clim(5.0, 2.0).unwrap_err();
     assert_eq!(err.hint(), Some("swap the two values."));
     assert_eq!(f.single_axes().color_limits(), None);
-    assert_eq!(f.to_svg(SvgText::Editable).unwrap(), before);
+    assert_eq!(f.to_svg(SvgText::Editable, 300).unwrap(), before);
 
     // Limits set first are checked when the mark arrives.
     let mut f = figure(Theme::pigment());
     f.single_axes_mut().clim(0.0, 10.0).unwrap();
-    let before = f.to_svg(SvgText::Editable).unwrap();
+    let before = f.to_svg(SvgText::Editable, 300).unwrap();
     let log = ColorBy {
         scale: Transform::Log(LogBase::TEN),
         ..ColorBy::new(vec![1.0])
@@ -386,7 +386,7 @@ fn clim_conflicts_are_rejected_atomically() {
         "Axes.scatter(): center is 12; it must lie inside the color range 0 to 10."
     );
     assert!(f.single_axes().marks().is_empty());
-    assert_eq!(f.to_svg(SvgText::Editable).unwrap(), before);
+    assert_eq!(f.to_svg(SvgText::Editable, 300).unwrap(), before);
 }
 
 #[test]

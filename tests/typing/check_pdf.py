@@ -19,8 +19,8 @@ def save_to_pathlike(path: os.PathLike[str]) -> None:
 
 
 def native_pdf(native: _umber.Figure) -> None:
-    assert_type(native.to_pdf(), bytes)
-    assert_type(native.pdf_for_file(), bytes)
+    assert_type(native.to_pdf(300), bytes)
+    assert_type(native.pdf_for_file(300), bytes)
 
 
 fig.save_pdf(b"chart.pdf")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

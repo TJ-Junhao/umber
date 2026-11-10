@@ -129,15 +129,15 @@ fn every_format_draws_the_same_scene() {
     let figure = circle(true);
     let scene = render(&figure);
     let plain = circle(false);
-    let editable = render_svg(&scene, SvgText::Editable);
-    assert_eq!(figure.to_svg(SvgText::Editable).unwrap(), editable);
-    assert_ne!(plain.to_svg(SvgText::Editable).unwrap(), editable);
-    let outlines = render_svg(&scene, SvgText::Outlines);
-    assert_eq!(figure.to_svg(SvgText::Outlines).unwrap(), outlines);
+    let editable = render_svg(&scene, SvgText::Editable, 300).unwrap();
+    assert_eq!(figure.to_svg(SvgText::Editable, 300).unwrap(), editable);
+    assert_ne!(plain.to_svg(SvgText::Editable, 300).unwrap(), editable);
+    let outlines = render_svg(&scene, SvgText::Outlines, 300).unwrap();
+    assert_eq!(figure.to_svg(SvgText::Outlines, 300).unwrap(), outlines);
     let png = render_png(&scene, 72).unwrap();
     assert_eq!(figure.to_png(72).unwrap(), png);
     assert_ne!(plain.to_png(72).unwrap(), png);
-    let pdf = render_pdf(&scene).unwrap();
-    assert_eq!(figure.to_pdf().unwrap(), pdf);
-    assert_ne!(plain.to_pdf().unwrap(), pdf);
+    let pdf = render_pdf(&scene, 300).unwrap();
+    assert_eq!(figure.to_pdf(300).unwrap(), pdf);
+    assert_ne!(plain.to_pdf(300).unwrap(), pdf);
 }

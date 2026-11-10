@@ -24,8 +24,11 @@ use crate::scene::{
 const CONTEXT: &str = "Figure.to_png()";
 const MIN_DPI: u32 = 10;
 const MAX_DPI: u32 = 2400;
-const MAX_SIDE: f64 = 32_767.0;
-const MAX_PIXELS: f64 = 67_108_864.0; // 2^26
+/// The largest side, in pixels, of an image the backends draw: a PNG, or the image of marks
+/// drawn as one image in vector output.
+pub(super) const MAX_SIDE: f64 = 32_767.0;
+/// The most pixels, 2^26, of an image the backends draw.
+pub(super) const MAX_PIXELS: f64 = 67_108_864.0;
 /// A marker sprite larger than this, in pixels per side, is not cached.
 const MAX_SPRITE_SIDE: i32 = 256;
 /// Sub-pixel phases per axis for marker sprites (8 x 8 = 64 sprites at most per item).
@@ -90,21 +93,76 @@ impl DeviceScale {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct DevicePixels(f32);
 
+/// The pixel of the device grid that is a pixmap's top-left pixel. The device grid is the
+/// grid of pixels of a PNG of the whole scene at the pixmap's resolution: a PNG's pixmap starts
+/// at its pixel (0, 0), and the pixmap of a region ([`draw_region`]) at the region's corner.
+/// Whole pixels, so that every shape keeps its sub-pixel position on the grid and is drawn
+/// alike in both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DeviceOrigin {
+    /// The column of the device grid of the pixmap's first column.
+    pub(super) x: i32,
+    /// The row of the device grid of the pixmap's first row.
+    pub(super) y: i32,
+}
+
+impl DeviceOrigin {
+    /// The origin of a pixmap that holds the whole scene.
+    const SCENE: DeviceOrigin = DeviceOrigin { x: 0, y: 0 };
+
+    /// The pixmap coordinate of the scene point `points` along x, at `scale`.
+    fn x(self, scale: DeviceScale, points: f32) -> DevicePixels {
+        // A whole number of pixels is subtracted exactly, so the sub-pixel phase is kept.
+        DevicePixels(scale.to_device(points).0 - self.x as f32)
+    }
+
+    /// The pixmap coordinate of the scene point `points` along y, at `scale`.
+    fn y(self, scale: DeviceScale, points: f32) -> DevicePixels {
+        DevicePixels(scale.to_device(points).0 - self.y as f32)
+    }
+
+    /// The transform from scene points to the pixmap at `scale`. For [`DeviceOrigin::SCENE`]
+    /// it is the scale alone.
+    fn root(self, scale: DeviceScale) -> sk::Transform {
+        // Integer negation, so that no origin gives a translation of -0.
+        sk::Transform::from_row(
+            scale.get(),
+            0.0,
+            0.0,
+            scale.get(),
+            (-self.x) as f32,
+            (-self.y) as f32,
+        )
+    }
+}
+
 fn rasterize(scene: &Scene, dpi: u32) -> Result<sk::Pixmap> {
     let (width, height) = pixel_size(scene, dpi)?;
     let Some(mut pixmap) = sk::Pixmap::new(width, height) else {
         return Err(too_large("the image cannot be allocated"));
     };
     pixmap.fill(color(scene.background));
-    let scale = DeviceScale::new(dpi);
-    let mut canvas = Canvas {
-        pixmap,
-        scale,
-        root: sk::Transform::from_scale(scale.get(), scale.get()),
-        mask: None,
-    };
+    let mut canvas = Canvas::new(pixmap, DeviceScale::new(dpi), DeviceOrigin::SCENE);
     canvas.items(&scene.items, None, 0);
     Ok(canvas.pixmap)
+}
+
+/// `items` drawn at `dpi` on a transparent pixmap of `size` pixels that covers the device grid
+/// of a PNG at `dpi` from its pixel `origin` (see [`DeviceOrigin`]): each pixel is the pixel of
+/// the grid it covers in a PNG of a scene that holds only `items`, on a transparent background.
+/// `None` when the pixmap cannot be allocated; the caller bounds the size. `depth` is the number
+/// of groups around the items, which counts toward [`MAX_GROUP_DEPTH`] as in a PNG.
+pub(super) fn draw_region(
+    items: &[Item],
+    dpi: u32,
+    origin: DeviceOrigin,
+    (width, height): (u32, u32),
+    depth: usize,
+) -> Option<sk::Pixmap> {
+    let pixmap = sk::Pixmap::new(width, height)?;
+    let mut canvas = Canvas::new(pixmap, DeviceScale::new(dpi), origin);
+    canvas.items(items, None, depth);
+    Some(canvas.pixmap)
 }
 
 fn too_large(what: &str) -> Error {
@@ -117,13 +175,27 @@ fn too_large(what: &str) -> Error {
 /// `dpi` as the `u32` the renderer works in, or `Error::Style` under `context` when it is
 /// outside `10..=2400`. The message names the value as given, however large or negative.
 pub(crate) fn check_dpi(context: &'static str, dpi: i64) -> Result<u32> {
-    match u32::try_from(dpi) {
+    check_resolution(context, "dpi", dpi)
+}
+
+/// The resolution of the marks that SVG and PDF output draw as images, checked as
+/// [`check_dpi`] checks a PNG's, with errors that name `raster_dpi`.
+pub(crate) fn check_raster_dpi(context: &'static str, raster_dpi: i64) -> Result<u32> {
+    check_resolution(context, "raster_dpi", raster_dpi)
+}
+
+/// `value`, a resolution named `parameter`, as a `u32` in `10..=2400`, or `Error::Style` under
+/// `context` naming the parameter and the value as given.
+fn check_resolution(context: &'static str, parameter: &'static str, value: i64) -> Result<u32> {
+    match u32::try_from(value) {
         Ok(valid) if (MIN_DPI..=MAX_DPI).contains(&valid) => Ok(valid),
         _ => Err(Error::style(
             context,
-            format!("dpi {dpi} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."),
+            format!(
+                "{parameter} {value} is out of range; use a value from {MIN_DPI} to {MAX_DPI}."
+            ),
         )
-        .with_parameter("dpi")),
+        .with_parameter(parameter)),
     }
 }
 
@@ -315,10 +387,15 @@ struct ClipRect {
 }
 
 impl ClipRect {
-    /// Converts a scene rectangle to device pixels and intersects it with the pixmap bounds
-    /// `(0, 0, width, height)`. `None` when the rectangle is invalid (the SVG rule: finite,
-    /// positive size) or the intersection is empty.
-    fn from_rect(r: &Rect, scale: DeviceScale, width: u32, height: u32) -> Option<ClipRect> {
+    /// Converts a scene rectangle to the pixels of a pixmap at `origin` and intersects it with
+    /// the pixmap bounds `(0, 0, width, height)`. `None` when the rectangle is invalid (the SVG
+    /// rule: finite, positive size) or the intersection is empty.
+    fn from_rect(
+        r: &Rect,
+        (scale, origin): (DeviceScale, DeviceOrigin),
+        width: u32,
+        height: u32,
+    ) -> Option<ClipRect> {
         if !clip_is_valid(r) {
             return None;
         }
@@ -326,11 +403,12 @@ impl ClipRect {
         let (x, y) = (f64::from(r.x), f64::from(r.y));
         let (right, bottom) = (x + f64::from(r.width), y + f64::from(r.height));
         let (w, h) = (f64::from(width), f64::from(height));
+        let (ox, oy) = (f64::from(origin.x), f64::from(origin.y));
         let out = ClipRect {
-            left: (x * s).clamp(0.0, w) as f32,
-            top: (y * s).clamp(0.0, h) as f32,
-            right: (right * s).clamp(0.0, w) as f32,
-            bottom: (bottom * s).clamp(0.0, h) as f32,
+            left: (x * s - ox).clamp(0.0, w) as f32,
+            top: (y * s - oy).clamp(0.0, h) as f32,
+            right: (right * s - ox).clamp(0.0, w) as f32,
+            bottom: (bottom * s - oy).clamp(0.0, h) as f32,
         };
         (out.left < out.right && out.top < out.bottom).then_some(out)
     }
@@ -373,11 +451,13 @@ impl ClipRect {
     }
 }
 
-/// The render target shared by every item draw: the pixmap, the device scale, the root
-/// transform, and the clip mask with the rectangle it was built from, when a clip is active.
+/// The render target shared by every item draw: the pixmap, the device scale, the pixmap's
+/// origin on the device grid, the root transform, and the clip mask with the rectangle it was
+/// built from, when a clip is active.
 struct Surface<'a> {
     pixmap: &'a mut sk::Pixmap,
     scale: DeviceScale,
+    origin: DeviceOrigin,
     root: sk::Transform,
     clip: Option<(&'a sk::Mask, ClipRect)>,
 }
@@ -424,7 +504,7 @@ fn sampled_fill(surface: &mut Surface<'_>, fill: &SampledFill<'_>) {
         endpoints,
         rule,
     } = *fill;
-    let scale = surface.scale;
+    let (scale, origin, root) = (surface.scale, surface.origin, surface.root);
     let mask = surface.mask();
     let pixmap = &mut *surface.pixmap;
     let gradient = normalize_gradient(&crate::LinearGradient::sampled(
@@ -436,21 +516,12 @@ fn sampled_fill(surface: &mut Surface<'_>, fill: &SampledFill<'_>) {
         GradientKind::Linear { start, end, .. } => (start, end),
         other => {
             if let Some(paint) = fill_paint(other) {
-                pixmap.fill_path(
-                    path,
-                    &paint,
-                    rule,
-                    sk::Transform::from_scale(scale.get(), scale.get()),
-                    mask,
-                );
+                pixmap.fill_path(path, &paint, rule, root, mask);
             }
             return;
         }
     };
-    let Some(path) = path
-        .clone()
-        .transform(sk::Transform::from_scale(scale.get(), scale.get()))
-    else {
+    let Some(path) = path.clone().transform(root) else {
         refused();
         return;
     };
@@ -470,9 +541,14 @@ fn sampled_fill(surface: &mut Surface<'_>, fill: &SampledFill<'_>) {
     let length2 = dx * dx + dy * dy;
     let factor = f64::from(scale.get());
     let width = texture.width() as usize;
+    // The texture's pixels in pixmap coordinates, moved to the device grid by the origin.
+    let (left_on_grid, top_on_grid) = (
+        f64::from(left) + f64::from(origin.x),
+        f64::from(top) + f64::from(origin.y),
+    );
     for (index, pixel) in texture.pixels_mut().iter_mut().enumerate() {
-        let x = (f64::from(left) + (index % width) as f64 + 0.5) / factor;
-        let y = (f64::from(top) + (index / width) as f64 + 0.5) / factor;
+        let x = (left_on_grid + (index % width) as f64 + 0.5) / factor;
+        let y = (top_on_grid + (index / width) as f64 + 0.5) / factor;
         let t = (((x - f64::from(start.x)) * dx + (y - f64::from(start.y)) * dy) / length2)
             .clamp(0.0, 1.0);
         let color = cmap.at(t);
@@ -498,12 +574,26 @@ fn sampled_fill(surface: &mut Surface<'_>, fill: &SampledFill<'_>) {
 struct Canvas {
     pixmap: sk::Pixmap,
     scale: DeviceScale,
+    /// Where the pixmap lies on the device grid.
+    origin: DeviceOrigin,
     root: sk::Transform,
     /// The one clip mask that may exist, with the rectangle it was built from.
     mask: Option<(ClipRect, sk::Mask)>,
 }
 
 impl Canvas {
+    /// A canvas that draws on `pixmap` at `scale`, the pixmap lying at `origin` on the device
+    /// grid, with no clip.
+    fn new(pixmap: sk::Pixmap, scale: DeviceScale, origin: DeviceOrigin) -> Canvas {
+        Canvas {
+            pixmap,
+            scale,
+            origin,
+            root: origin.root(scale),
+            mask: None,
+        }
+    }
+
     /// Makes sure the live mask (if any) is the one for `clip`. Returns `false` when the mask
     /// cannot be built, which omits the item.
     fn use_clip(&mut self, clip: Option<ClipRect>) -> bool {
@@ -538,12 +628,15 @@ impl Canvas {
         while let Some((item, rest)) = items.split_first() {
             match item {
                 Item::Group { clip: own, items } => self.group(own.as_ref(), items, clip, depth),
+                // Drawn as the group without a clip that it is in PNG output.
+                Item::Raster { items, .. } => self.group(None, items, clip, depth),
                 leaf => {
                     if self.use_clip(clip) {
                         let consumed = colored_markers::draw(
                             &mut Surface {
                                 pixmap: &mut self.pixmap,
                                 scale: self.scale,
+                                origin: self.origin,
                                 root: self.root,
                                 clip: self.mask.as_ref().map(|(rect, mask)| (mask, *rect)),
                             },
@@ -570,7 +663,7 @@ impl Canvas {
             Some(rect) => {
                 let Some(rect) = ClipRect::from_rect(
                     rect,
-                    self.scale,
+                    (self.scale, self.origin),
                     self.pixmap.width(),
                     self.pixmap.height(),
                 ) else {
@@ -593,6 +686,7 @@ impl Canvas {
         let mut surface = Surface {
             pixmap: &mut self.pixmap,
             scale: self.scale,
+            origin: self.origin,
             root: self.root,
             clip: self.mask.as_ref().map(|(rect, mask)| (mask, *rect)),
         };
@@ -684,7 +778,7 @@ impl Canvas {
                     pixels,
                 },
             ),
-            Item::Group { .. } => {}
+            Item::Group { .. } | Item::Raster { .. } => {}
         }
     }
 }
@@ -702,15 +796,16 @@ fn draw_image(surface: &mut Surface<'_>, image: &ImageView<'_>) {
         pixels,
     } = *image;
     let clip = surface.clip.map(|(_, clip)| clip);
-    let scale = surface.scale;
+    let (scale, origin) = (surface.scale, surface.origin);
     let pixmap = &mut *surface.pixmap;
     if !image_is_drawable(rect, width, height, pixels) {
         return;
     }
     let s = f64::from(scale.get());
-    let (left, top) = (f64::from(rect.x) * s, f64::from(rect.y) * s);
-    let right = (f64::from(rect.x) + f64::from(rect.width)) * s;
-    let bottom = (f64::from(rect.y) + f64::from(rect.height)) * s;
+    let (ox, oy) = (f64::from(origin.x), f64::from(origin.y));
+    let (left, top) = (f64::from(rect.x) * s - ox, f64::from(rect.y) * s - oy);
+    let right = (f64::from(rect.x) + f64::from(rect.width)) * s - ox;
+    let bottom = (f64::from(rect.y) + f64::from(rect.height)) * s - oy;
     let (canvas_w, canvas_h) = (f64::from(pixmap.width()), f64::from(pixmap.height()));
     // The visible window: the clip, or the whole pixmap.
     let window = clip.map_or([0.0, 0.0, canvas_w, canvas_h], |c| {
@@ -1197,7 +1292,7 @@ fn place_markers<K: SpriteKind>(
     queue: &mut Vec<Placement<K::Colors>>,
     colors: K::Colors,
 ) {
-    let (scale, root, clip) = (surface.scale, surface.root, surface.clip);
+    let (scale, origin, root, clip) = (surface.scale, surface.origin, surface.root, surface.clip);
     let pixmap = &mut *surface.pixmap;
     let (width, height) = (pixmap.width() as i32, pixmap.height() as i32);
     let mask = clip.map(|(m, _)| m);
@@ -1207,8 +1302,8 @@ fn place_markers<K: SpriteKind>(
             marker.draw(pixmap, root.pre_translate(p.x, p.y), mask);
             continue;
         };
-        let (x, px) = split_phase(scale.to_device(p.x));
-        let (y, py) = split_phase(scale.to_device(p.y));
+        let (x, px) = split_phase(origin.x(scale, p.x));
+        let (y, py) = split_phase(origin.y(scale, p.y));
         let (left, top) = (x - sprites.origin.0, y - sprites.origin.1);
         let (w, h) = (sprites.size.0 as i32, sprites.size.1 as i32);
         if left >= width || top >= height || left + w <= 0 || top + h <= 0 {
@@ -2374,13 +2469,9 @@ mod tests {
                 255,
             ]);
         }
-        let clip = clip.map(|r| ClipRect::from_rect(&r, scale, width, height).unwrap());
-        let mut canvas = Canvas {
-            pixmap: background.clone(),
-            scale,
-            root,
-            mask: None,
-        };
+        let clip = clip
+            .map(|r| ClipRect::from_rect(&r, (scale, DeviceOrigin::SCENE), width, height).unwrap());
+        let mut canvas = Canvas::new(background.clone(), scale, DeviceOrigin::SCENE);
         assert!(canvas.use_clip(clip));
         let clip = canvas.mask.as_ref().map(|(c, m)| (m, *c));
         let shape = circle(4.0);
@@ -2413,6 +2504,7 @@ mod tests {
                     let mut surface = Surface {
                         pixmap: &mut queued,
                         scale,
+                        origin: DeviceOrigin::SCENE,
                         root,
                         clip,
                     };
@@ -2425,6 +2517,7 @@ mod tests {
         let mut surface = Surface {
             pixmap: &mut reference,
             scale,
+            origin: DeviceOrigin::SCENE,
             root,
             clip,
         };

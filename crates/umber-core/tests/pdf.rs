@@ -165,8 +165,8 @@ fn text_scene(library: &FontLibrary, fonts: &[Font], text: &str) -> Scene {
 #[test]
 fn pdf_is_deterministic() {
     let figure = line_figure();
-    let first = figure.to_pdf().unwrap();
-    let second = figure.to_pdf().unwrap();
+    let first = figure.to_pdf(300).unwrap();
+    let second = figure.to_pdf(300).unwrap();
     assert!(first == second, "two renders of one figure differ");
     assert!(first.starts_with(b"%PDF-1.7\n"));
     assert!(first.ends_with(b"%%EOF") || first.ends_with(b"%%EOF\n"));
@@ -183,7 +183,7 @@ fn pdf_is_deterministic() {
         .axes_at_mut(GridIndex::Auto, GridIndex::Auto)
         .unwrap()
         .title("Another title");
-    let other = other.to_pdf().unwrap();
+    let other = other.to_pdf(300).unwrap();
     let id = |pdf: &[u8]| after(&String::from_utf8_lossy(pdf), "/ID [").to_owned();
     assert_ne!(id(&first), id(&other));
 }
@@ -199,7 +199,7 @@ fn pdf_page_size_matches_figure() {
         figure
             .add_axes(ScaleKind::Linear, ScaleKind::Linear)
             .unwrap();
-        let pdf = figure.to_pdf().unwrap();
+        let pdf = figure.to_pdf(300).unwrap();
         let text = String::from_utf8_lossy(&pdf);
         assert!(
             text.contains(media_box),
@@ -220,7 +220,7 @@ fn pdf_rejects_pages_it_cannot_write() {
         (14_401.0, 10.0),
         (10.0, -1.0),
     ] {
-        let err = render_pdf(&Scene::new(width, height, WHITE)).unwrap_err();
+        let err = render_pdf(&Scene::new(width, height, WHITE), 300).unwrap_err();
         assert!(matches!(err, umber_core::Error::Style { .. }), "{err}");
         assert!(
             err.to_string().starts_with("Figure.to_pdf(): the page is "),
@@ -231,7 +231,7 @@ fn pdf_rejects_pages_it_cannot_write() {
             Some("use a width and height above 0 and at most 200 in.")
         );
     }
-    assert!(render_pdf(&Scene::new(14_400.0, 0.5, WHITE)).is_ok());
+    assert!(render_pdf(&Scene::new(14_400.0, 0.5, WHITE), 300).is_ok());
 }
 
 #[test]
@@ -242,14 +242,14 @@ fn figure_errors_name_to_pdf() {
         .unwrap()
         .xticks_labeled(&[0.0, 1.0], vec!["0".into(), "W".repeat(60)])
         .unwrap();
-    let err = figure.to_pdf().unwrap_err();
+    let err = figure.to_pdf(300).unwrap_err();
     assert!(err.to_string().starts_with("Figure.to_pdf(): "), "{err}");
 }
 
 #[test]
 fn pdf_text_extractable() {
     let dir = scratch("text");
-    let path = write(&dir, "line.pdf", &line_figure().to_pdf().unwrap());
+    let path = write(&dir, "line.pdf", &line_figure().to_pdf(300).unwrap());
     if !have("pdftotext") {
         return;
     }
@@ -285,7 +285,7 @@ fn pdf_text_of_several_lines_extracts_line_by_line() {
             },
         )
         .unwrap();
-    let pdf = figure.to_pdf().unwrap();
+    let pdf = figure.to_pdf(300).unwrap();
     let dir = scratch("lines");
     let path = write(&dir, "lines.pdf", &pdf);
     assert_readers_parse(&path);
@@ -340,7 +340,7 @@ fn pdf_text_of_several_lines_extracts_line_by_line() {
 #[test]
 fn pdf_embeds_only_used_glyphs() {
     let library = FontLibrary::with_fallbacks(Vec::new());
-    let pdf = render_pdf(&text_scene(&library, &[Font::INTER], "abcab")).unwrap();
+    let pdf = render_pdf(&text_scene(&library, &[Font::INTER], "abcab"), 300).unwrap();
     let files = references(&pdf, "/FontFile2");
     assert_eq!(files.len(), 1, "one embedded font");
     let subset = stream_data(&pdf, files[0]);
@@ -374,7 +374,7 @@ fn pdf_embeds_only_used_glyphs() {
         );
     }
     // Fewer distinct glyphs give a smaller subset.
-    let fewer = render_pdf(&text_scene(&library, &[Font::INTER], "aaa")).unwrap();
+    let fewer = render_pdf(&text_scene(&library, &[Font::INTER], "aaa"), 300).unwrap();
     let subset = stream_data(&fewer, references(&fewer, "/FontFile2")[0]);
     assert_eq!(
         FontRef::new(&subset).unwrap().maxp().unwrap().num_glyphs(),
@@ -391,7 +391,7 @@ fn pdf_embeds_cff_and_variable_fonts() {
     // Inter, then two glyphs of the CFF font and two of the variable font.
     let text = "Ab \u{E001}\u{E002} \u{E004}\u{E006}";
     let scene = text_scene(&library, &[Font::INTER], text);
-    let pdf = render_pdf(&scene).unwrap();
+    let pdf = render_pdf(&scene, 300).unwrap();
     let body = String::from_utf8_lossy(&pdf);
     assert_eq!(
         body.matches("/Type /Font\n").count() + body.matches("/Type /Font ").count(),
@@ -456,8 +456,8 @@ fn pdf_embeds_cff_and_variable_fonts() {
 fn pdf_all_features_grid() {
     let figure = all_features_figure();
     let scene = figure.to_scene(FontLibrary::global()).unwrap();
-    let pdf = figure.to_pdf().unwrap();
-    assert_eq!(pdf, render_pdf(&scene).unwrap());
+    let pdf = figure.to_pdf(300).unwrap();
+    assert_eq!(pdf, render_pdf(&scene, 300).unwrap());
     let dir = scratch("all-features");
     let path = write(&dir, "grid.pdf", &pdf);
     let body = String::from_utf8_lossy(&pdf);
@@ -525,7 +525,7 @@ fn raster_cells_not_interpolated() {
         count(&scene.items)
     };
     assert_eq!(image_count, 1);
-    let pdf = render_pdf(&scene).unwrap();
+    let pdf = render_pdf(&scene, 300).unwrap();
     let text = String::from_utf8_lossy(&pdf);
     let image = after(&text, "/Subtype /Image");
     let dict = &image[..image.find(">>").unwrap()];
@@ -641,7 +641,7 @@ fn pdf_text_extracts_each_occurrence() {
             false,
         ),
     ] {
-        let pdf = render_pdf(&text_scene(library, &[font], text)).unwrap();
+        let pdf = render_pdf(&text_scene(library, &[font], text), 300).unwrap();
         let content = page_content(&pdf);
         assert_eq!(content.contains("/ActualText"), marked, "{name}: {content}");
         let path = write(&dir, &format!("{name}.pdf"), &pdf);
@@ -686,7 +686,7 @@ fn pdf_writes_tiny_text_validly() {
                 INK,
             )
             .unwrap();
-        let pdf = render_pdf(&scene).unwrap();
+        let pdf = render_pdf(&scene, 300).unwrap();
         let content = page_content(&pdf);
         assert!(
             !content.contains("NaN") && !content.contains("inf"),
@@ -716,7 +716,7 @@ fn pdf_writes_tiny_text_validly() {
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .title("Tiny");
-    assert_readers_parse(&write(&dir, "font-scale.pdf", &figure.to_pdf().unwrap()));
+    assert_readers_parse(&write(&dir, "font-scale.pdf", &figure.to_pdf(300).unwrap()));
 }
 
 #[test]
@@ -734,7 +734,7 @@ fn pdf_keeps_fonts_of_different_libraries_apart() {
             .push_text(&fonts, text, style(0, 18.0), Point { x: 10.0, y }, INK)
             .unwrap();
     }
-    let pdf = render_pdf(&scene).unwrap();
+    let pdf = render_pdf(&scene, 300).unwrap();
     assert_eq!(references(&pdf, "/FontFile3").len(), 1, "the CFF font");
     assert_eq!(references(&pdf, "/FontFile2").len(), 1, "the variable font");
     let dir = scratch("libraries");
@@ -756,7 +756,7 @@ fn pdf_embeds_cff2_as_text() {
     let library = FontLibrary::with_fallbacks(vec![fixture("outline-cff2.otf")]);
     let text = "ABC \u{E007}\u{E009}";
     let scene = text_scene(&library, &[Font::INTER], text);
-    let pdf = render_pdf(&scene).unwrap();
+    let pdf = render_pdf(&scene, 300).unwrap();
     let content = page_content(&pdf);
     // Both runs are text, so nothing is filled but the background.
     assert_eq!(
@@ -833,7 +833,7 @@ fn pdf_writes_rotated_labels_as_text() {
         labels.iter().any(|(_, angle)| angle.abs() > 1.0),
         "no turned label: {labels:?}"
     );
-    let pdf = figure.to_pdf().unwrap();
+    let pdf = figure.to_pdf(300).unwrap();
     let content = page_content(&pdf);
     // Each label is set in a turned text space, not filled as outlines.
     let turned = content
@@ -896,7 +896,7 @@ fn pdf_resolves_bold_fallback_to_the_regular_face() {
         .add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
         .title("Bold fallback");
-    let pdf = figure.to_pdf().unwrap();
+    let pdf = figure.to_pdf(300).unwrap();
     let body = String::from_utf8_lossy(&pdf);
     // The bold title is set in the regular face, whose bytes the bundled body font shares:
     // one subset of Inter Regular, and no bold face.
@@ -1006,7 +1006,7 @@ fn pdf_pages_keep_order_and_size() {
         titled_figure(3.5, "Narrow"),
         Figure::new(2.0, 5.0, Theme::graphite()).unwrap(),
     );
-    let pdf = pdf_pages(&[&wide, &narrow, &tall]).unwrap();
+    let pdf = pdf_pages(&[&wide, &narrow, &tall], 300).unwrap();
     assert_eq!(
         media_boxes(&pdf),
         ["0 0 432 288", "0 0 252 288", "0 0 144 360"]
@@ -1015,7 +1015,7 @@ fn pdf_pages_keep_order_and_size() {
     assert!(text.contains("/Count 3"), "page count");
     assert_eq!(references(&pdf, "/Contents").len(), 3);
     // The same figure twice gives two pages.
-    let twice = pdf_pages(&[&wide, &wide]).unwrap();
+    let twice = pdf_pages(&[&wide, &wide], 300).unwrap();
     assert_eq!(media_boxes(&twice), ["0 0 432 288", "0 0 432 288"]);
     let contents = page_contents(&twice);
     assert_eq!(contents[0], contents[1]);
@@ -1024,15 +1024,15 @@ fn pdf_pages_keep_order_and_size() {
 #[test]
 fn pdf_pages_of_one_figure_is_to_pdf() {
     for figure in [line_figure(), all_features_figure()] {
-        assert!(pdf_pages(&[&figure]).unwrap() == figure.to_pdf().unwrap());
+        assert!(pdf_pages(&[&figure], 300).unwrap() == figure.to_pdf(300).unwrap());
     }
 }
 
 #[test]
 fn pdf_pages_embed_a_shared_font_once() {
     let (first, second) = (titled_figure(6.0, "Alpha"), titled_figure(5.0, "Omega"));
-    let single = first.to_pdf().unwrap();
-    let pdf = pdf_pages(&[&first, &second]).unwrap();
+    let single = first.to_pdf(300).unwrap();
+    let pdf = pdf_pages(&[&first, &second], 300).unwrap();
     let count = |pdf: &[u8], key: &str| references(pdf, key).len();
     for key in [
         "/FontFile2",
@@ -1063,10 +1063,10 @@ fn pdf_pages_draw_what_a_single_page_draws() {
         titled_figure(6.0, "Title"),
         themed_figure(Theme::graphite(), 6.0, "Title"),
     );
-    let pdf = pdf_pages(&[&first, &second]).unwrap();
+    let pdf = pdf_pages(&[&first, &second], 300).unwrap();
     let pages = page_contents(&pdf);
     for (page, figure) in pages.iter().zip([&first, &second]) {
-        let single = String::from_utf8(stream_data(&figure.to_pdf().unwrap(), 4)).unwrap();
+        let single = String::from_utf8(stream_data(&figure.to_pdf(300).unwrap(), 4)).unwrap();
         assert_eq!(
             without_resource_names(page),
             without_resource_names(&single)
@@ -1074,8 +1074,8 @@ fn pdf_pages_draw_what_a_single_page_draws() {
     }
     // A page whose text comes first in the document is the single page exactly.
     let other = titled_figure(6.0, "Other words");
-    let pdf = pdf_pages(&[&first, &other]).unwrap();
-    let single = String::from_utf8(stream_data(&first.to_pdf().unwrap(), 4)).unwrap();
+    let pdf = pdf_pages(&[&first, &other], 300).unwrap();
+    let single = String::from_utf8(stream_data(&first.to_pdf(300).unwrap(), 4)).unwrap();
     assert_eq!(page_contents(&pdf)[0], single);
 }
 
@@ -1087,16 +1087,16 @@ fn pdf_pages_keep_raster_images_with_their_page() {
             .matches("/Subtype /Image")
             .count()
     };
-    let pdf = pdf_pages(&[&plain, &grid, &grid]).unwrap();
-    assert_eq!(images(&pdf), 2 * images(&grid.to_pdf().unwrap()));
-    assert_eq!(images(&pdf_pages(&[&plain]).unwrap()), 0);
+    let pdf = pdf_pages(&[&plain, &grid, &grid], 300).unwrap();
+    assert_eq!(images(&pdf), 2 * images(&grid.to_pdf(300).unwrap()));
+    assert_eq!(images(&pdf_pages(&[&plain], 300).unwrap()), 0);
 }
 
 #[test]
 fn pdf_pages_report_the_page_that_fails() {
     let (good, bad) = (titled_figure(6.0, "Fine"), failing_figure());
-    let single = bad.to_pdf().unwrap_err();
-    let err = pdf_pages(&[&good, &bad, &good]).unwrap_err();
+    let single = bad.to_pdf(300).unwrap_err();
+    let err = pdf_pages(&[&good, &bad, &good], 300).unwrap_err();
     let text = err.to_string();
     assert!(text.starts_with("to_pdf(): figures[1]: "), "{text}");
     let own = single.to_string();
@@ -1107,7 +1107,7 @@ fn pdf_pages_report_the_page_that_fails() {
     assert!(matches!(err, umber_core::Error::Style { .. }));
     assert_eq!(err.parameter(), Some("figures"));
     // The first failing page is the one named.
-    let err = pdf_pages(&[&bad, &bad]).unwrap_err();
+    let err = pdf_pages(&[&bad, &bad], 300).unwrap_err();
     assert!(
         err.to_string().starts_with("to_pdf(): figures[0]: "),
         "{err}"
@@ -1116,21 +1116,21 @@ fn pdf_pages_report_the_page_that_fails() {
 
 #[test]
 fn pdf_pages_need_a_page() {
-    let err = pdf_pages(&[]).unwrap_err();
+    let err = pdf_pages(&[], 300).unwrap_err();
     assert!(matches!(err, umber_core::Error::Data { .. }));
     assert!(
         err.to_string().starts_with("to_pdf(): figures is empty"),
         "{err}"
     );
-    assert!(umber_core::render::render_pdf_pages(&[]).is_err());
+    assert!(umber_core::render::render_pdf_pages(&[], 300).is_err());
 }
 
 #[test]
 fn pdf_pages_are_deterministic() {
     let (first, second) = (titled_figure(6.0, "Alpha"), all_features_figure());
-    let pdf = pdf_pages(&[&first, &second]).unwrap();
-    assert!(pdf == pdf_pages(&[&first, &second]).unwrap());
-    assert_ne!(pdf, pdf_pages(&[&second, &first]).unwrap());
+    let pdf = pdf_pages(&[&first, &second], 300).unwrap();
+    assert!(pdf == pdf_pages(&[&first, &second], 300).unwrap());
+    assert_ne!(pdf, pdf_pages(&[&second, &first], 300).unwrap());
     let text = String::from_utf8_lossy(&pdf);
     assert!(!text.contains("/CreationDate") && !text.contains("/ModDate"));
     assert_eq!(
@@ -1154,12 +1154,12 @@ fn pdf_pages_rasterize_like_single_pages() {
         line_figure(),
     ];
     let refs: Vec<&Figure> = figures.iter().collect();
-    let combined = write(&dir, "combined.pdf", &pdf_pages(&refs).unwrap());
+    let combined = write(&dir, "combined.pdf", &pdf_pages(&refs, 300).unwrap());
     for (index, figure) in figures.iter().enumerate() {
         let single = write(
             &dir,
             &format!("single{index}.pdf"),
-            &figure.to_pdf().unwrap(),
+            &figure.to_pdf(300).unwrap(),
         );
         let page = u32::try_from(index).unwrap() + 1;
         let (mean, far) = raster_difference(

@@ -247,6 +247,7 @@ fn each_group_has_its_own_sub_column() {
             SizeSpec::Auto,
             column_labels(fixed(1)),
             false,
+            umber_core::MarkRender::Vector,
         )
         .unwrap();
     let scene = render(&f);
@@ -903,6 +904,7 @@ fn a_column_on_twin_axes_is_refused() {
             SizeSpec::Auto,
             column_labels(None),
             false,
+            umber_core::MarkRender::Vector,
         )
         .unwrap_err();
     assert_eq!(err.parameter(), Some("place"));
@@ -1154,13 +1156,13 @@ fn a_tall_row_title_gets_room_and_is_centred_with_the_row() {
 #[test]
 fn png_svg_and_pdf_render_the_column() {
     let f = forest(&[SHORT, LONG], Some("Mean (%)"));
-    let svg = f.to_svg(SvgText::Editable).unwrap();
+    let svg = f.to_svg(SvgText::Editable, 300).unwrap();
     for value in [">66.5</text>", ">75.4</text>", ">Mean (%)</text>"] {
         assert!(svg.contains(value), "{value} in {svg}");
     }
     let png = f.to_png(72).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
-    let pdf = f.to_pdf().unwrap();
+    let pdf = f.to_pdf(300).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     // All three come from one scene, which holds each value once.
     let scene = render(&f);

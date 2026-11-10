@@ -2637,7 +2637,7 @@ mod tests {
                 )
                 .unwrap();
             }
-            f.to_svg(crate::SvgText::Editable).unwrap()
+            f.to_svg(crate::SvgText::Editable, 300).unwrap()
         };
         let alone = svg(None);
         assert_eq!(svg(Some((Vec::new(), Vec::new()))), alone);

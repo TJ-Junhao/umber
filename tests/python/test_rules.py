@@ -477,12 +477,12 @@ def test_the_four_methods_match_the_native_figure() -> None:
     )
     native = _umber.Figure(4.0, 3.0, _umber.Theme.graphite(), *ONE_CELL)
     native.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
-    native.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "Signal", AUTO, 0, NO_SIZE)
+    native.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "Signal", AUTO, 0, NO_SIZE, 0)
     native.hline(0, 0, 2.5, "h", AUTO, 1, (1, 2.0))
     native.vline(0, 0, 1.5, "v", AUTO, 0, NO_SIZE)
     native.hspan(0, 0, 1.0, 2.0, "hs", AUTO)
     native.vspan(0, 0, 0.5, 1.0, "vs", _color.native(ub.Color.RED))
-    assert fig.to_svg() == native.to_svg(OUTLINES)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 
@@ -493,7 +493,7 @@ def test_a_category_vline_matches_the_native_figure() -> None:
     native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
     native.bar(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "", AUTO, False, None, NO_SIZE)
     native.vline(0, 0, "Q2", "Go", AUTO, 0, NO_SIZE)
-    assert fig.to_svg() == native.to_svg(OUTLINES)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 

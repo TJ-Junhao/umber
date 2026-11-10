@@ -4725,7 +4725,7 @@ mod tests {
                 resolved.y.continuous().unwrap(),
                 &resolved.y.ticks
             ));
-            f.to_svg(crate::SvgText::Editable).unwrap();
+            f.to_svg(crate::SvgText::Editable, 300).unwrap();
         }
 
         #[test]
@@ -4760,7 +4760,7 @@ mod tests {
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
             }
             assert_eq!(tick_labels(&resolved.y.ticks), ["6356.586"]);
-            f.to_svg(crate::SvgText::Editable).unwrap();
+            f.to_svg(crate::SvgText::Editable, 300).unwrap();
         }
 
         #[test]
@@ -4796,7 +4796,7 @@ mod tests {
                 assert!(slack >= 0.0, "{side:?}: {ticks:?}, slack {slack}");
             }
             assert_eq!(tick_labels(&resolved.y.ticks), ["0.01", "10"]);
-            f.to_svg(crate::SvgText::Editable).unwrap();
+            f.to_svg(crate::SvgText::Editable, 300).unwrap();
         }
 
         proptest! {

@@ -87,8 +87,8 @@ fn best_ties_follow_the_order() {
     near(b.right(), p.right() - 6.0);
     near(b.y, p.y + 6.0);
     assert_eq!(
-        f.to_svg(crate::SvgText::Outlines).unwrap(),
-        f.to_svg(crate::SvgText::Outlines).unwrap()
+        f.to_svg(crate::SvgText::Outlines, 300).unwrap(),
+        f.to_svg(crate::SvgText::Outlines, 300).unwrap()
     );
 }
 
@@ -364,7 +364,7 @@ fn theme_position_is_inherited_and_legend_resets_an_override() {
                 },
             )
             .unwrap();
-        let inherited = f.to_svg(crate::SvgText::Outlines).unwrap();
+        let inherited = f.to_svg(crate::SvgText::Outlines, 300).unwrap();
         let l = layout(&f);
         near(l.legend.entries()[0].swatch.x, l.plot.right() + 12.0);
         f.single_axes_mut()
@@ -374,12 +374,12 @@ fn theme_position_is_inherited_and_legend_resets_an_override() {
                 crate::SizeSpec::Auto,
             )
             .unwrap();
-        assert_ne!(f.to_svg(crate::SvgText::Outlines).unwrap(), inherited);
+        assert_ne!(f.to_svg(crate::SvgText::Outlines, 300).unwrap(), inherited);
         f.single_axes_mut()
             .legend(LegendStyle::Header, crate::SizeSpec::Auto)
             .unwrap();
         assert_eq!(f.single_axes().legend_position(), None);
-        assert_eq!(f.to_svg(crate::SvgText::Outlines).unwrap(), inherited);
+        assert_eq!(f.to_svg(crate::SvgText::Outlines, 300).unwrap(), inherited);
     }
 }
 
@@ -411,7 +411,7 @@ fn merged_grid_ignores_panel_positions() {
             )
             .unwrap();
         }
-        f.to_svg(crate::SvgText::Outlines).unwrap()
+        f.to_svg(crate::SvgText::Outlines, 300).unwrap()
     };
     let baseline = render(LegendPosition::TopLeft);
     for position in [

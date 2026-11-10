@@ -90,7 +90,7 @@ pub use mark::{
 };
 pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
-pub use render::Render;
+pub use render::{MarkRender, Render};
 pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
 pub(crate) use share::{ShareGroups, label_visibility};
 pub use stacked_area::StackedAreaMark;

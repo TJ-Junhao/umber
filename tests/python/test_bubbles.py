@@ -326,7 +326,7 @@ def test_native_rendering_parity(marker: ub.Marker) -> None:
         (0, 0, 1.0),
         marker.value,
     )
-    assert fig.to_svg() == native.to_svg(0)
+    assert fig.to_svg() == native.to_svg(0, 300)
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 

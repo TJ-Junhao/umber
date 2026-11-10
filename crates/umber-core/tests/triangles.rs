@@ -361,13 +361,16 @@ fn triangle_meshes_agree_in_png_svg_and_pdf() {
         let figure = mesh_figure(theme, 300, true);
         let scene = figure.to_scene(FontLibrary::global()).unwrap();
         for text in [SvgText::Editable, SvgText::Outlines] {
-            assert!(figure.to_svg(text).unwrap().contains("<path"), "{name}");
+            assert!(
+                figure.to_svg(text, 300).unwrap().contains("<path"),
+                "{name}"
+            );
         }
         let dpi: u32 = 144;
         let png = figure.to_png(i64::from(dpi)).unwrap();
         assert!(image::decode_rgba8(&png).is_ok(), "{name}");
-        let pdf = figure.to_pdf().unwrap();
-        assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+        let pdf = figure.to_pdf(300).unwrap();
+        assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
         if poppler {
             let dir = pdf_check::scratch(&format!("triangles-{name}"));
             let path = pdf_check::write(&dir, "triangles.pdf", &pdf);
@@ -403,8 +406,8 @@ fn a_large_mesh_is_two_items_per_color() {
     assert_eq!(distinct.len(), colors.len(), "each color once");
     assert!(colors.len() < 2000, "{}", colors.len());
     for text in [SvgText::Editable, SvgText::Outlines] {
-        assert!(figure.to_svg(text).is_ok());
+        assert!(figure.to_svg(text, 300).is_ok());
     }
     assert!(figure.to_png(72).is_ok());
-    assert!(figure.to_pdf().is_ok());
+    assert!(figure.to_pdf(300).is_ok());
 }

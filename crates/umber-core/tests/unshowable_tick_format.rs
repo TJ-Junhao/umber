@@ -78,7 +78,10 @@ fn assert_unshowable(axis: &str) {
                 "Figure.to_scene()",
                 f.to_scene(FontLibrary::global()).unwrap_err(),
             ),
-            ("Figure.to_svg()", f.to_svg(SvgText::Editable).unwrap_err()),
+            (
+                "Figure.to_svg()",
+                f.to_svg(SvgText::Editable, 300).unwrap_err(),
+            ),
             ("Figure.to_png()", f.to_png(72).unwrap_err()),
         ] {
             assert!(matches!(error, Error::Style { .. }));
@@ -378,7 +381,7 @@ fn one_representable_value_keeps_one_tick() {
                     center + 0.004,
                     false,
                 );
-                let svg = f.to_svg(SvgText::Editable).unwrap();
+                let svg = f.to_svg(SvgText::Editable, 300).unwrap();
                 assert_eq!(svg.matches(">only:").count(), 1, "{axis}: {svg}");
             }
         }

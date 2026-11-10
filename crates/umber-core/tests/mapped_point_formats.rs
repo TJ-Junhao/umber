@@ -82,7 +82,7 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                 assert_eq!(style.color.a, 255);
             }
             for text in [SvgText::Editable, SvgText::Outlines] {
-                let svg = f.to_svg(text).unwrap();
+                let svg = f.to_svg(text, 300).unwrap();
                 for style in &strokes {
                     assert!(svg.contains(&format!(
                         r#"stroke="{}" stroke-width="0.5""#,
@@ -126,8 +126,8 @@ fn mapped_point_outlines_agree_in_png_svg_and_pdf() {
                 actual.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2),
                 "{name}, bubbles={bubbles}: ring pixel {actual:?}, expected {expected:?}"
             );
-            let pdf = f.to_pdf().unwrap();
-            assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+            let pdf = f.to_pdf(300).unwrap();
+            assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
             let content = pdf_check::page_content(&pdf);
             let lines: Vec<_> = content.lines().collect();
             let pdf_colors: Vec<Vec<f32>> = lines

@@ -901,7 +901,7 @@ fn failed_time_calls_change_nothing() {
         .unwrap()
         .xlim_time(date(2026, 1, 1), date(2026, 1, 3))
         .unwrap();
-    let svg = f.to_svg(crate::SvgText::Outlines).unwrap();
+    let svg = f.to_svg(crate::SvgText::Outlines, 300).unwrap();
     let calls: Vec<Call> = vec![
         Box::new(|a| a.xlim_time(date(2026, 1, 3), date(2026, 1, 1)).map(drop)),
         Box::new(|a| {
@@ -925,7 +925,7 @@ fn failed_time_calls_change_nothing() {
     for call in &calls {
         refused(&mut f, |a| call(a));
     }
-    assert_eq!(f.to_svg(crate::SvgText::Outlines).unwrap(), svg);
+    assert_eq!(f.to_svg(crate::SvgText::Outlines, 300).unwrap(), svg);
 }
 
 #[test]

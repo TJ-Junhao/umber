@@ -53,6 +53,15 @@ fn sized_line(label: &str, dash: Dash, width: SizeSpec) -> LineOptions {
     }
 }
 
+fn sized_area(label: &str, dash: Dash, width: SizeSpec) -> AreaOptions {
+    AreaOptions {
+        label: label.into(),
+        dash,
+        width,
+        ..AreaOptions::default()
+    }
+}
+
 fn sized_scatter(label: &str, marker: Marker, size: SizeSpec) -> ScatterOptions {
     ScatterOptions {
         label: label.into(),
@@ -103,7 +112,7 @@ fn emphasis(figure: &mut Figure) {
         .area(
             numbers(x4),
             &y4,
-            sized_line("Area", Dash::Dashed, times(1.5)),
+            sized_area("Area", Dash::Dashed, times(1.5)),
         )
         .unwrap()
         .scatter(
@@ -223,7 +232,7 @@ fn figures() -> Vec<(String, Figure)> {
         .area(
             AxisData::Categories(months.clone()),
             &[1.0, 2.0, 3.5, 4.0, 3.0, 2.5],
-            sized_line("Solar", Dash::Solid, times(2.0)),
+            sized_area("Solar", Dash::Solid, times(2.0)),
         )
         .unwrap()
         .line(
@@ -307,7 +316,7 @@ fn size_errors() -> String {
             .area(
                 numbers(vec![0.0, 1.0]),
                 &[0.5, 1.0],
-                sized_line(name, Dash::Dashed, size),
+                sized_area(name, Dash::Dashed, size),
             )?
             .scatter(
                 numbers(vec![0.5]),

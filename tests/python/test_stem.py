@@ -279,7 +279,7 @@ def test_stems_match_native_rendering(
         marker.value,
         (2, 8.0),
     )
-    assert fig.to_svg() == native.to_svg(0)
+    assert fig.to_svg() == native.to_svg(0, 300)
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 
@@ -291,4 +291,4 @@ def test_category_stems_match_native_rendering() -> None:
     native.stem(
         0, 0, ["b", "a", "b"], np.array([3.0, -2.0, 1.0]), "Response", (0, 0, 1.0), 0, (0, 0.0)
     )
-    assert fig.to_svg() == native.to_svg(0)
+    assert fig.to_svg() == native.to_svg(0, 300)

@@ -411,7 +411,7 @@ def test_an_area_matches_the_native_figure(
     native_fig = _umber.Figure(4.0, 3.0, native_theme().with_fill_style(fill.value), *ONE_CELL)
     native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     native_fig.area(0, 0, floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
 
 
@@ -431,4 +431,4 @@ def test_a_category_area_matches_the_native_figure() -> None:
     native.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
     native.area(0, 0, ["Q1", "Q2", "Q3"], floats(3, 1, 2), "Sales", AUTO, 0, (0, 0.0))
     assert fig.to_png(dpi=60) == native.to_png(60)
-    assert fig.to_svg() == native.to_svg(OUTLINES)
+    assert fig.to_svg() == native.to_svg(OUTLINES, 300)

@@ -257,11 +257,11 @@ def test_labels_and_shared_figure_palette(style: ub.LegendStyle) -> None:
         fig.add_axes(1, 0, 1, col, 1, 1, 2, 10.0, 0, 10.0)
     fig.violin(0, 0, ["A"], [np.array([1.0, 2.0])], "Same", (0, 0, 1.0))
     fig.grouped_violin(0, 1, ["A"], [("Same", [np.array([3.0, 4.0])], (0, 0, 1.0))])
-    assert fig.to_svg(1).count(">Same</text>") == 1
-    before = fig.to_svg(0)
+    assert fig.to_svg(1, 300).count(">Same</text>") == 1
+    before = fig.to_svg(0, 300)
     with pytest.raises(ub.DataError):
         fig.violin(0, 1, ["A"], [], "", (0, 0, 1.0))
-    assert fig.to_svg(0) == before
+    assert fig.to_svg(0, 300) == before
 
 
 @pytest.mark.parametrize(
@@ -309,7 +309,7 @@ def test_native_rendering_parity(
     else:
         ax.violin(["A", "B"], groups, label="Samples")
         native.violin(0, 0, ["A", "B"], groups, "Samples", (0, 0, 1.0))
-    assert fig.to_svg() == native.to_svg(0)
+    assert fig.to_svg() == native.to_svg(0, 300)
     assert fig.to_png(dpi=60) == native.to_png(60)
 
 

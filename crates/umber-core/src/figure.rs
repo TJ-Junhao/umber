@@ -59,7 +59,7 @@ pub use crate::model::{
 };
 pub use crate::model::{HeatmapMark, HeatmapOptions};
 pub use crate::model::{
-    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
+    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MarkRender, MeshMark, MeshOptions, Render,
 };
 pub use crate::model::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use crate::model::{StemMark, StemOptions};
@@ -70,7 +70,8 @@ pub use crate::model::{
 pub use crate::model::{ViolinGroupMark, ViolinMark, ViolinOptions};
 
 use crate::render::{
-    SvgText, check_dpi, page_size, render_pdf, render_pdf_pages, render_png, render_svg,
+    SvgText, check_dpi, check_raster_dpi, page_size, pages_document, render_pdf, render_png,
+    render_svg,
 };
 use crate::scene::Scene;
 use crate::{Error, FontLibrary, Result, pipeline, resolve};
@@ -106,6 +107,12 @@ impl Figure {
     /// cell or as one [`Item::Image`](crate::Item::Image) with one pixel per cell, in the
     /// mark's place among the marks; an image whose outer cells explicit limits cut is drawn
     /// whole inside a group clipped to the limits.
+    ///
+    /// A scatter, line or tripcolor whose options ask for [`MarkRender::Raster`] has its items
+    /// inside one [`Item::Raster`](crate::Item::Raster) covering the clip of the marks, in the
+    /// mark's place; SVG and PDF output draw it as one image. A scatter's error bars stay outside
+    /// it: with a joining line too, the line and the markers are two such items, under and over
+    /// the bars.
     ///
     /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area
     /// has the same size and the axes line up: each grid column has room left of its plots
@@ -258,11 +265,17 @@ impl Figure {
 
     /// Renders the figure as an SVG document, with the global [`FontLibrary`].
     ///
+    /// Marks drawn as one image ([`MarkRender::Raster`]) are drawn at `raster_dpi` dots per
+    /// inch; `raster_dpi` changes nothing else, so a figure without such a mark gives the same
+    /// document at every `raster_dpi` (see [`render_svg`]).
+    ///
     /// # Errors
     ///
-    /// `Error::Style` with context `"Figure.to_svg()"` when the plot area or its x tick labels
-    /// cannot fit, or titles, subtitles or axis labels are wider than their room
-    /// (see [`Figure::to_scene`]).
+    /// `Error::Style` with context `"Figure.to_svg()"` when `raster_dpi` is outside
+    /// `10..=2400` (the message names the value however large or negative it is, and the
+    /// parameter is `raster_dpi`), when the plot area or its x tick labels cannot fit, or
+    /// titles, subtitles or axis labels are wider than their room (see [`Figure::to_scene`]),
+    /// or when the image of a mark would be too large (see [`render_svg`]).
     ///
     /// # Examples
     ///
@@ -271,26 +284,34 @@ impl Figure {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::midnight())?;
     /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
-    /// let svg = figure.to_svg(SvgText::Editable)?;
+    /// let svg = figure.to_svg(SvgText::Editable, 300)?;
     /// assert!(svg.contains(r#"width="432pt" height="288pt""#));
     /// assert!(svg.contains(">Signal</text>"));
+    /// assert!(figure.to_svg(SvgText::Editable, 9).is_err());
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn to_svg(&self, text: SvgText) -> Result<String> {
-        let scene = self.scene(FontLibrary::global(), "Figure.to_svg()")?;
-        Ok(render_svg(&scene, text))
+    pub fn to_svg(&self, text: SvgText, raster_dpi: i64) -> Result<String> {
+        const CONTEXT: &str = "Figure.to_svg()";
+        let raster_dpi = check_raster_dpi(CONTEXT, raster_dpi)?;
+        let scene = self.scene(FontLibrary::global(), CONTEXT)?;
+        render_svg(&scene, text, raster_dpi)
     }
 
     /// Renders the figure as a one-page PDF document, with the global [`FontLibrary`].
     ///
     /// The page is the figure's size in points (72 per inch). Text is embedded as text in
-    /// subsets of its fonts, so it can be selected and searched; see [`render_pdf`].
+    /// subsets of its fonts, so it can be selected and searched; see [`render_pdf`]. Marks
+    /// drawn as one image ([`MarkRender::Raster`]) are drawn at `raster_dpi` dots per inch;
+    /// `raster_dpi` changes nothing else, so a figure without such a mark gives the same bytes
+    /// at every `raster_dpi`.
     ///
     /// # Errors
     ///
-    /// `Error::Style` with context `"Figure.to_pdf()"` when the plot area or its x tick labels
-    /// cannot fit, or titles, subtitles or axis labels are wider than their room
-    /// (see [`Figure::to_scene`]).
+    /// `Error::Style` with context `"Figure.to_pdf()"` when `raster_dpi` is outside
+    /// `10..=2400`, as [`Figure::to_svg`] says, when the plot area or its x tick labels cannot
+    /// fit, or titles, subtitles or axis labels are wider than their room (see
+    /// [`Figure::to_scene`]), or when the image of a mark would be too large (see
+    /// [`render_pdf`]).
     ///
     /// # Examples
     ///
@@ -299,21 +320,25 @@ impl Figure {
     ///
     /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
     /// figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
-    /// let pdf = figure.to_pdf()?;
+    /// let pdf = figure.to_pdf(300)?;
     /// assert!(pdf.starts_with(b"%PDF-"));
     /// assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 432 288]"));
+    /// assert_eq!(figure.to_pdf(150)?, pdf);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
-    pub fn to_pdf(&self) -> Result<Vec<u8>> {
-        let scene = self.scene(FontLibrary::global(), "Figure.to_pdf()")?;
-        render_pdf(&scene)
+    pub fn to_pdf(&self, raster_dpi: i64) -> Result<Vec<u8>> {
+        const CONTEXT: &str = "Figure.to_pdf()";
+        let raster_dpi = check_raster_dpi(CONTEXT, raster_dpi)?;
+        let scene = self.scene(FontLibrary::global(), CONTEXT)?;
+        render_pdf(&scene, raster_dpi)
     }
 }
 
 /// Renders `figures` as one PDF document, a page for each in list order, with the global
 /// [`FontLibrary`].
 ///
-/// Each page is the size of its figure and draws what [`Figure::to_pdf`] draws for it. A font
+/// Each page is the size of its figure and draws what [`Figure::to_pdf`] draws for it at
+/// `raster_dpi`. A font
 /// used on several pages is embedded once, as a subset of the glyphs of every page that uses
 /// it; raster images stay with their page. Every figure is laid out before anything is
 /// written, so the result is all pages or an error. The same figure may appear more than once.
@@ -322,10 +347,12 @@ impl Figure {
 ///
 /// # Errors
 ///
-/// `Error::Data` with context `"to_pdf()"` when `figures` is empty. When a figure cannot be
-/// rendered, the error [`Figure::to_pdf`] gives for it, with context `"to_pdf()"`, parameter
-/// `"figures"` and the message beginning `figures[i]: `, where `i` is the 0-based index of the
-/// first such figure.
+/// `Error::Data` with context `"to_pdf()"` when `figures` is empty, and then `Error::Style` with
+/// that context when `raster_dpi` is outside `10..=2400`, as [`Figure::to_pdf`] says. When a
+/// figure cannot be rendered, the error [`Figure::to_pdf`] gives for it, with context
+/// `"to_pdf()"`, parameter `"figures"` and the message beginning `figures[i]: `, where `i` is
+/// the 0-based index of the first such figure; an image of marks that is too large keeps the
+/// parameter `"raster_dpi"`.
 ///
 /// # Examples
 ///
@@ -335,14 +362,15 @@ impl Figure {
 /// let mut wide = Figure::new(6.0, 4.0, Theme::pigment())?;
 /// wide.add_axes(ScaleKind::Linear, ScaleKind::Linear)?.title("Signal");
 /// let tall = Figure::new(4.0, 6.0, Theme::pigment())?;
-/// let pdf = pdf_pages(&[&wide, &tall])?;
+/// let pdf = pdf_pages(&[&wide, &tall], 300)?;
 /// let text = String::from_utf8_lossy(&pdf);
 /// assert!(text.contains("/MediaBox [0 0 432 288]"));
 /// assert!(text.contains("/MediaBox [0 0 288 432]"));
-/// assert!(pdf_pages(&[]).is_err());
+/// assert!(pdf_pages(&[], 300).is_err());
+/// assert!(pdf_pages(&[&wide], 0).is_err());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
-pub fn pdf_pages(figures: &[&Figure]) -> Result<Vec<u8>> {
+pub fn pdf_pages(figures: &[&Figure], raster_dpi: i64) -> Result<Vec<u8>> {
     const CONTEXT: &str = "to_pdf()";
     if figures.is_empty() {
         return Err(
@@ -351,6 +379,7 @@ pub fn pdf_pages(figures: &[&Figure]) -> Result<Vec<u8>> {
                 .with_hint("pass at least one figure."),
         );
     }
+    let raster_dpi = check_raster_dpi(CONTEXT, raster_dpi)?;
     let mut scenes = Vec::with_capacity(figures.len());
     for (index, figure) in figures.iter().enumerate() {
         let scene = figure
@@ -364,7 +393,7 @@ pub fn pdf_pages(figures: &[&Figure]) -> Result<Vec<u8>> {
         scenes.push(scene);
     }
     let scenes: Vec<&Scene> = scenes.iter().collect();
-    render_pdf_pages(&scenes).map_err(|err| err.with_context(CONTEXT))
+    pages_document(&scenes, raster_dpi, "figures").map_err(|err| err.with_context(CONTEXT))
 }
 
 impl Figure {
@@ -424,7 +453,10 @@ mod tests {
                 f.to_scene(FontLibrary::global()).unwrap_err(),
             ),
             ("Figure.to_png()", f.to_png(72).unwrap_err()),
-            ("Figure.to_svg()", f.to_svg(SvgText::Outlines).unwrap_err()),
+            (
+                "Figure.to_svg()",
+                f.to_svg(SvgText::Outlines, 300).unwrap_err(),
+            ),
         ] {
             assert_eq!(err.to_string(), format!("{context}: {message}"));
             assert!(matches!(
@@ -459,7 +491,10 @@ mod tests {
                 f.to_scene(FontLibrary::global()).unwrap_err(),
             ),
             ("Figure.to_png()", f.to_png(72).unwrap_err()),
-            ("Figure.to_svg()", f.to_svg(SvgText::Outlines).unwrap_err()),
+            (
+                "Figure.to_svg()",
+                f.to_svg(SvgText::Outlines, 300).unwrap_err(),
+            ),
         ] {
             assert_eq!(err.to_string(), format!("{context}: {message}"));
             assert!(matches!(
@@ -574,7 +609,7 @@ mod tests {
             ("Figure.to_png()", f.to_png(72).unwrap_err()),
             (
                 "Figure.to_svg()",
-                f.to_svg(crate::SvgText::Editable).unwrap_err(),
+                f.to_svg(crate::SvgText::Editable, 300).unwrap_err(),
             ),
         ];
         for (context, err) in errors {

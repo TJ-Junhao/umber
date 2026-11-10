@@ -347,9 +347,12 @@ class ColorbarPosition(Enum):
 
 @unique
 class Render(Enum):
-    """How the cells of a heatmap, a 2-D histogram or a mesh are drawn.
+    """How a mark is drawn: as vector shapes or as one image.
 
-    The cells form a grid of solid colors. As vector shapes, each cell is one filled
+    It means one thing for the grid marks ``heatmap()``, ``hist2d()`` and ``mesh()``, and another
+    for ``scatter()``, ``line()`` and ``tripcolor()``.
+
+    Grid marks: the cells form a grid of solid colors. As vector shapes, each cell is one filled
     rectangle. As an image, the grid is one image with one pixel per cell, stretched over the
     cells with nearest-neighbour scaling: it looks the same, while the file stays small and
     fast to open. In PNG output each pixel takes the average of the cells it covers, weighted
@@ -361,21 +364,39 @@ class Render(Enum):
     cut by explicit limits reaches at most 10,000 pt past them (the image covers whole cells
     and is clipped at the limits). Limits that zoom in far on a mesh can break either bound;
     then ``AUTO`` draws vector shapes and ``RASTER`` makes rendering raise ``StyleError``.
+    ``raster_dpi`` does not apply to them.
+
+    Scatter, line and tripcolor: these marks are drawn as vector shapes by default. With
+    ``RASTER``, SVG and PDF output draw the mark as one image that covers the plot area, at the
+    ``raster_dpi`` of the export (300 dots per inch by default), in the mark's place among the
+    other marks and clipped to the plot as the mark is. A scatter of a million points then
+    opens quickly in any viewer. The image is transparent where the mark draws nothing, so
+    marks below it show through, and it looks as a PNG at ``raster_dpi`` does; viewers may
+    smooth it when they scale it. PNG output is the same as with ``VECTOR``. The axes, text,
+    legends and colorbars, the other marks, and the mark's own value labels and error bars stay
+    vector. With ``by``, each group is an image of its own. These marks take no ``AUTO``: a
+    mark is an image only when asked, as its look can change.
 
     Example:
         >>> import umber as ub
         >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
         >>> ax = ax.heatmap(["a", "b"], ["r"], [[1, 2]], render=ub.Render.RASTER)
+        >>> dense = ub.Figure().add_axes().scatter(
+        ...     [0.1, 0.4, 0.7], [1.0, 3.0, 2.0], render=ub.Render.RASTER
+        ... )
+        >>> pdf = dense.figure.to_pdf(raster_dpi=600)
     """
 
     __slots__ = ()
 
     VECTOR = 0
-    """One filled rectangle per cell."""
+    """Vector shapes: one filled rectangle per cell, or the shapes of a scatter, line or
+    tripcolor."""
 
     RASTER = 1
-    """One image with one pixel per cell. A mesh needs edges evenly spaced on screen, and
-    rendering fails when the image would not be exact on the final plot."""
+    """One image. For grid marks, one pixel per cell: a mesh needs edges evenly spaced on
+    screen, and rendering fails when the image would not be exact on the final plot. For a
+    scatter, line or tripcolor, an image at ``raster_dpi`` in SVG and PDF output."""
 
 
 @unique

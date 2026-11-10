@@ -116,6 +116,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/pie.rs
   crates/umber-core/tests/support/corpus/plot_height.rs
   crates/umber-core/tests/support/corpus/point_labels.rs
+  crates/umber-core/tests/support/corpus/raster_marks.rs
   crates/umber-core/tests/support/corpus/rules.rs
   crates/umber-core/tests/support/corpus/share.rs
   crates/umber-core/tests/support/corpus/share_color.rs

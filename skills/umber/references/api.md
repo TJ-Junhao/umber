@@ -1469,12 +1469,15 @@ Example:
 ### `umber.Axes.line`
 
 ```text
-Axes.line(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO) -> SY
+Axes.line(self: SY, x: Values[X], y: Values[Y], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, by: Values[str] | Auto=AUTO, render: Render=Render.VECTOR) -> SY
 ```
 
 Add a line through the points ``(x[i], y[i])``, in order.
 
-A NaN in ``x`` or ``y`` leaves a gap in the line.
+A NaN in ``x`` or ``y`` leaves a gap in the line. ``render=Render.RASTER`` draws the
+line as one image in SVG and PDF output, at the export's ``raster_dpi``, for a long
+noisy line that would make the file slow to open (see ``Render``); PNG output stays
+the same.
 
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -1487,12 +1490,14 @@ Args:
         one series. Names supply legend labels and palette colors; do not pass
         a non-empty ``label`` or an explicit ``color``. Missing or empty names
         and an empty grouping column are refused. Column names are never read.
+    render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+        and PDF output (one per group with ``by``). There is no ``AUTO``.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, such as ``AUTO`` for ``render``.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
@@ -1510,6 +1515,7 @@ Example:
 >>> ax = ax.line([0, 1, 2, 3], [1.0, 3.0, float("nan"), 2.0], label="North")
 >>> grouped = ub.Figure().add_axes()
 >>> grouped = grouped.line([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+>>> noisy = ub.Figure().add_axes().line([0, 1, 2], [1, 3, 2], render=ub.Render.RASTER)
 ```
 
 ### `umber.Axes.mesh`
@@ -1692,7 +1698,7 @@ Example:
 ### `umber.Axes.scatter`
 
 ```text
-Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False) -> Self
+Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False, render: Render=Render.VECTOR) -> Self
 ```
 
 Add a marker at each point ``(x[i], y[i])``.
@@ -1744,6 +1750,12 @@ marker, no value label and no bar, and breaks the line. With ``by``, each group'
 joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
 stand on their own.
 
+``render=Render.RASTER`` draws the markers, and the line of ``connect``, as one image in
+SVG and PDF output, at the export's ``raster_dpi``, for a scatter so dense that the file
+would be slow to open (see ``Render``); with error bars and ``connect`` the line and the
+markers are two images, under and over the bars. Value labels, error bars and the legend
+swatch stay vector, and PNG output stays the same.
+
 Args:
     x: The x values: numbers on a linear or log x axis, names on a category x axis.
     y: The y values, one per x value: numbers on a linear or log y axis, names on a
@@ -1777,13 +1789,15 @@ Args:
         each per point, in y data units: numbers on a linear or log y axis, times on a
         time y axis. ``AUTO`` draws no bars.
     connect: Whether a line joins the points in input order.
+    render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+        and PDF output (one per group with ``by``). There is no ``AUTO``.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
-        tuple of two columns.
+    TypeError: If an argument has the wrong type, such as ``AUTO`` for ``render``, or
+        ``x_error`` or ``y_error`` is not a tuple of two columns.
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the
@@ -1832,6 +1846,12 @@ Example:
 ...     ["Fold 1", "Fold 2", "Mean"], [66.8, 68.1, 67.5],
 ...     y_error=([nan, nan, 66.9], [nan, nan, 68.1]), connect=True,
 ... )
+>>> import numpy as np
+>>> rng = np.random.default_rng(0)
+>>> cloud = ub.Figure().add_axes().scatter(
+...     rng.normal(size=100_000), rng.normal(size=100_000), render=ub.Render.RASTER
+... )
+>>> cloud.figure.save_pdf("cloud.pdf")
 ```
 
 ### `umber.Axes.show`
@@ -2457,7 +2477,7 @@ Example:
 ### `umber.Axes.tripcolor`
 
 ```text
-Axes.tripcolor(self: 'Axes[float, float]', x: Values[float], y: Values[float], values: Values[float], *, triangles: TriangleIndices | Auto=AUTO, on: TriValues=TriValues.POINTS, cmap: Cmap | Auto=AUTO, scale: Scale[float]=Scale.linear(), center: float | Auto=AUTO) -> 'Axes[float, float]'
+Axes.tripcolor(self: 'Axes[float, float]', x: Values[float], y: Values[float], values: Values[float], *, triangles: TriangleIndices | Auto=AUTO, on: TriValues=TriValues.POINTS, cmap: Cmap | Auto=AUTO, scale: Scale[float]=Scale.linear(), center: float | Auto=AUTO, render: Render=Render.VECTOR) -> 'Axes[float, float]'
 ```
 
 Add the triangles of a mesh, each filled with one color from its value.
@@ -2479,9 +2499,11 @@ triangles overlap (given triangles may, and a mesh may on a log axis) the higher
 is on top, whatever else the mesh holds. Triangles of one color that follow one another
 in that order share one fill and one stroke, so a colormap that takes the same color at
 two places apart along it draws that color as several; the same triangles in any order
-draw the same output. The mesh is always
-drawn flat, as vector shapes. Automatic limits are the extent of the points, without
-padding.
+draw the same output. The mesh is drawn flat, as vector shapes, unless
+``render=Render.RASTER`` asks for one image in SVG and PDF output, at the export's
+``raster_dpi`` (see ``Render``), for a mesh of so many triangles that the file would be
+slow to open; NaN triangles stay transparent in it, and PNG output stays the same.
+Automatic limits are the extent of the points, without padding.
 
 Args:
     x: The x coordinate of each point: finite, positive on a log axis.
@@ -2496,13 +2518,15 @@ Args:
     scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
     center: The value at the middle of a diverging colormap, as for ``ColorBy``;
         ``AUTO`` for a sequential mapping.
+    render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+        and PDF output. There is no ``AUTO``.
 
 Returns:
     These axes.
 
 Raises:
     TypeError: If an argument has the wrong type, such as a float array for
-        ``triangles``, or ``scale`` is not linear or log.
+        ``triangles`` or ``AUTO`` for ``render``, or ``scale`` is not linear or log.
     DataError: If the points or ``triangles`` are invalid, as ``triplot()`` says, or
         ``values`` does not hold one value per point (``POINTS``) or per triangle
         (``TRIANGLES``), or a value is infinite, beyond 1e300 in magnitude, or not
@@ -2525,6 +2549,7 @@ Example:
 >>> strain = x[tri].std(axis=1)
 >>> fem = ub.Figure().add_axes()
 >>> fem = fem.tripcolor(x, y, strain, triangles=tri, on=ub.TriValues.TRIANGLES)
+>>> image = ub.Figure().add_axes().tripcolor(x, y, x * y, render=ub.Render.RASTER)
 ```
 
 ### `umber.Axes.triplot`
@@ -4564,19 +4589,23 @@ True
 ### `umber.Figure.save_pdf`
 
 ```text
-Figure.save_pdf(self, path: str | os.PathLike[str]) -> None
+Figure.save_pdf(self, path: str | os.PathLike[str], *, raster_dpi: int=300) -> None
 ```
 
 Render the figure as a PDF document and write it to ``path``.
 
 Args:
     path: The file to write; an existing file is replaced.
+    raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from
+        10 to 2400 and 300 by default; see ``to_pdf()``.
 
 Raises:
-    TypeError: If ``path`` is not a ``str`` or a path-like object returning a string.
-    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-        cannot fit their room, bubbles are too large for the plot of an axis with
-        automatic limits, or a font cannot render the requested text.
+    TypeError: If ``path`` is not a ``str`` or a path-like object returning a string,
+        or ``raster_dpi`` is not an int.
+    StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, bubbles are too large for
+        the plot of an axis with automatic limits, a font cannot render the requested
+        text, or the image of a mark would be larger than a PNG may be.
     OSError: If the file cannot be written.
 
 Example:
@@ -4618,7 +4647,7 @@ Example:
 ### `umber.Figure.save_svg`
 
 ```text
-Figure.save_svg(self, path: str | os.PathLike[str], *, text: SvgText=SvgText.OUTLINES) -> None
+Figure.save_svg(self, path: str | os.PathLike[str], *, text: SvgText=SvgText.OUTLINES, raster_dpi: int=300) -> None
 ```
 
 Render the figure as an SVG document and write it to ``path`` in UTF-8.
@@ -4626,13 +4655,16 @@ Render the figure as an SVG document and write it to ``path`` in UTF-8.
 Args:
     path: The file to write; an existing file is replaced.
     text: How text is written; see ``to_svg()``.
+    raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from
+        10 to 2400 and 300 by default; see ``to_svg()``.
 
 Raises:
-    TypeError: If ``path`` is not a ``str`` or path-like object, or ``text`` is not
-        an ``SvgText``.
-    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-        cannot fit their room, or bubbles are too large for the plot of an axis with
-        automatic limits.
+    TypeError: If ``path`` is not a ``str`` or path-like object, ``text`` is not an
+        ``SvgText`` or ``raster_dpi`` is not an int.
+    StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, bubbles are too large for
+        the plot of an axis with automatic limits, or the image of a mark would be
+        larger than a PNG may be.
     OSError: If the file cannot be written.
 
 Example:
@@ -4756,21 +4788,29 @@ Example:
 ### `umber.Figure.to_pdf`
 
 ```text
-Figure.to_pdf(self) -> bytes
+Figure.to_pdf(self, *, raster_dpi: int=300) -> bytes
 ```
 
 Render the figure as a single-page PDF with embedded fonts.
 
 The page has the figure's size in points (72 points per inch). Lines, fills and text
-stay vector; raster cell grids remain images. Text can be selected and searched.
+stay vector; raster cell grids remain images, and so do the marks drawn with
+``render=Render.RASTER``, at ``raster_dpi``. Text can be selected and searched.
+
+Args:
+    raster_dpi: The resolution, from 10 to 2400 pixels per inch and 300 by default, of
+        the marks drawn with ``render=Render.RASTER``. It changes nothing else: a
+        figure without such a mark gives the same bytes at every ``raster_dpi``.
 
 Returns:
     The PDF file contents.
 
 Raises:
-    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-        cannot fit their room, bubbles are too large for the plot of an axis with
-        automatic limits, or a font cannot render the requested text.
+    TypeError: If ``raster_dpi`` is not an int.
+    StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, bubbles are too large for
+        the plot of an axis with automatic limits, a font cannot render the requested
+        text, or the image of a mark would be larger than a PNG may be.
 
 Example:
 
@@ -4814,7 +4854,7 @@ b'PNG'
 ### `umber.Figure.to_svg`
 
 ```text
-Figure.to_svg(self, *, text: SvgText=SvgText.OUTLINES) -> str
+Figure.to_svg(self, *, text: SvgText=SvgText.OUTLINES, raster_dpi: int=300) -> str
 ```
 
 Render the figure as an SVG document.
@@ -4822,15 +4862,20 @@ Render the figure as an SVG document.
 Args:
     text: How text is written. ``SvgText.OUTLINES`` draws it as paths, which look the
         same everywhere; ``SvgText.EDITABLE`` keeps it as text elements.
+    raster_dpi: The resolution, from 10 to 2400 pixels per inch and 300 by default, of
+        the marks drawn with ``render=Render.RASTER``, each one image. It changes
+        nothing else: a figure without such a mark gives the same document at every
+        ``raster_dpi``.
 
 Returns:
     The SVG document.
 
 Raises:
-    TypeError: If ``text`` is not an ``SvgText``.
-    StyleError: If the plot area, titles, subtitles, axis labels or x tick labels
-        cannot fit their room, or bubbles are too large for the plot of an axis with
-        automatic limits.
+    TypeError: If ``text`` is not an ``SvgText`` or ``raster_dpi`` is not an int.
+    StyleError: If ``raster_dpi`` is out of range, the plot area, titles, subtitles,
+        axis labels or x tick labels cannot fit their room, bubbles are too large for
+        the plot of an axis with automatic limits, or the image of a mark would be
+        larger than a PNG may be (32,767 pixels on a side, 2**26 pixels in all).
 
 Example:
 
@@ -4839,6 +4884,10 @@ Example:
 >>> svg = ub.Figure().to_svg(text=ub.SvgText.EDITABLE)
 >>> svg.startswith("<svg")
 True
+>>> dense = ub.scatter([1, 2, 3], [2.0, 1.0, 3.0], render=ub.Render.RASTER)
+>>> svg = dense.figure.to_svg(raster_dpi=150)
+>>> svg.count("<image")
+1
 ```
 
 ### `umber.Figure.twin_axes_at`
@@ -5737,9 +5786,12 @@ Right of the point, centred vertically.
 class Render(Enum)
 ```
 
-How the cells of a heatmap, a 2-D histogram or a mesh are drawn.
+How a mark is drawn: as vector shapes or as one image.
 
-The cells form a grid of solid colors. As vector shapes, each cell is one filled
+It means one thing for the grid marks ``heatmap()``, ``hist2d()`` and ``mesh()``, and another
+for ``scatter()``, ``line()`` and ``tripcolor()``.
+
+Grid marks: the cells form a grid of solid colors. As vector shapes, each cell is one filled
 rectangle. As an image, the grid is one image with one pixel per cell, stretched over the
 cells with nearest-neighbour scaling: it looks the same, while the file stays small and
 fast to open. In PNG output each pixel takes the average of the cells it covers, weighted
@@ -5751,6 +5803,18 @@ no edge of the image lies more than 0.001 pt from the cell edge it stands for, a
 cut by explicit limits reaches at most 10,000 pt past them (the image covers whole cells
 and is clipped at the limits). Limits that zoom in far on a mesh can break either bound;
 then ``AUTO`` draws vector shapes and ``RASTER`` makes rendering raise ``StyleError``.
+``raster_dpi`` does not apply to them.
+
+Scatter, line and tripcolor: these marks are drawn as vector shapes by default. With
+``RASTER``, SVG and PDF output draw the mark as one image that covers the plot area, at the
+``raster_dpi`` of the export (300 dots per inch by default), in the mark's place among the
+other marks and clipped to the plot as the mark is. A scatter of a million points then
+opens quickly in any viewer. The image is transparent where the mark draws nothing, so
+marks below it show through, and it looks as a PNG at ``raster_dpi`` does; viewers may
+smooth it when they scale it. PNG output is the same as with ``VECTOR``. The axes, text,
+legends and colorbars, the other marks, and the mark's own value labels and error bars stay
+vector. With ``by``, each group is an image of its own. These marks take no ``AUTO``: a
+mark is an image only when asked, as its look can change.
 
 Example:
 
@@ -5758,6 +5822,10 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
 >>> ax = ax.heatmap(["a", "b"], ["r"], [[1, 2]], render=ub.Render.RASTER)
+>>> dense = ub.Figure().add_axes().scatter(
+...     [0.1, 0.4, 0.7], [1.0, 3.0, 2.0], render=ub.Render.RASTER
+... )
+>>> pdf = dense.figure.to_pdf(raster_dpi=600)
 ```
 
 ### `umber.Render.RASTER`
@@ -5766,8 +5834,9 @@ Example:
 Render.RASTER
 ```
 
-One image with one pixel per cell. A mesh needs edges evenly spaced on screen, and
-rendering fails when the image would not be exact on the final plot.
+One image. For grid marks, one pixel per cell: a mesh needs edges evenly spaced on
+screen, and rendering fails when the image would not be exact on the final plot. For a
+scatter, line or tripcolor, an image at ``raster_dpi`` in SVG and PDF output.
 
 ### `umber.Render.VECTOR`
 
@@ -5775,7 +5844,8 @@ rendering fails when the image would not be exact on the final plot.
 Render.VECTOR
 ```
 
-One filled rectangle per cell.
+Vector shapes: one filled rectangle per cell, or the shapes of a scatter, line or
+tripcolor.
 
 ## `umber.Scale`
 
@@ -7463,7 +7533,7 @@ Example:
 ## `umber.line`
 
 ```text
-line(x: Values[float], y: Values[float], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO) -> Axes[float, float]
+line(x: Values[float], y: Values[float], *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, render: Render=Render.VECTOR) -> Axes[float, float]
 ```
 
 Plot a line on a new figure and return its axes.
@@ -7483,6 +7553,8 @@ Args:
         appearance, supplying their labels and palette colors. Do not pass an explicit
         color or a non-empty label. Missing or empty names and an empty grouping column
         are refused.
+    render: ``Render.RASTER`` draws the line as one image in SVG and PDF output, as in
+        ``Axes.line()``.
 
 Returns:
     The axes of the new figure.
@@ -7547,7 +7619,7 @@ Example:
 ## `umber.save_pdf`
 
 ```text
-save_pdf(path: str | os.PathLike[str], figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> None
+save_pdf(path: str | os.PathLike[str], figures: Sequence[Figure | Axes[Any, Any] | PieAxes], *, raster_dpi: int=300) -> None
 ```
 
 Render several figures as one PDF document and write it to ``path``.
@@ -7558,12 +7630,15 @@ cannot be rendered no file is written and an existing file at ``path`` is left a
 Args:
     path: The file to write; an existing file is replaced.
     figures: The figures, one per page; a list or tuple with at least one item.
+    raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from 10
+        to 2400 and 300 by default; see ``Figure.to_pdf()``.
 
 Raises:
     TypeError: If ``path`` is not a ``str`` or a path-like object returning a string,
-        ``figures`` is a single ``Figure`` or not a list or tuple, or an item is not a
-        figure or the axes of one.
+        ``figures`` is a single ``Figure`` or not a list or tuple, an item is not a
+        figure or the axes of one, or ``raster_dpi`` is not an int.
     DataError: If ``figures`` is empty.
+    StyleError: If ``raster_dpi`` is out of range.
     DataError, StyleError: If a figure cannot be rendered. The error keeps the class the
         figure's own render raises, and its message begins with ``figures[i]: ``, where
         ``i`` counts from 0.
@@ -7581,7 +7656,7 @@ Example:
 ## `umber.scatter`
 
 ```text
-scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False) -> Axes[float, float]
+scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False, render: Render=Render.VECTOR) -> Axes[float, float]
 ```
 
 Plot a marker at each point on a new figure and return its axes.
@@ -7612,6 +7687,8 @@ Args:
     y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
         ``Axes.scatter()``.
     connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
+    render: ``Render.RASTER`` draws the markers as one image in SVG and PDF output, as in
+        ``Axes.scatter()``.
 
 Returns:
     The axes of the new figure.
@@ -7643,26 +7720,29 @@ Example:
 ## `umber.to_pdf`
 
 ```text
-to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes]) -> bytes
+to_pdf(figures: Sequence[Figure | Axes[Any, Any] | PieAxes], *, raster_dpi: int=300) -> bytes
 ```
 
 Render several figures as one PDF with embedded fonts.
 
 Each figure is one page at its own size, in list order, and draws what ``Figure.to_pdf()``
-draws for it. A font used on several pages is embedded once. The same figure may appear
-more than once. Every figure is rendered before anything is returned.
+draws for it at ``raster_dpi``. A font used on several pages is embedded once. The same
+figure may appear more than once. Every figure is rendered before anything is returned.
 
 Args:
     figures: The figures, one per page; a list or tuple with at least one item. An axes
         stands for its figure.
+    raster_dpi: The resolution of the marks drawn with ``render=Render.RASTER``, from 10
+        to 2400 and 300 by default, on every page; see ``Figure.to_pdf()``.
 
 Returns:
     The PDF file contents.
 
 Raises:
-    TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, or an item is
-        not a figure or the axes of one.
+    TypeError: If ``figures`` is a single ``Figure`` or not a list or tuple, an item is
+        not a figure or the axes of one, or ``raster_dpi`` is not an int.
     DataError: If ``figures`` is empty.
+    StyleError: If ``raster_dpi`` is out of range.
     DataError, StyleError: If a figure cannot be rendered (see ``Figure.to_pdf()``). The
         error keeps the class the figure's own render raises, and its message begins with
         ``figures[i]: ``, where ``i`` counts from 0.
