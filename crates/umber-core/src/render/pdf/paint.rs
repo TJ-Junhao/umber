@@ -20,7 +20,7 @@ use super::super::normalize::{
 use super::Clip;
 use super::image::{side, write_image};
 use super::text::{Fonts, written};
-use super::write::{Refs, limited, rounded, unit};
+use super::write::{Refs, from_thousandths, limited, rounded, thousandths, unit};
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
 use crate::scene::{
@@ -55,6 +55,7 @@ impl<'f, 's> Page<'f, 's> {
                 opacities: HashMap::new(),
                 shadings: Vec::new(),
                 xobjects: Vec::new(),
+                marker_forms: HashMap::new(),
             },
             fonts,
         }
@@ -269,10 +270,7 @@ impl<'f, 's> Page<'f, 's> {
         let Some(bbox) = bbox else {
             return;
         };
-        let name = self.resources.xobject(XObject::Marker {
-            content: form.finish().into_vec(),
-            bbox,
-        });
+        let name = self.resources.marker_form(form.finish().into_vec(), bbox);
 
         self.content.save_state();
         self.opacity(fill.map_or(255, |c| c.a), stroke.map_or(255, |s| s.color.a));
@@ -282,12 +280,22 @@ impl<'f, 's> Page<'f, 's> {
         if let Some(s) = stroke {
             stroke_style(&mut self.content, s, normalized.control_length());
         }
+        // Each copy moves by its offset from the previous one, so the position of every copy is
+        // the sum of the deltas. The deltas are taken between positions already rounded to
+        // thousandths, as whole thousandths, so the sums are exactly the rounded positions.
+        let mut at = (0_i64, 0_i64);
         for p in positions.iter().filter(|p| valid_point(**p)) {
-            self.content.save_state();
-            self.content
-                .transform([1.0, 0.0, 0.0, 1.0, rounded(p.x), rounded(p.y)]);
+            let to = (thousandths(p.x), thousandths(p.y));
+            self.content.transform([
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+                from_thousandths(to.0 - at.0),
+                from_thousandths(to.1 - at.1),
+            ]);
             self.content.x_object(Name(name.as_bytes()));
-            self.content.restore_state();
+            at = to;
         }
         self.content.restore_state();
     }
@@ -577,6 +585,9 @@ pub(super) struct Resources<'s> {
     opacities: HashMap<(u8, u8), usize>,
     shadings: Vec<Shading>,
     xobjects: Vec<XObject<'s>>,
+    /// The index in `xobjects` of each marker form used, by its content and its box (as bits,
+    /// so equal forms are equal keys).
+    marker_forms: HashMap<(Vec<u8>, [u32; 4]), usize>,
 }
 
 impl<'s> Resources<'s> {
@@ -606,6 +617,26 @@ impl<'s> Resources<'s> {
     fn xobject(&mut self, xobject: XObject<'s>) -> String {
         self.xobjects.push(xobject);
         format!("X{}", self.xobjects.len() - 1)
+    }
+
+    /// The name of the marker form with `content` and `bbox`: the one already added when an
+    /// equal form was, else a new one. A form holds only a path and its fill and stroke
+    /// operators; color, opacity and stroke style are set outside it, so equal forms look equal.
+    fn marker_form(&mut self, content: Vec<u8>, bbox: [f32; 4]) -> String {
+        let key = (content, bbox.map(f32::to_bits));
+        let index = match self.marker_forms.get(&key) {
+            Some(&index) => index,
+            None => {
+                let index = self.xobjects.len();
+                self.xobjects.push(XObject::Marker {
+                    content: key.0.clone(),
+                    bbox,
+                });
+                self.marker_forms.insert(key, index);
+                index
+            }
+        };
+        format!("X{index}")
     }
 
     /// Writes every resource but the fonts into `chunk`, numbering objects with `refs`, and

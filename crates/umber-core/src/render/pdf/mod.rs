@@ -924,4 +924,157 @@ mod tests {
         let pdf = String::from_utf8_lossy(&render_pdf(&scene).unwrap()).into_owned();
         assert!(pdf.contains("/S /Luminosity") && pdf.contains("/CS /DeviceGray"));
     }
+
+    /// A scene of `runs` runs of markers, alternating between two colors as a `ColorBy`
+    /// scatter does, each run holding `per_run` positions on a fine grid.
+    fn run_scene(runs: usize, per_run: usize, shape: fn() -> Path) -> Scene {
+        let mut scene = Scene::new(300.0, 200.0, WHITE);
+        for run in 0..runs {
+            let color = if run % 2 == 0 { RED } else { WHITE };
+            let positions = (0..per_run)
+                .map(|i| {
+                    let n = (run * per_run + i) as f32;
+                    p(n * 0.37 % 290.0 + 0.0004, n * 0.91 % 190.0 + 0.0006)
+                })
+                .collect();
+            scene.push(Item::Markers {
+                shape: shape(),
+                fill: Some(color),
+                stroke: None,
+                positions,
+            });
+        }
+        scene
+    }
+
+    fn forms(pdf: &[u8]) -> usize {
+        String::from_utf8_lossy(pdf)
+            .matches("/Subtype /Form")
+            .count()
+    }
+
+    /// The absolute position of every `Do` in `content`, summing the translations, which a
+    /// `q` and `Q` pair scopes as a reader does.
+    fn do_positions(content: &str) -> Vec<(i64, i64)> {
+        let thousandths = |token: &str| (token.parse::<f64>().unwrap() * 1000.0).round() as i64;
+        let (mut at, mut saved, mut found) = ((0, 0), Vec::new(), Vec::new());
+        for line in content.lines() {
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            match tokens.last().copied() {
+                Some("q") => saved.push(at),
+                Some("Q") => at = saved.pop().unwrap(),
+                Some("cm") if tokens[..4] == ["1", "0", "0", "1"] => {
+                    at = (at.0 + thousandths(tokens[4]), at.1 + thousandths(tokens[5]));
+                }
+                Some("Do") => found.push(at),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn runs_of_equal_markers_share_one_form_per_shape() {
+        let scene = run_scene(200, 5, || square(-2.0, -2.0, 4.0));
+        let pdf = render_pdf(&scene).unwrap();
+        // The two colors are set outside the form, so one form serves every run.
+        assert_eq!(forms(&pdf), 1);
+        let text = content(&scene);
+        assert_eq!(
+            operators(&text).iter().filter(|op| **op == "Do").count(),
+            1000
+        );
+        // One q/Q per run, not per marker, and one for the background.
+        assert_eq!(
+            operators(&text).iter().filter(|op| **op == "q").count(),
+            201
+        );
+    }
+
+    #[test]
+    fn marker_positions_are_the_rounded_positions() {
+        let scene = run_scene(3, 400, || square(-2.0, -2.0, 4.0));
+        let text = content(&scene);
+        // The page flips the y axis with one cm before the items; it is not a translation.
+        let expected: Vec<(i64, i64)> = (0..1200)
+            .map(|n| {
+                let n = n as f32;
+                (
+                    write::thousandths(n * 0.37 % 290.0 + 0.0004),
+                    write::thousandths(n * 0.91 % 190.0 + 0.0006),
+                )
+            })
+            .collect();
+        assert_eq!(do_positions(&text), expected);
+    }
+
+    #[test]
+    fn far_apart_markers_keep_their_positions() {
+        let mut scene = Scene::new(100.0, 100.0, WHITE);
+        scene.push(Item::Markers {
+            shape: square(-2.0, -2.0, 4.0),
+            fill: Some(RED),
+            stroke: None,
+            positions: vec![p(-1.0e6, 5.0), p(1.0e6, 6.0), p(7.0, 8.0)],
+        });
+        let text = content(&scene);
+        assert!(!text.contains("inf") && !text.contains("NaN"), "{text}");
+        let found = do_positions(&text);
+        assert_eq!(
+            found,
+            [(-1_000_000_000, 5000), (1_000_000_000, 6000), (7000, 8000)]
+        );
+    }
+
+    #[test]
+    fn mixed_shapes_get_one_form_each() {
+        let mut scene = run_scene(40, 3, || square(-2.0, -2.0, 4.0));
+        for run in 0..40 {
+            scene.push(Item::Markers {
+                shape: if run % 2 == 0 {
+                    square(-3.0, -3.0, 6.0)
+                } else {
+                    triangle_shape()
+                },
+                fill: Some(RED),
+                stroke: None,
+                positions: vec![p(run as f32, 10.0)],
+            });
+        }
+        scene.push(Item::Markers {
+            shape: square(-2.0, -2.0, 4.0),
+            fill: Some(RED),
+            stroke: Some(StrokeStyle {
+                color: RED,
+                width: 1.0,
+                dash: Vec::new(),
+                cap: LineCap::Butt,
+                join: LineJoin::Miter,
+            }),
+            positions: vec![p(1.0, 1.0)],
+        });
+        let pdf = render_pdf(&scene).unwrap();
+        // The small square, the large square, the triangle, and the small square with a
+        // stroke (different content and box).
+        assert_eq!(forms(&pdf), 4);
+    }
+
+    fn triangle_shape() -> Path {
+        let mut path = Path::new();
+        path.move_to(p(0.0, -3.0));
+        path.line_to(p(3.0, 3.0));
+        path.line_to(p(-3.0, 3.0));
+        path.close();
+        path
+    }
+
+    #[test]
+    fn pages_of_a_document_each_write_their_own_forms() {
+        let a = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
+        let b = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
+        let pdf = render_pdf_pages(&[&a, &b]).unwrap();
+        // Resources belong to a page, so a page's forms are not named by another page.
+        assert_eq!(forms(&pdf), 2);
+        assert_eq!(forms(&render_pdf(&a).unwrap()), 1);
+    }
 }
