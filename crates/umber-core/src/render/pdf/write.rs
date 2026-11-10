@@ -21,16 +21,6 @@ pub(super) fn rounded(v: f32) -> f32 {
     if r == 0.0 { 0.0 } else { r }
 }
 
-/// `v` rounded as by [`rounded`], in whole thousandths.
-pub(super) fn thousandths(v: f32) -> i64 {
-    (f64::from(rounded(v)) * 1000.0).round() as i64
-}
-
-/// `units` thousandths as a number [`rounded`] leaves as it is.
-pub(super) fn from_thousandths(units: i64) -> f32 {
-    rounded((units as f64 / 1000.0) as f32)
-}
-
 /// A color channel or an opacity of `0..=255` as a PDF number in `0..=1`.
 pub(super) fn unit(channel: u8) -> f32 {
     rounded(f32::from(channel) / 255.0)

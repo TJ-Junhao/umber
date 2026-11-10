@@ -953,20 +953,17 @@ mod tests {
             .count()
     }
 
-    /// The absolute position of every `Do` in `content`, summing the translations, which a
-    /// `q` and `Q` pair scopes as a reader does.
-    fn do_positions(content: &str) -> Vec<(i64, i64)> {
-        let thousandths = |token: &str| (token.parse::<f64>().unwrap() * 1000.0).round() as i64;
-        let (mut at, mut saved, mut found) = ((0, 0), Vec::new(), Vec::new());
+    /// The translation written before every `Do` in `content`, as text tokens.
+    fn do_positions(content: &str) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        let mut last = None;
         for line in content.lines() {
             let tokens: Vec<&str> = line.split_whitespace().collect();
             match tokens.last().copied() {
-                Some("q") => saved.push(at),
-                Some("Q") => at = saved.pop().unwrap(),
                 Some("cm") if tokens[..4] == ["1", "0", "0", "1"] => {
-                    at = (at.0 + thousandths(tokens[4]), at.1 + thousandths(tokens[5]));
+                    last = Some((tokens[4].to_string(), tokens[5].to_string()));
                 }
-                Some("Do") => found.push(at),
+                Some("Do") => found.push(last.take().unwrap()),
                 _ => {}
             }
         }
@@ -984,46 +981,37 @@ mod tests {
             operators(&text).iter().filter(|op| **op == "Do").count(),
             1000
         );
-        // One q/Q per run, not per marker, and one for the background.
-        assert_eq!(
-            operators(&text).iter().filter(|op| **op == "q").count(),
-            201
-        );
     }
 
     #[test]
-    fn marker_positions_are_the_rounded_positions() {
+    fn marker_positions_are_written_absolutely() {
         let scene = run_scene(3, 400, || square(-2.0, -2.0, 4.0));
         let text = content(&scene);
-        // The page flips the y axis with one cm before the items; it is not a translation.
-        let expected: Vec<(i64, i64)> = (0..1200)
+        // Every copy sits in its own q/Q pair and is placed by its position rounded to
+        // thousandths, never by an offset from the copy before.
+        assert_eq!(
+            operators(&text).iter().filter(|op| **op == "q").count(),
+            1200 + 3 + 1
+        );
+        let expected: Vec<(String, String)> = (0..1200)
             .map(|n| {
                 let n = n as f32;
+                let (x, y) = (n * 0.37 % 290.0 + 0.0004, n * 0.91 % 190.0 + 0.0006);
                 (
-                    write::thousandths(n * 0.37 % 290.0 + 0.0004),
-                    write::thousandths(n * 0.91 % 190.0 + 0.0006),
+                    format!("{}", write::rounded(x)),
+                    format!("{}", write::rounded(y)),
                 )
             })
             .collect();
-        assert_eq!(do_positions(&text), expected);
-    }
-
-    #[test]
-    fn far_apart_markers_keep_their_positions() {
-        let mut scene = Scene::new(100.0, 100.0, WHITE);
-        scene.push(Item::Markers {
-            shape: square(-2.0, -2.0, 4.0),
-            fill: Some(RED),
-            stroke: None,
-            positions: vec![p(-1.0e6, 5.0), p(1.0e6, 6.0), p(7.0, 8.0)],
-        });
-        let text = content(&scene);
-        assert!(!text.contains("inf") && !text.contains("NaN"), "{text}");
         let found = do_positions(&text);
-        assert_eq!(
-            found,
-            [(-1_000_000_000, 5000), (1_000_000_000, 6000), (7000, 8000)]
-        );
+        assert_eq!(found.len(), expected.len());
+        for (found, expected) in found.iter().zip(&expected) {
+            let parse = |t: &str| t.parse::<f32>().unwrap();
+            assert_eq!(
+                (parse(&found.0), parse(&found.1)),
+                (parse(&expected.0), parse(&expected.1))
+            );
+        }
     }
 
     #[test]

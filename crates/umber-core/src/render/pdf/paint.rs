@@ -20,7 +20,7 @@ use super::super::normalize::{
 use super::Clip;
 use super::image::{side, write_image};
 use super::text::{Fonts, written};
-use super::write::{Refs, from_thousandths, limited, rounded, thousandths, unit};
+use super::write::{Refs, limited, rounded, unit};
 use crate::color::Rgba;
 use crate::geometry::{Path, Point};
 use crate::scene::{
@@ -280,22 +280,12 @@ impl<'f, 's> Page<'f, 's> {
         if let Some(s) = stroke {
             stroke_style(&mut self.content, s, normalized.control_length());
         }
-        // Each copy moves by its offset from the previous one, so the position of every copy is
-        // the sum of the deltas. The deltas are taken between positions already rounded to
-        // thousandths, as whole thousandths, so the sums are exactly the rounded positions.
-        let mut at = (0_i64, 0_i64);
         for p in positions.iter().filter(|p| valid_point(**p)) {
-            let to = (thousandths(p.x), thousandths(p.y));
-            self.content.transform([
-                1.0,
-                0.0,
-                0.0,
-                1.0,
-                from_thousandths(to.0 - at.0),
-                from_thousandths(to.1 - at.1),
-            ]);
+            self.content.save_state();
+            self.content
+                .transform([1.0, 0.0, 0.0, 1.0, rounded(p.x), rounded(p.y)]);
             self.content.x_object(Name(name.as_bytes()));
-            at = to;
+            self.content.restore_state();
         }
         self.content.restore_state();
     }
