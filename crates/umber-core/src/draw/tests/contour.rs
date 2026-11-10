@@ -1,11 +1,11 @@
 //! Contours as drawn: bands, lines and level labels, the colorbar of their levels, and the
 //! degenerate grids that draw little or nothing.
 
-use crate::pipeline::plan_figure;
+use crate::pipeline::{plan_figure, plan_panel_marks};
 use crate::scene::{FillRule, Item, Paint, Scene};
 use crate::{
-    ContourLevels, ContourOptions, ContourStyle, Figure, FontLibrary, Mark, Rgba, ScaleKind,
-    SvgText, Theme, TickFormat,
+    ColorbarOptions, ContourLevels, ContourOptions, ContourStyle, Error, Figure, FontLibrary, Mark,
+    MeshOptions, Rgba, ScaleKind, SvgText, Theme, TickFormat, Transform,
 };
 
 /// A figure with one contour of `z` on the grid `x` by `y`.
@@ -405,5 +405,161 @@ fn level_labels_sit_on_long_lines_and_break_them() {
     assert_eq!(
         svg.matches("transform=\"rotate(").count(),
         labels.iter().filter(|(_, a)| *a != 0.0).count()
+    );
+}
+
+/// The colorbar levels of the only panel of `f`, if it marks any.
+fn bar_levels(f: &Figure) -> Option<Vec<f64>> {
+    let (resolved, _, _) = plan_panel_marks(f, FontLibrary::global()).remove(0);
+    let levels = resolved.color?.levels?;
+    Some(levels.ticks.iter().map(|tick| tick.value).collect())
+}
+
+/// A figure with one grid contour of `z` on the unit square for each of `contours`.
+fn grids(contours: &[([f64; 4], ContourOptions)]) -> Figure {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    for (z, options) in contours {
+        axes.contour(&[0.0, 1.0], &[0.0, 1.0], z, options.clone())
+            .unwrap();
+    }
+    f
+}
+
+/// Values whose finite ones never meet in a cell: nothing is drawn.
+const NO_CELL: [f64; 4] = [0.0, 1.0, f64::NAN, 2.0];
+
+const RISING: [f64; 4] = [0.0, 1.0, 2.0, 3.0];
+
+#[test]
+fn a_grid_contour_that_draws_nothing_takes_no_part_in_the_colorbar() {
+    let beside = |empty: [f64; 4], options: ContourOptions| {
+        let f = grids(&[(RISING, ContourOptions::default()), (empty, options)]);
+        let [Mark::Contour(drawn), Mark::Contour(nothing)] = f.single_axes().marks() else {
+            unreachable!()
+        };
+        assert!(!drawn.levels().is_empty());
+        let expected = drawn.levels();
+        let empty_levels = nothing.levels();
+        scene(&f);
+        assert_eq!(bar_levels(&f), Some(expected), "{empty:?}");
+        // It still counts in the limits.
+        let (resolved, _, _) = plan_panel_marks(&f, FontLibrary::global()).remove(0);
+        assert_eq!(resolved.x.continuous().unwrap().domain(), (0.0, 1.0));
+        empty_levels
+    };
+    // All NaN: no automatic levels. One finite value, or finite values that share no cell:
+    // levels from every finite value, still compared with nothing.
+    assert!(beside([f64::NAN; 4], ContourOptions::default()).is_empty());
+    assert!(
+        beside(
+            [f64::NAN, f64::NAN, 5.0, f64::NAN],
+            ContourOptions::default()
+        )
+        .is_empty()
+    );
+    assert!(!beside(NO_CELL, ContourOptions::default()).is_empty());
+    // With levels of its own, which differ, too.
+    let given = ContourOptions {
+        levels: ContourLevels::Values(vec![5.0]),
+        ..styled(ContourStyle::Both)
+    };
+    assert_eq!(beside([f64::NAN; 4], given), [5.0]);
+}
+
+#[test]
+fn an_empty_filled_grid_contour_keeps_the_gradient_colorbar() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.mesh(
+        &[0.0, 1.0, 2.0],
+        &[0.0, 1.0],
+        &[1.0, 3.0],
+        MeshOptions::default(),
+    )
+    .unwrap()
+    .contour(
+        &[0.0, 1.0],
+        &[0.0, 1.0],
+        &[f64::NAN; 4],
+        styled(ContourStyle::Filled),
+    )
+    .unwrap()
+    .colorbar(ColorbarOptions::default())
+    .unwrap();
+    let (resolved, layout, _) = plan_panel_marks(&f, FontLibrary::global()).remove(0);
+    assert!(layout.colorbar.is_some());
+    let scale = resolved.color.unwrap();
+    assert!(scale.levels.is_none(), "the bar marks levels");
+    assert!(scale.ticks.len() >= 2);
+    scene(&f);
+}
+
+#[test]
+fn an_empty_grid_contour_adds_nothing_to_the_color_range() {
+    // Over a mesh of 1 to 3, an empty contour of values up to 300 leaves the range alone, on
+    // a linear, a centered and a log scale. One that draws something still widens it.
+    let values = [100.0, 200.0, f64::NAN, 300.0];
+    let range = |mesh: MeshOptions, contour: ContourOptions, z: [f64; 4]| {
+        let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.mesh(&[0.0, 1.0, 2.0], &[0.0, 1.0], &[1.0, 3.0], mesh)
+            .unwrap()
+            .contour(&[0.0, 1.0], &[0.0, 1.0], &z, contour)
+            .unwrap();
+        let (resolved, _, _) = plan_panel_marks(&f, FontLibrary::global()).remove(0);
+        resolved.color.unwrap().norm.range()
+    };
+    let filled = styled(ContourStyle::Filled);
+    assert_eq!(
+        range(MeshOptions::default(), filled.clone(), values),
+        (1.0, 3.0)
+    );
+    let centered = |center| {
+        (
+            MeshOptions {
+                center,
+                ..MeshOptions::default()
+            },
+            ContourOptions {
+                center,
+                ..filled.clone()
+            },
+        )
+    };
+    let (mesh, contour) = centered(Some(2.0));
+    assert_eq!(range(mesh, contour, values), (1.0, 3.0));
+    let log = Transform::Log(crate::LogBase::TEN);
+    let mesh = MeshOptions {
+        scale: log,
+        ..MeshOptions::default()
+    };
+    let contour = ContourOptions {
+        scale: log,
+        ..filled.clone()
+    };
+    assert_eq!(range(mesh, contour, values), (1.0, 3.0));
+    // Every finite value of a contour that draws something counts, as before.
+    assert_eq!(
+        range(MeshOptions::default(), filled, [100.0, 200.0, 250.0, 300.0]),
+        (1.0, 300.0)
+    );
+}
+
+#[test]
+fn a_grid_contour_that_draws_but_has_no_levels_is_still_compared() {
+    // Equal values draw every cell but give no automatic levels: the contour takes part in
+    // the check, so it differs from one with levels, as before.
+    let f = grids(&[
+        (RISING, ContourOptions::default()),
+        ([1.0; 4], ContourOptions::default()),
+    ]);
+    let error = f.to_scene(FontLibrary::global()).unwrap_err();
+    assert!(matches!(error, Error::Style { .. }), "{error:?}");
+    assert!(
+        error
+            .to_string()
+            .contains("two contours of these axes have different levels"),
+        "{error}"
     );
 }

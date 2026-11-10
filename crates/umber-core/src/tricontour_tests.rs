@@ -793,3 +793,60 @@ fn a_mesh_contour_that_draws_nothing_takes_no_part_in_the_colorbar() {
         scene(&f);
     }
 }
+
+/// A grid contour of `z` on the unit square.
+fn grid(z: [f64; 4], options: ContourOptions) -> impl FnOnce(&mut Figure) {
+    move |f| {
+        f.single_axes_mut()
+            .contour(&[0.0, 1.0], &[0.0, 1.0], &z, options)
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_grid_and_a_mesh_contour_on_one_bar_ignore_whichever_draws_nothing() {
+    let (x, y) = fan();
+    // An empty mesh contour beside a grid contour that draws, and the other way round.
+    let mut f = figure_of(LINEAR);
+    grid([0.0, 1.0, 2.0, 3.0], lines())(&mut f);
+    f.single_axes_mut()
+        .tricontour(
+            &EMPTY_X,
+            &EMPTY_Y,
+            Triangles::Given(&[[0, 1, 2]]),
+            &EMPTY_Z,
+            lines(),
+        )
+        .unwrap();
+    let Mark::Contour(drawn) = &f.single_axes().marks()[0] else {
+        unreachable!()
+    };
+    let expected = drawn.levels();
+    scene(&f);
+    assert_eq!(bar_levels(&f), Some(expected));
+    let mut f = figure_of(LINEAR);
+    f.single_axes_mut()
+        .tricontour(&x, &y, Triangles::Auto, &PEAK, lines())
+        .unwrap();
+    grid([f64::NAN; 4], lines())(&mut f);
+    let Mark::Tricontour(drawn) = &f.single_axes().marks()[0] else {
+        unreachable!()
+    };
+    let expected = drawn.levels();
+    scene(&f);
+    assert_eq!(bar_levels(&f), Some(expected));
+    // Both empty: nothing on the bar.
+    let mut f = figure_of(LINEAR);
+    grid([f64::NAN; 4], lines())(&mut f);
+    f.single_axes_mut()
+        .tricontour(
+            &EMPTY_X,
+            &EMPTY_Y,
+            Triangles::Given(&[[0, 1, 2]]),
+            &EMPTY_Z,
+            lines(),
+        )
+        .unwrap();
+    scene(&f);
+    assert_eq!(bar_levels(&f), None);
+}
