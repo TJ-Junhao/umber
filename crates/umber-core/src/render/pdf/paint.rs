@@ -34,6 +34,11 @@ use crate::scene::{
 /// The miter limit of every stroke, as in the PNG and SVG backends.
 const MITER_LIMIT: f32 = 4.0;
 
+/// The step of the coordinates the content writes, in points: they are rounded to three
+/// decimals ([`rounded`]). The image of marks is placed this far inside its pixel edges (see
+/// `Page::raster`).
+const COORDINATE_STEP: f32 = 0.001;
+
 /// The page content being written, with the resources it uses.
 pub(super) struct Page<'f, 's> {
     content: Content,
@@ -399,7 +404,20 @@ impl<'f, 's> Page<'f, 's> {
         let encoded = EncodedImage::marks((columns, rows), &image.rgba);
         drop(image.rgba);
         let name = self.resources.xobject(XObject::Marks(encoded));
-        self.place_image(&image.rect, &name);
+        // Poppler and MuPDF widen an image to every device pixel its edges touch: placed on its
+        // pixel edges, an image drawn at its own resolution would be widened by one pixel and
+        // resampled. Placed one step of the written coordinates inside them, it is drawn pixel
+        // for pixel. The step is fixed in points, whatever the raster resolution, and is the
+        // precision every coordinate is written in already.
+        let r = image.rect;
+        let step = f64::from(COORDINATE_STEP);
+        let inside = Rect {
+            x: (f64::from(r.x) + step) as f32,
+            y: (f64::from(r.y) + step) as f32,
+            width: (f64::from(r.width) - 2.0 * step) as f32,
+            height: (f64::from(r.height) - 2.0 * step) as f32,
+        };
+        self.place_image(&inside, &name);
         Ok(())
     }
 

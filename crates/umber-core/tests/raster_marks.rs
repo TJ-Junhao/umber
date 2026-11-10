@@ -604,23 +604,21 @@ fn a_document_of_several_pages_draws_each_raster_mark_on_its_page() {
     }
 }
 
-// Poppler and MuPDF draw an image whose edges lie on device pixel edges one device pixel wider
-// and taller than it is: drawn at its own resolution, the image is resampled to one pixel more,
-// which moves its pixels by up to one pixel toward its far edges. Dense small markers show that
-// most; a scatter of 5,000 points over a band, the largest case here, differs from the vector
-// PDF by a mean of 4.0 (Poppler) and 2.7 (MuPDF), with 2.4% and 1.2% of pixels over 64 apart.
-
 /// The largest mean channel difference allowed between a PDF reader's drawing of a figure with
 /// a raster mark and of the same figure with the mark as vector shapes, both at the raster
-/// resolution.
-const MAX_RASTER_MEAN: f64 = 4.5;
+/// resolution: the two rasterizers antialias edges differently, as they do for every shape. The
+/// largest measured is 0.82 (MuPDF, a scatter of 5,000 points over a band), with no pixel over
+/// 64 apart.
+const MAX_RASTER_MEAN: f64 = 1.0;
 /// The largest share of pixels with a channel more than 64 apart between the two.
-const MAX_RASTER_FAR: f64 = 0.03;
+const MAX_RASTER_FAR: f64 = 0.001;
 /// The largest mean channel difference allowed between Poppler's drawing of a figure with a
-/// raster mark and its PNG at the raster resolution.
-const MAX_IMAGE_MEAN: f64 = 4.5;
+/// raster mark and its PNG at the raster resolution, where the image is drawn pixel for pixel
+/// and only the vector shapes around it differ. The largest measured is 0.29, with 0.05% of
+/// pixels over 64 apart.
+const MAX_IMAGE_MEAN: f64 = 0.5;
 /// The largest share of pixels with a channel more than 64 apart between the two.
-const MAX_IMAGE_FAR: f64 = 0.03;
+const MAX_IMAGE_FAR: f64 = 0.002;
 
 #[test]
 fn at_the_raster_resolution_a_raster_mark_looks_as_the_vector_mark() {
@@ -882,7 +880,8 @@ fn at_a_low_raster_dpi_the_image_meets_the_vector_shapes_beside_it() {
         items: vec![solid(box_path(72.0, 0.0, 144.0, 72.0), UNDER)],
     });
     let pdf = render_pdf(&scene, 10).unwrap();
-    // The image is written on its pixel edges, not moved in.
+    // The image is placed one step of the written coordinates, 0.001 pt, inside its pixel
+    // edges, which lie on 72 and 144 pt across and on 0 and 72 pt down.
     let content = page_content(&pdf);
     let place = content
         .lines()
@@ -895,7 +894,13 @@ fn at_a_low_raster_dpi_the_image_meets_the_vector_shapes_beside_it() {
         .take(6)
         .map(|v| v.parse().unwrap())
         .collect();
-    assert_eq!(numbers[4], 72.0, "{place}");
+    let [width, _, _, height, left, bottom] = numbers[..] else {
+        panic!("{place}");
+    };
+    let (right, top) = (left + width, bottom + height);
+    for (edge, at) in [(left, 72.0), (right, 144.0), (top, 0.0), (bottom, 72.0)] {
+        assert!((edge - at).abs() <= 0.001 + 1e-9, "{place}");
+    }
     let png = png_raster(&render_png(&scene, 720).unwrap());
     for (reader, page) in readers(&dir, "low", &pdf, 720, &png) {
         let (_, height) = page.size();

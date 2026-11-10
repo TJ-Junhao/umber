@@ -45,7 +45,7 @@ fn exceptional_tolerances(name: &str) -> Option<((f64, f64), (f64, f64))> {
         // compositing them at 300 dpi and then averaging differs from compositing their
         // coverage at the lower resolution, as the PNG does.
         "raster-marks-scatter-pigment" | "raster-marks-scatter-graphite" => {
-            ((8.5, 0.07), (7.5, 0.05))
+            ((8.0, 0.065), (7.0, 0.045))
         }
         _ => return None,
     })

@@ -71,9 +71,12 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 ///
 /// The items of an [`Item::Raster`] are drawn by the PNG backend at `raster_dpi`, over the whole
 /// pixels they cover, into one image XObject in their place, with a soft mask for the pixels
-/// that are not opaque and `/Interpolate true`, so viewers may smooth it. Its edges are written
-/// on its pixel edges, where the vector shapes beside it end. `raster_dpi` changes nothing else:
-/// a scene without such an item gives the same bytes at every `raster_dpi`.
+/// that are not opaque and `/Interpolate true`, so viewers may smooth it. The image is placed
+/// 0.001 pt, one step of the written coordinates, inside its pixel edges, whatever `raster_dpi`:
+/// Poppler and MuPDF widen an image to every device pixel its edges touch, so placed on its
+/// pixel edges it would be drawn one pixel larger, and resampled, at its own resolution.
+/// `raster_dpi` changes nothing else: a scene without such an item gives the same bytes at
+/// every `raster_dpi`.
 ///
 /// # Errors
 ///
