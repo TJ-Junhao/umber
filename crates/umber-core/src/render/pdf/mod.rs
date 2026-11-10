@@ -924,4 +924,145 @@ mod tests {
         let pdf = String::from_utf8_lossy(&render_pdf(&scene).unwrap()).into_owned();
         assert!(pdf.contains("/S /Luminosity") && pdf.contains("/CS /DeviceGray"));
     }
+
+    /// A scene of `runs` runs of markers, alternating between two colors as a `ColorBy`
+    /// scatter does, each run holding `per_run` positions on a fine grid.
+    fn run_scene(runs: usize, per_run: usize, shape: fn() -> Path) -> Scene {
+        let mut scene = Scene::new(300.0, 200.0, WHITE);
+        for run in 0..runs {
+            let color = if run % 2 == 0 { RED } else { WHITE };
+            let positions = (0..per_run)
+                .map(|i| {
+                    let n = (run * per_run + i) as f32;
+                    p(n * 0.37 % 290.0 + 0.0004, n * 0.91 % 190.0 + 0.0006)
+                })
+                .collect();
+            scene.push(Item::Markers {
+                shape: shape(),
+                fill: Some(color),
+                stroke: None,
+                positions,
+            });
+        }
+        scene
+    }
+
+    fn forms(pdf: &[u8]) -> usize {
+        String::from_utf8_lossy(pdf)
+            .matches("/Subtype /Form")
+            .count()
+    }
+
+    /// The translation written before every `Do` in `content`, as text tokens.
+    fn do_positions(content: &str) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        let mut last = None;
+        for line in content.lines() {
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            match tokens.last().copied() {
+                Some("cm") if tokens[..4] == ["1", "0", "0", "1"] => {
+                    last = Some((tokens[4].to_string(), tokens[5].to_string()));
+                }
+                Some("Do") => found.push(last.take().unwrap()),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn runs_of_equal_markers_share_one_form_per_shape() {
+        let scene = run_scene(200, 5, || square(-2.0, -2.0, 4.0));
+        let pdf = render_pdf(&scene).unwrap();
+        // The two colors are set outside the form, so one form serves every run.
+        assert_eq!(forms(&pdf), 1);
+        let text = content(&scene);
+        assert_eq!(
+            operators(&text).iter().filter(|op| **op == "Do").count(),
+            1000
+        );
+    }
+
+    #[test]
+    fn marker_positions_are_written_absolutely() {
+        let scene = run_scene(3, 400, || square(-2.0, -2.0, 4.0));
+        let text = content(&scene);
+        // Every copy sits in its own q/Q pair and is placed by its position rounded to
+        // thousandths, never by an offset from the copy before.
+        assert_eq!(
+            operators(&text).iter().filter(|op| **op == "q").count(),
+            1200 + 3 + 1
+        );
+        let expected: Vec<(String, String)> = (0..1200)
+            .map(|n| {
+                let n = n as f32;
+                let (x, y) = (n * 0.37 % 290.0 + 0.0004, n * 0.91 % 190.0 + 0.0006);
+                (
+                    format!("{}", write::rounded(x)),
+                    format!("{}", write::rounded(y)),
+                )
+            })
+            .collect();
+        let found = do_positions(&text);
+        assert_eq!(found.len(), expected.len());
+        for (found, expected) in found.iter().zip(&expected) {
+            let parse = |t: &str| t.parse::<f32>().unwrap();
+            assert_eq!(
+                (parse(&found.0), parse(&found.1)),
+                (parse(&expected.0), parse(&expected.1))
+            );
+        }
+    }
+
+    #[test]
+    fn mixed_shapes_get_one_form_each() {
+        let mut scene = run_scene(40, 3, || square(-2.0, -2.0, 4.0));
+        for run in 0..40 {
+            scene.push(Item::Markers {
+                shape: if run % 2 == 0 {
+                    square(-3.0, -3.0, 6.0)
+                } else {
+                    triangle_shape()
+                },
+                fill: Some(RED),
+                stroke: None,
+                positions: vec![p(run as f32, 10.0)],
+            });
+        }
+        scene.push(Item::Markers {
+            shape: square(-2.0, -2.0, 4.0),
+            fill: Some(RED),
+            stroke: Some(StrokeStyle {
+                color: RED,
+                width: 1.0,
+                dash: Vec::new(),
+                cap: LineCap::Butt,
+                join: LineJoin::Miter,
+            }),
+            positions: vec![p(1.0, 1.0)],
+        });
+        let pdf = render_pdf(&scene).unwrap();
+        // The small square, the large square, the triangle, and the small square with a
+        // stroke (different content and box).
+        assert_eq!(forms(&pdf), 4);
+    }
+
+    fn triangle_shape() -> Path {
+        let mut path = Path::new();
+        path.move_to(p(0.0, -3.0));
+        path.line_to(p(3.0, 3.0));
+        path.line_to(p(-3.0, 3.0));
+        path.close();
+        path
+    }
+
+    #[test]
+    fn pages_of_a_document_each_write_their_own_forms() {
+        let a = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
+        let b = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
+        let pdf = render_pdf_pages(&[&a, &b]).unwrap();
+        // Resources belong to a page, so a page's forms are not named by another page.
+        assert_eq!(forms(&pdf), 2);
+        assert_eq!(forms(&render_pdf(&a).unwrap()), 1);
+    }
 }

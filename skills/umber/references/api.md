@@ -690,6 +690,11 @@ color-mapped mark shares; the colorbar shows the levels, as bands for filled con
 and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
 without padding. By default a contour alone draws no baseline.
 
+A contour draws something when some cell has four finite values. One that draws
+nothing, such as a field of NaN, still has its values checked and still counts in the
+automatic limits, but supplies no levels, no bands and no color range, and is left out of
+the rule that contours sharing a colorbar need the same levels.
+
 A line colored by its level whose color comes close to the background, such as the
 lines near the middle of a diverging colormap, is drawn darker on a light background
 and lighter on a dark one, so that it stays visible. The closer its color is to the
