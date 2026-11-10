@@ -3892,6 +3892,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         and as ticks on a smooth bar for lines. Automatic limits are the outer coordinates,
         without padding. By default a contour alone draws no baseline.
 
+        A contour draws something when some cell has four finite values. One that draws
+        nothing, such as a field of NaN, still has its values checked and still counts in the
+        automatic limits, but takes no part in a colorbar that other marks draw: neither in its
+        levels and bands nor in the rule that contours sharing it need the same levels.
+
         A line colored by its level whose color comes close to the background, such as the
         lines near the middle of a diverging colormap, is drawn darker on a light background
         and lighter on a dark one, so that it stays visible. The closer its color is to the

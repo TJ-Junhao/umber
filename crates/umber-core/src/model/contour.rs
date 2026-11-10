@@ -129,8 +129,10 @@ impl Default for ContourOptions {
 /// A contour: the grid coordinates, the values on the grid, the levels resolved from its
 /// [`ContourOptions`], and the options. The values are stored row by row, one row per y
 /// coordinate, each holding one value per x coordinate; a NaN value leaves the four cells
-/// around it out of every line and band. Everything is validated together and never changes;
-/// clones share the data.
+/// around it out of every line and band. A contour draws something when some cell has four
+/// finite values; one that draws nothing still counts in the automatic limits, but takes no part in the colorbar: neither its levels
+/// nor its bands, nor the check that contours sharing the bar have the same levels.
+/// Everything is validated together and never changes; clones share the data.
 ///
 /// # Examples
 ///
@@ -166,6 +168,8 @@ pub struct ContourMark {
     y: Arc<[f64]>,
     z: Arc<[f64]>,
     spec: ContourSpec,
+    /// Whether some cell has four finite values.
+    draws: bool,
 }
 
 /// The levels and options of a contour, validated together: what a contour on a grid
@@ -240,12 +244,23 @@ impl ContourMark {
             |i| format!("z[{}][{}]", i / columns, i % columns),
             options,
         )?;
+        let draws = any_finite_cell(&z, columns);
         Ok(ContourMark {
             x: Arc::from(x),
             y: Arc::from(y),
             z,
             spec,
+            draws,
         })
+    }
+
+    /// Whether the contour draws anything: whether some cell has four finite values. One that
+    /// draws nothing still counts in the automatic limits, but takes no part in the colorbar:
+    /// neither its levels nor its bands, nor the check that contours sharing the bar have the
+    /// same levels. A contour on a triangle mesh has the same rule
+    /// ([`TricontourMark`](super::TricontourMark)), on its triangles.
+    pub(crate) fn draws(&self) -> bool {
+        self.draws
     }
 
     /// The x coordinates of the grid's columns, strictly increasing.
@@ -442,6 +457,15 @@ impl ContourSpec {
             center: self.options.center,
         })
     }
+}
+
+/// Whether some cell of the grid `z`, `columns` values to a row, has four finite values.
+fn any_finite_cell(z: &[f64], columns: usize) -> bool {
+    let finite = |i: usize| z[i].is_finite();
+    z.len() >= 2 * columns
+        && (0..z.len() - columns)
+            .filter(|i| i % columns + 1 < columns)
+            .any(|i| finite(i) && finite(i + 1) && finite(i + columns) && finite(i + columns + 1))
 }
 
 impl fmt::Debug for ContourMark {

@@ -307,3 +307,40 @@ def test_level_labels_read_as_the_colorbar_ticks() -> None:
     texts = [node.text or "" for node in tags(ax, "text")]
     assert texts.count("50%") >= 2, texts
     assert "0.50" not in texts
+
+
+NO_CELL_Z = [[0.0, 1.0], [np.nan, 2.0]]
+
+
+def test_a_grid_contour_that_draws_nothing_takes_no_part_in_the_colorbar() -> None:
+    alone = axes().contour([0, 1], [0, 1], [[0.0, 1.0], [2.0, 3.0]]).figure.to_svg()
+    for empty in ([[np.nan, np.nan], [np.nan, np.nan]], NO_CELL_Z):
+        ax = axes().contour([0, 1], [0, 1], [[0.0, 1.0], [2.0, 3.0]])
+        ax.contour([0, 1], [0, 1], empty)
+        assert ax.figure.to_svg() == alone
+    given = axes().contour([0, 1], [0, 1], [[0.0, 1.0], [2.0, 3.0]])
+    given.contour([0, 1], [0, 1], [[np.nan] * 2] * 2, levels=[5.0], style=ub.Contour.BOTH)
+    assert given.figure.to_svg().startswith("<svg")
+
+
+def test_an_empty_filled_grid_contour_keeps_the_gradient_colorbar() -> None:
+    ax = axes().mesh([0, 1, 2], [0, 1], [[1.0, 3.0]])
+    ax.contour([0, 1], [0, 1], [[np.nan] * 2] * 2, style=ub.Contour.FILLED).colorbar()
+    assert "linearGradient" in ax.figure.to_svg()
+
+
+def test_a_grid_and_a_mesh_contour_on_one_bar_ignore_whichever_draws_nothing() -> None:
+    mesh = ([0.0, 1.0, 0.0, 2.0], [0.0, 0.0, 1.0, 2.0], [0.0, 1.0, np.nan, 2.0])
+    ax = axes().contour([0, 1], [0, 1], [[0.0, 1.0], [2.0, 3.0]])
+    ax.tricontour(*mesh, triangles=[[0, 1, 2]])
+    assert ax.figure.to_svg().startswith("<svg")
+    ax = axes().tricontour([0, 1, 0], [0, 0, 1], [0, 1, 2])
+    ax.contour([0, 1], [0, 1], [[np.nan] * 2] * 2)
+    assert ax.figure.to_svg().startswith("<svg")
+
+
+def test_a_grid_contour_with_no_levels_that_draws_is_still_compared() -> None:
+    ax = axes().contour([0, 1], [0, 1], [[0.0, 1.0], [2.0, 3.0]])
+    ax.contour([0, 1], [0, 1], [[1.0, 1.0], [1.0, 1.0]])
+    with pytest.raises(ub.StyleError, match="two contours of these axes have different levels"):
+        ax.figure.to_svg()
