@@ -1,6 +1,7 @@
 //! Output cases for contours: lines, filled bands and both in each theme, level labels in each
-//! theme, lines in one color, a field with holes, a diverging field, a log color scale, a
-//! contour cut by explicit limits beside a scatter, and the errors of invalid contours.
+//! theme, level labels beside a hole and on light bands in each theme, lines in one color, a
+//! field with holes, a diverging field, a log color scale, a contour cut by explicit limits
+//! beside a scatter, and the errors of invalid contours.
 
 use std::fmt::Write as _;
 
@@ -36,6 +37,25 @@ fn field(diverging: bool, holes: bool) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
                     f64::NAN
                 } else {
                     1.5 * (a + sign * b) + 0.1 * x * y
+                }
+            })
+        })
+        .collect();
+    (x, y, z)
+}
+
+/// A bump on a 60 × 45 grid, highest (lightest on Midnight) at its top, with a NaN island on
+/// its upper slope that the rings of the high levels pass close to.
+fn holed_bump() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let (x, y) = (spaced(-3.0, 3.0, 60), spaced(-2.4, 2.4, 45));
+    let z = y
+        .iter()
+        .flat_map(|&y| {
+            x.iter().map(move |&x| {
+                if (x - 0.55).powi(2) + (y - 0.25).powi(2) < 0.09 {
+                    f64::NAN
+                } else {
+                    2.0 * (-(x * x) / 2.0 - y * y / 1.4).exp()
                 }
             })
         })
@@ -119,6 +139,34 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let f = contour(theme, "Level labels", annotated, [false, false]);
         emit_scene(
             &format!("contour-annotated-{name}"),
+            &f.to_scene(lib).unwrap(),
+            sink,
+        );
+    }
+    // Filled bands with labels beside a hole: the labels move clear of it, and on the light
+    // bands they take the color that reads there.
+    for (name, theme) in themes() {
+        let (x, y, z) = holed_bump();
+        let mut f = figure(6.0, 4.4, theme, linear(), linear());
+        axes(&mut f)
+            .title("Labels beside a hole")
+            .contour(
+                &x,
+                &y,
+                &z,
+                ContourOptions {
+                    annotate: true,
+                    ..styled(ContourStyle::Both)
+                },
+            )
+            .unwrap()
+            .colorbar(ColorbarOptions {
+                label: "z".into(),
+                ..ColorbarOptions::default()
+            })
+            .unwrap();
+        emit_scene(
+            &format!("contour-label-holes-{name}"),
             &f.to_scene(lib).unwrap(),
             sink,
         );

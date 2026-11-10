@@ -309,6 +309,59 @@ def test_level_labels_read_as_the_colorbar_ticks() -> None:
     assert "0.50" not in texts
 
 
+# The Midnight theme's background and text colors.
+MIDNIGHT_BACKGROUND = "#121419"
+MIDNIGHT_TEXT = "#E7E9EF"
+
+
+def fills_of(ax: ub.Axes[Any, Any], text: str) -> list[str]:
+    return [(node.get("fill") or "").upper() for node in tags(ax, "text") if node.text == text]
+
+
+def test_level_labels_on_bands_take_the_color_that_reads_on_both() -> None:
+    levels = [k / 10 for k in range(1, 10)]
+    bump = np.exp(-(X[None, :] ** 2) / 1.5 - Y[:, None] ** 2)
+    filled = (
+        ub.Figure(6, 4, theme=ub.Theme.MIDNIGHT)
+        .add_axes()
+        .contour(X, Y, bump, levels=levels, style=ub.Contour.BOTH, annotate=True)
+    )
+    # The top of the bump lies on the light end of the colormap: dark labels there, light
+    # labels on the dark bands at its foot.
+    assert MIDNIGHT_BACKGROUND in fills_of(filled, "0.9")
+    assert MIDNIGHT_TEXT in fills_of(filled, "0.1")
+    lines = (
+        ub.Figure(6, 4, theme=ub.Theme.MIDNIGHT)
+        .add_axes()
+        .contour(X, Y, bump, levels=levels, annotate=True)
+    )
+    assert all(fill != MIDNIGHT_BACKGROUND for fill in fills_of(lines, "0.9"))
+
+
+def test_level_labels_keep_clear_of_holes_or_are_left_out() -> None:
+    x = y = np.arange(21.0)
+    z = np.repeat(y[:, None], 21, axis=1)
+
+    def positions(values: np.ndarray) -> list[float]:
+        ax = axes().contour(x, y, values, levels=[10.75], annotate=True)
+        return sorted(
+            float(node.get("x") or "nan") for node in tags(ax, "text") if node.text == "10.75"
+        )
+
+    # The colorbar tick and the label on the line.
+    whole = positions(z)
+    assert len(whole) == 2
+    # A hole just above the middle of the line: the label moves along the line, the tick stays.
+    holed = z.copy()
+    holed[12, 10] = np.nan
+    moved = positions(holed)
+    assert len(moved) == 2 and len(set(moved) & set(whole)) == 1, (whole, moved)
+    # Holes on both sides leave a strip too narrow for the label anywhere: the line has none.
+    narrow = z.copy()
+    narrow[[9, 12], :] = np.nan
+    assert len(positions(narrow)) == 1
+
+
 NO_CELL_Z = [[0.0, 1.0], [np.nan, 2.0]]
 
 

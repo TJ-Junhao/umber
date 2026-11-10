@@ -4171,13 +4171,20 @@ impl<'a> AxesMut<'a> {
     /// contours, a smooth bar with a tick at each level for lines; every color-mapped contour
     /// that shares the bar, on these axes or through shared colors, needs the same levels, and
     /// rendering refuses different ones (`Error::Style`). With `options.annotate`, every line at
-    /// least three times as long as its label carries its level's value at its middle, along
-    /// the line and upright, in the colorbar's format unless it has its own, the line broken
-    /// under it. Points between grid coordinates are interpolated in the data, then placed on
-    /// the axes, so on a log axis too a line crosses a cell side where the data does. Automatic
-    /// limits are the
-    /// outer coordinates, without padding, as for [`AxesMut::mesh`]; by default a contour
-    /// alone draws no baseline.
+    /// least three times as long as its label carries its level's value, along the line and
+    /// upright, in the colorbar's format unless it has its own, the line broken under it. The
+    /// label lies wholly inside the plot area and inside the field, clear of its holes and of
+    /// its edge, with 3 pt kept clear around it: at the middle of the line when it fits there,
+    /// else at the first place that fits among those a quarter of its width apart along the
+    /// line, nearest the middle first and up to eight label widths away on either side; a line
+    /// with no such place is drawn whole without a label. On the bands of
+    /// [`ContourStyle::Both`](crate::ContourStyle::Both) a label is written in the theme's text
+    /// color or its background color, whichever has the higher contrast ratio against the least
+    /// contrasting of the bands painted under its text, as seen at a grid of 9 × 5 points over
+    /// it (the text color on a tie); other labels take the text color. Points between grid
+    /// coordinates are interpolated in the data, then placed on the axes, so on a log axis too a
+    /// line crosses a cell side where the data does. Automatic limits are the outer coordinates,
+    /// without padding, as for [`AxesMut::mesh`]; by default a contour alone draws no baseline.
     ///
     /// A field that changes from cell to cell, such as noise or a checkerboard, makes many
     /// short lines and many small bands: vector output then grows very large and slow to write
