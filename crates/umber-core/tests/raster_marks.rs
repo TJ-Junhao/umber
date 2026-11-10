@@ -916,3 +916,44 @@ fn at_a_low_raster_dpi_the_image_meets_the_vector_shapes_beside_it() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn deep_nesting_inside_an_image_of_marks_is_cut_at_the_nesting_limit() {
+    // A fill inside 20,000 groups, or 20,000 images of marks, inside an image of marks: the
+    // content past the nesting limit is not drawn, and nothing walks it, in every backend.
+    for raster_groups in [false, true] {
+        let mut item = solid(box_path(10.0, 10.0, 30.0, 30.0), UNDER);
+        let whole = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 40.0,
+            height: 40.0,
+        };
+        for _ in 0..20_000 {
+            item = if raster_groups {
+                Item::Raster {
+                    rect: whole,
+                    items: vec![item],
+                }
+            } else {
+                Item::Group {
+                    clip: None,
+                    items: vec![item],
+                }
+            };
+        }
+        let mut scene = Scene::new(40.0, 40.0, OVER);
+        scene.push(Item::Raster {
+            rect: whole,
+            items: vec![item],
+        });
+        let empty = Scene::new(40.0, 40.0, OVER);
+        assert_eq!(
+            render_png(&scene, 72).unwrap(),
+            render_png(&empty, 72).unwrap()
+        );
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
+        assert_eq!(svg, render_svg(&empty, SvgText::Outlines, 300).unwrap());
+        assert_eq!(pdf_images(&render_pdf(&scene, 300).unwrap()), 0);
+    }
+}

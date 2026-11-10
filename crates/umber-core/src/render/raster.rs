@@ -22,7 +22,7 @@ use super::normalize::{clip_is_valid, valid_point};
 use super::png::{DeviceOrigin, MAX_PIXELS, MAX_SIDE, draw_region};
 use crate::error::{Error, Result};
 use crate::geometry::Point;
-use crate::scene::{Item, Rect};
+use crate::scene::{Item, MAX_GROUP_DEPTH, Rect};
 
 /// An [`Item::Raster`] drawn: the rectangle its image covers, in points, the image's size in
 /// pixels, and its pixels, row by row from the top, as straight (not premultiplied) RGBA bytes.
@@ -138,8 +138,10 @@ fn pixel_region(rect: &Rect, scene: (f32, f32), dpi: u32) -> Option<(DeviceOrigi
 /// The box `[left, top, right, bottom]`, in points, that `items` can draw into: their paths,
 /// marker copies and text outlines, strokes widened by twice their width (the reach of a miter
 /// at the renderers' miter limit of 4), and images. Points that are not finite are left out;
-/// `None` when nothing is left.
-fn reach(items: &[Item]) -> Option<[f64; 4]> {
+/// `None` when nothing is left. `depth` is the number of groups around `items`: as in the
+/// renderers, the content of a group or image item nested [`MAX_GROUP_DEPTH`] deep is not
+/// drawn, so it is not looked into either, which also bounds the recursion.
+fn reach(items: &[Item], depth: usize) -> Option<[f64; 4]> {
     let mut out: Option<[f64; 4]> = None;
     let mut add = |left: f32, top: f32, right: f32, bottom: f32, grow: f32| {
         let side = [left - grow, top - grow, right + grow, bottom + grow].map(f64::from);
@@ -198,7 +200,10 @@ fn reach(items: &[Item]) -> Option<[f64; 4]> {
                 );
             }
             Item::Group { items, .. } | Item::Raster { items, .. } => {
-                if let Some([l, t, r, b]) = reach(items) {
+                if depth >= MAX_GROUP_DEPTH {
+                    continue;
+                }
+                if let Some([l, t, r, b]) = reach(items, depth + 1) {
                     add(l as f32, t as f32, r as f32, b as f32, 0.0);
                 }
             }
@@ -207,8 +212,8 @@ fn reach(items: &[Item]) -> Option<[f64; 4]> {
     out
 }
 
-/// The pixmap the items of an image of `region` (its origin and size) are drawn on, on a scene
-/// of `scene` points at `dpi`: the region, widened to everything the items draw ([`reach`]) as
+/// The pixmap the items of an image of `region` (its origin and size), inside `depth` groups,
+/// are drawn on, on a scene of `scene` points at `dpi`: the region, widened to everything the items draw ([`reach`]) as
 /// far as the pixels of a PNG of the scene, and as large as a PNG may be at most.
 ///
 /// The PNG backend cuts a path at the edges of its pixmap before it rasterizes it, and the cut
@@ -216,7 +221,7 @@ fn reach(items: &[Item]) -> Option<[f64; 4]> {
 /// would not be drawn as in a PNG. Drawn on this pixmap, a path is cut where a PNG of the scene
 /// cuts it, or not at all, and the image is the PNG's pixels.
 fn canvas(
-    items: &[Item],
+    (items, depth): (&[Item], usize),
     scene: (f32, f32),
     dpi: u32,
     (origin, (width, height)): (DeviceOrigin, (u32, u32)),
@@ -227,7 +232,7 @@ fn canvas(
         f64::from(origin.x) + f64::from(width),
         f64::from(origin.y) + f64::from(height),
     ];
-    let Some([left, top, right, bottom]) = reach(items) else {
+    let Some([left, top, right, bottom]) = reach(items, depth) else {
         return (origin, (width, height));
     };
     // The pixels of a PNG of the scene, as the PNG backend sizes it.
@@ -312,7 +317,7 @@ pub(super) fn raster_image(
     }
     // Both are whole numbers in 1..=32767 here.
     let size = (width as u32, height as u32);
-    let (canvas_origin, canvas_size) = canvas(items, scene, dpi, (origin, size));
+    let (canvas_origin, canvas_size) = canvas((items, depth), scene, dpi, (origin, size));
     let Some(pixmap) = draw_region(items, dpi, canvas_origin, canvas_size, depth) else {
         return Err(too_large(format!(
             "a mark drawn as an image of {width} by {height} pixels at raster_dpi {dpi} cannot \
