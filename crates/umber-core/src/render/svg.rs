@@ -19,6 +19,7 @@
 //! assert!(svg.starts_with("<svg "));
 //! ```
 
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use super::SvgText;
@@ -70,6 +71,7 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         defs: String::new(),
         body: String::new(),
         next_id: 0,
+        marker_ids: HashMap::new(),
         text,
         fonts: &scene.fonts,
         images: false,
@@ -242,6 +244,8 @@ struct Writer<'a> {
     defs: String,
     body: String,
     next_id: usize,
+    /// The id of each marker shape written, by its path data, so equal shapes share one.
+    marker_ids: HashMap<String, usize>,
     text: SvgText,
     /// The scene's fonts, which the faces of text items index.
     fonts: &'a [Font],
@@ -396,12 +400,16 @@ impl Writer<'_> {
         if uses.is_empty() {
             return;
         }
-        let id = self.id();
-        let _ = writeln!(
-            self.defs,
-            r#"<path id="m{id}" d="{}"/>"#,
-            path_d(&normalized)
-        );
+        let d = path_d(&normalized);
+        let id = match self.marker_ids.get(&d) {
+            Some(&id) => id,
+            None => {
+                let id = self.id();
+                let _ = writeln!(self.defs, r#"<path id="m{id}" d="{d}"/>"#);
+                self.marker_ids.insert(d, id);
+                id
+            }
+        };
         let _ = writeln!(self.body, "<g{attrs}>");
         for p in uses {
             let _ = writeln!(
@@ -1258,5 +1266,22 @@ mod tests {
         let svg = handle.join().expect("no stack overflow");
         parse(&svg);
         assert!(!svg.contains("<path d="));
+    }
+
+    #[test]
+    fn markers_of_equal_shape_share_one_definition() {
+        let mut scene = Scene::new(100.0, 100.0, WHITE);
+        for (i, color) in [RED, BLUE, RED].into_iter().enumerate() {
+            scene.push(Item::Markers {
+                shape: triangle(),
+                fill: Some(color),
+                stroke: None,
+                positions: vec![p(i as f32, 1.0), p(i as f32, 2.0)],
+            });
+        }
+        let svg = render_svg(&scene, SvgText::Outlines);
+        assert_eq!(svg.matches("<path id=").count(), 1, "{svg}");
+        assert_eq!(svg.matches("<use ").count(), 6, "{svg}");
+        assert_eq!(svg.matches(r##"href="#m0""##).count(), 6, "{svg}");
     }
 }
