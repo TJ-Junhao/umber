@@ -13,7 +13,7 @@ fn iso_lines(grid: &Grid<'_>, level: f64) -> Vec<Polyline<GridPoint>> {
 
 /// The bands of `grid` between the increasing `levels`.
 fn bands(grid: &Grid<'_>, levels: &[f64]) -> Vec<BandPolygons<GridPoint>> {
-    ContourShapes::of(grid, levels, ContourStyle::Filled).bands
+    ContourShapes::of(grid, levels, ContourStyle::Filled, false).bands
 }
 
 /// The field along the grid line through `p` (one of its coordinates whole), interpolated
@@ -426,51 +426,6 @@ fn grids_need_two_rows_and_columns_of_the_right_size() {
         bands(&grid, &[0.0])
             .iter()
             .all(|band| band.rings.is_empty())
-    );
-}
-
-#[test]
-fn labels_sit_upright_at_the_middle_of_long_lines() {
-    // A line from right to left: the label reads left to right, upright.
-    let line = [(100.0, 50.0), (0.0, 50.0)];
-    let (placement, pieces) = labels::place(&line, false, 20.0, 3.0).unwrap();
-    assert_eq!(placement.center, (50.0, 50.0));
-    assert_eq!(placement.angle, 0.0);
-    assert_eq!(
-        pieces,
-        [
-            vec![(100.0, 50.0), (63.0, 50.0)],
-            vec![(37.0, 50.0), (0.0, 50.0)]
-        ]
-    );
-    // Falling to the right on the page: a positive (clockwise) angle.
-    let (placement, _) = labels::place(&[(0.0, 0.0), (60.0, 60.0)], false, 10.0, 3.0).unwrap();
-    assert!((placement.angle - 45.0).abs() < 1e-9);
-    // Too short for its label: none.
-    assert!(labels::place(&line, false, 40.0, 3.0).is_none());
-    // A closed square: one piece round from the far side of the label to its near side.
-    let square = [
-        (0.0, 0.0),
-        (40.0, 0.0),
-        (40.0, 40.0),
-        (0.0, 40.0),
-        (0.0, 0.0),
-    ];
-    let started = labels::rotated_ring(&square, 0);
-    assert_eq!(started.first(), started.last());
-    assert_eq!(started[0], (40.0, 0.0));
-    let (placement, pieces) = labels::place(&started, true, 10.0, 3.0).unwrap();
-    assert_eq!(placement.center, (0.0, 40.0));
-    assert_eq!(pieces.len(), 1);
-    assert_eq!(
-        pieces[0],
-        [
-            (0.0, 32.0),
-            (0.0, 0.0),
-            (40.0, 0.0),
-            (40.0, 40.0),
-            (8.0, 40.0)
-        ]
     );
 }
 

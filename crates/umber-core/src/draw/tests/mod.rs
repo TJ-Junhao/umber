@@ -13,6 +13,7 @@ mod clip;
 mod contour;
 mod contour_contrast;
 mod contour_fixes;
+mod contour_labels;
 mod downsample;
 mod error_bars;
 mod events;

@@ -13,7 +13,8 @@
 //! same way for both, into lines (open ones first, then closed ones) and into the closed rings
 //! of a region. [`ContourShapes::of`] asks a field for the lines and regions that a
 //! [`ContourStyle`] draws, and makes nested bands of the regions ([`BandPolygons`]). Level
-//! labels ([`labels`]) are placed on the drawn lines on the page, whatever the field.
+//! labels ([`labels`]) are placed on the drawn lines on the page, whatever the field, inside
+//! the boundary of the whole field ([`ContourField::whole`]).
 //!
 //! **Grid only.** Index space, marching squares and the saddle rule, the sides of cells as
 //! vertices, and the simplification of rings along grid lines.
@@ -83,32 +84,48 @@ pub(crate) trait ContourField {
 }
 
 /// The geometry of one contour in its field's space: the lines along each of its levels, when
-/// it is drawn with lines, and its bands, when it is filled.
+/// it is drawn with lines, its bands, when it is filled, and the boundary of its field, when
+/// its lines carry labels.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ContourShapes<P> {
     /// The lines of each level, in the order of the levels; none for a contour without lines.
     pub lines: Vec<Vec<Polyline<P>>>,
     /// The bands, one more than the levels ([`BandPolygons`]); none for a contour without fill.
     pub bands: Vec<BandPolygons<P>>,
+    /// The boundary rings of every finite cell or triangle ([`ContourField::whole`]), which
+    /// level labels must stay inside ([`labels::Room`]); none for a contour without labels.
+    pub field: Vec<Vec<P>>,
 }
 
 impl<P> ContourShapes<P> {
     /// The lines and bands that `style` draws for `field` at the increasing `levels`: for
-    /// filled bands, the whole field first, then for each level the region at or above it.
-    pub(crate) fn of<F>(field: &F, levels: &[f64], style: ContourStyle) -> ContourShapes<P>
+    /// filled bands, the whole field first, then for each level the region at or above it; and
+    /// the boundary of the whole field when the lines carry labels (`annotate`).
+    pub(crate) fn of<F>(
+        field: &F,
+        levels: &[f64],
+        style: ContourStyle,
+        annotate: bool,
+    ) -> ContourShapes<P>
     where
         F: ContourField<Point = P>,
+        P: Clone,
     {
         let (lines, filled) = match style {
             ContourStyle::Lines => (true, false),
             ContourStyle::Filled => (false, true),
             ContourStyle::Both => (true, true),
         };
+        let labelled = lines && annotate;
         let mut shapes = ContourShapes::empty();
-        if filled {
-            shapes.bands.push(BandPolygons {
-                rings: field.whole(),
-            });
+        if filled || labelled {
+            let whole = field.whole();
+            if labelled {
+                shapes.field.clone_from(&whole);
+            }
+            if filled {
+                shapes.bands.push(BandPolygons { rings: whole });
+            }
         }
         for &level in levels {
             let traced = field.trace(level, style);
@@ -129,6 +146,7 @@ impl<P> ContourShapes<P> {
         ContourShapes {
             lines: Vec::new(),
             bands: Vec::new(),
+            field: Vec::new(),
         }
     }
 }
@@ -147,6 +165,8 @@ pub(crate) fn line_width(style: ContourStyle) -> Option<f32> {
     }
 }
 
+#[cfg(test)]
+mod label_tests;
 #[cfg(test)]
 mod mesh_tests;
 #[cfg(test)]

@@ -127,7 +127,7 @@ fn shapes(
     levels: &[f64],
     style: ContourStyle,
 ) -> ContourShapes<MeshPoint> {
-    ContourShapes::of(&TriField::new(mesh, z), levels, style)
+    ContourShapes::of(&TriField::new(mesh, z), levels, style, false)
 }
 
 /// One triangle, counter-clockwise, at (0, 0), (1, 0) and (0, 1).

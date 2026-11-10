@@ -313,3 +313,49 @@ def test_an_empty_filled_mesh_contour_keeps_the_gradient_colorbar(under: str) ->
         ax.tripcolor(x, y, [1.0, 3.0, 2.0, 2.0])
     ax.tricontour(x, y, z, triangles=[[0, 1, 2]], style=ub.Contour.FILLED).colorbar()
     assert "linearGradient" in ax.figure.to_svg()
+
+
+def lattice(
+    holes: list[tuple[float, float, float, float]],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A 21 x 21 lattice and its Delaunay triangles, those centred in a hole left out."""
+    x, y = (values.ravel() for values in np.meshgrid(np.arange(21.0), np.arange(21.0)))
+    tri = ub.delaunay(x, y)
+    cx, cy = x[tri].mean(axis=1), y[tri].mean(axis=1)
+    keep = np.ones(len(tri), dtype=bool)
+    for x0, y0, x1, y1 in holes:
+        keep &= ~((x0 < cx) & (cx < x1) & (y0 < cy) & (cy < y1))
+    return x, y, tri[keep]
+
+
+def test_level_labels_keep_clear_of_filtered_holes_or_are_left_out() -> None:
+    def positions(holes: list[tuple[float, float, float, float]]) -> list[float]:
+        x, y, tri = lattice(holes)
+        ax = axes().tricontour(x, y, y, triangles=tri, levels=[10.75], annotate=True)
+        return sorted(
+            float(node.get("x") or "nan") for node in tags(ax, "text") if node.text == "10.75"
+        )
+
+    whole = positions([])
+    assert len(whole) == 2
+    moved = positions([(9.0, 11.0, 11.0, 13.0)])
+    assert len(moved) == 2 and len(set(moved) & set(whole)) == 1, (whole, moved)
+    assert len(positions([(-1.0, 8.0, 21.0, 10.0), (-1.0, 11.0, 21.0, 13.0)])) == 1
+
+
+def test_level_labels_on_mesh_bands_take_the_color_that_reads_on_both() -> None:
+    x, y, tri = lattice([(9.0, 9.0, 11.0, 11.0)])
+    ax = (
+        ub.Figure(6, 4, theme=ub.Theme.MIDNIGHT)
+        .add_axes()
+        .tricontour(
+            x, y, y, triangles=tri, levels=[2.5, 10.5, 18.5], style=ub.Contour.BOTH, annotate=True
+        )
+    )
+
+    def fills(text: str) -> list[str]:
+        return [(node.get("fill") or "").upper() for node in tags(ax, "text") if node.text == text]
+
+    # The Midnight background on the light bands at the top, its text color on the dark ones.
+    assert "#121419" in fills("18.5")
+    assert "#E7E9EF" in fills("2.5")
