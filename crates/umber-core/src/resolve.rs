@@ -4687,6 +4687,7 @@ fn resolve_panel_marks_from<'a>(
                             &grid,
                             &mark.levels(),
                             mark.options().style,
+                            mark.options().annotate,
                         ),
                         // The model checked the shape of the grid.
                         None => crate::contour::ContourShapes::empty(),
@@ -4709,8 +4710,12 @@ fn resolve_panel_marks_from<'a>(
             }
             Mark::Tricontour(mark) => {
                 let field = crate::contour::TriField::new(mark.mesh(), mark.z());
-                let shapes =
-                    crate::contour::ContourShapes::of(&field, &mark.levels(), mark.options().style);
+                let shapes = crate::contour::ContourShapes::of(
+                    &field,
+                    &mark.levels(),
+                    mark.options().style,
+                    mark.options().annotate,
+                );
                 ResolvedMark::Tricontour {
                     geometry: None,
                     mark,

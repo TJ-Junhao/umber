@@ -15,7 +15,9 @@
 //! theme reaches 4.5:1 against its background. Text written in a series color (direct labels,
 //! point labels, the value column) takes [`readable_text`] of it: the color itself when it
 //! reaches [`TEXT_CONTRAST`] against the background, else its Oklab lightness moved away from
-//! the background, a and b unchanged, by the smallest step that does. Marks keep their colors.
+//! the background, a and b unchanged, by the smallest step that does. A contour's level label on
+//! filled bands takes the theme's text or background color, whichever has the higher lower
+//! ratio against the two bands it lies across ([`super::contour`]). Marks keep their colors.
 
 use crate::cmap::{Oklab, from_oklab, to_oklab};
 use crate::{Rgba, Theme};

@@ -103,7 +103,9 @@ pub struct ContourOptions {
     /// line in it, and the contour is then not color-mapped and has no colorbar. Filled
     /// contours take [`ColorSpec::AUTO`] only.
     pub color: ColorSpec,
-    /// Whether each line long enough to hold it carries its level's value.
+    /// Whether each line long enough to hold it carries its level's value, placed wholly inside
+    /// the plot area and the field and colored to read on the bands it lies across, as
+    /// [`AxesMut::contour`](super::AxesMut::contour) describes.
     pub annotate: bool,
     /// The format of the level values that `annotate` writes; `None` writes each level as the
     /// colorbar writes its ticks (the colorbar's format, else the y tick format), so a level

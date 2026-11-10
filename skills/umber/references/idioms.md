@@ -255,7 +255,7 @@ svg = ax.figure.to_svg()
 
 ## Text sizes
 
-Titles, subtitles, axis labels, legends, colorbar titles, `text`, `annotate`, bar value labels and pie labels take `size=`: `ub.Size.AUTO` (the theme's size), `ub.Size.times(1.5)` (relative to the theme, following its font scale) or `ub.Size.pt(14)` (fixed points). Tick labels are sized per axis with `ax.xtick_labels(size=...)` and `ax.ytick_labels(size=...)`. Heatmap and contour value labels use the theme's tick label size.
+Titles, subtitles, axis labels, legends, colorbar titles, `text`, `annotate`, bar value labels and pie labels take `size=`: `ub.Size.AUTO` (the theme's size), `ub.Size.times(1.5)` (relative to the theme, following its font scale) or `ub.Size.pt(14)` (fixed points). Tick labels are sized per axis with `ax.xtick_labels(size=...)` and `ax.ytick_labels(size=...)`. Heatmap and contour value labels use the theme's tick label size. Contour level labels place and color themselves: each sits at the middle of its line or at the nearest place along it that lies wholly inside the plot area and the field, clear of NaN holes and filtered triangles, and on the bands of `ub.Contour.BOTH` it takes the theme's text or background color, whichever reads better on both bands; a line with no such place has no label, so do not draw level values with `ax.text()`.
 
 ```python
 ax = ub.Figure(6, 4).add_axes().line([0, 1], [0.0, 1.0])

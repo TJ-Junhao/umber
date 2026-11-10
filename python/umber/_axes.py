@@ -3899,6 +3899,16 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         farther from the background, lines of one ``color`` and the lines of ``Contour.BOTH``
         keep their colors, and the colorbar always shows the colormap's own colors.
 
+        A level label lies wholly inside the plot area and inside the field, clear of its holes
+        and of its edge, with 3 pt kept clear around it. It sits at the middle of its line when
+        it fits there; otherwise it takes the first place that fits among those a quarter of
+        its width apart along the line, nearest the middle first and up to eight label widths
+        away on either side. A line with no such place is drawn whole, without a label. On the
+        bands of ``Contour.BOTH`` a label lies across the band below its level and the band
+        above it, and is written in the theme's text color or its background color, whichever
+        has the higher contrast ratio against the less contrasting of the two bands (the text
+        color on a tie); the labels of ``Contour.LINES`` are in the theme's text color.
+
         A field that changes from cell to cell, such as noise or a checkerboard, makes many short
         lines and many small bands, so vector output grows very large and slow to write and to
         draw. Use fewer levels, or ``Contour.FILLED`` instead of ``Contour.BOTH``; smooth or
@@ -3927,8 +3937,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
                 no colorbar.
             annotate: Whether each line at least three times as long as its label carries its
-                level's value at its middle, along the line and upright, in the tick font, with
-                the line broken under it.
+                level's value, along the line and upright, in the tick font, with the line broken
+                under it: at the middle of the line, or at the nearest place along it where the
+                label fits inside the field, as described above.
             format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
                 the colorbar writes its ticks (its own format, else the y tick format), so a
                 level reads the same on its line and on the bar.
@@ -4603,15 +4614,19 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         ``levels``, ``style``, ``cmap``, ``scale``, ``center``, ``color``, ``annotate`` and
         ``format`` mean what they mean for ``contour()``: the same automatic levels, colors,
         colorbar and level labels, and the same darker or lighter lines where a level's color
-        comes close to the background. Contours that share a colorbar, on a grid or on a mesh,
-        need the same levels. The automatic levels and color range come from the values that
-        are drawn, those at the corners of triangles whose three values are finite, as
-        ``tripcolor()`` takes its range from the triangles it draws. A point that no drawn
-        triangle uses still has its value checked and still counts in the automatic limits.
-        When no triangle is left, nothing is drawn and no colorbar appears, as for
-        ``contour()`` on a grid of NaN; such a contour takes no part in a colorbar that other
-        marks draw, neither in its levels and bands nor in the rule that contours sharing it
-        need the same levels.
+        comes close to the background. A level label lies wholly inside the plot area and the
+        mesh, clear of its holes and of its edge, at the middle of its line or else at the
+        nearest place along it that fits, and a line with no such place has no label; on the
+        bands of ``Contour.BOTH`` it is written in the theme's text or background color,
+        whichever reads better on both bands it lies across, as for ``contour()``. Contours that
+        share a colorbar, on a grid or on a mesh, need the same levels. The automatic levels and
+        color range come from the values that are drawn, those at the corners of triangles whose
+        three values are finite, as ``tripcolor()`` takes its range from the triangles it draws.
+        A point that no drawn triangle uses still has its value checked and still counts in the
+        automatic limits. When no triangle is left, nothing is drawn and no colorbar appears, as
+        for ``contour()`` on a grid of NaN; such a contour takes no part in a colorbar that
+        other marks draw, neither in its levels and bands nor in the rule that contours sharing
+        it need the same levels.
 
         A point is above a level when its value is at or above it, so integer data often puts
         a level exactly on points. Each band above a level is the area where the field is at or
@@ -4644,7 +4659,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 line of ``Contour.LINES`` in it; the contour is then not color-mapped and draws
                 no colorbar.
             annotate: Whether each line at least three times as long as its label carries its
-                level's value at its middle, as for ``contour()``.
+                level's value, at the middle of the line or at the nearest place along it where
+                the label fits inside the mesh, as for ``contour()``.
             format: The format of the values that ``annotate`` writes. ``AUTO`` writes them as
                 the colorbar writes its ticks.
 

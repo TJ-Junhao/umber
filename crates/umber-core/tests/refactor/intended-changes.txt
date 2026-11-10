@@ -1,1 +1,13 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change: level labels on filled
+# contours take the theme's text or background color, whichever reads on both bands, and
+# labels that would reach a hole, the edge of the field or the plot edge move along their line
+# or are left out.
+contour-holes
+contour-limits
+contour-log
+tricontour-integer-levels-graphite
+tricontour-integer-levels-midnight
+tricontour-integer-levels-pigment
+tricontour-nan-both-graphite
+tricontour-nan-both-midnight
+tricontour-nan-both-pigment
