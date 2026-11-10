@@ -199,19 +199,23 @@ pub(crate) fn rotated_ring(ring: &[PagePoint], turns: usize) -> Vec<PagePoint> {
 /// the boundary rings of their first band ([`super::ContourField::whole`]).
 ///
 /// **The test.** A label's box, turned along its line and widened by the gap kept around it,
-/// fits when its four corners lie in the plot area and no edge of the field's boundary meets
-/// it, on its border or inside. The box is centred on a point of a contour line, and every
-/// line lies in the field, so a box that meets no boundary edge lies wholly in the field: the
-/// box is connected, and a part of it outside the field would put a boundary edge through it.
-/// The test is conservative: the box is first widened by a millionth of a point, so rounding
-/// never lets a box that touches the boundary, or reaches past the plot area, pass. A boundary
-/// point that is not finite leaves no room at all.
+/// fits when its four corners lie in the plot area, no edge of the field's boundary meets it,
+/// on its border or inside, and its centre lies inside the field by the even-odd rule the bands
+/// are filled with: a ray from the centre to the right crosses the boundary an odd number of
+/// times. The box is connected and meets no boundary edge, so every point of it lies on the
+/// same side of the boundary as its centre: the whole box lies in the field as it is drawn.
+/// The centre is tested on its own because a label's line need not lie in the field as drawn:
+/// a log axis can fold a mesh that is valid in the data, and given triangles may overlap, so
+/// that the even-odd fill leaves out part of them. The test is conservative: the box is first
+/// widened by a millionth of a point, so rounding never lets a box that touches the boundary,
+/// or reaches past the plot area, pass; a centre exactly on the boundary puts an edge through
+/// the box. A boundary point that is not finite leaves no room at all.
 ///
 /// **The cost.** The boundary edges are kept in a tree of bounding boxes, split at the median
 /// of the longer side of each node down to leaves of at most eight edges, built once per
-/// contour in `O(e log e)` for `e` edges. A test visits the nodes whose bounds meet the box's,
-/// `O(log e + k)` for the `k` edges near the box, so placing every label of a contour costs
-/// `O(labels × (2 × 32 + 1) × (log e + k))`.
+/// contour in `O(e log e)` for `e` edges. A test visits the nodes whose bounds meet the box's
+/// bounds or the ray, `O(log e + k)` for the `k` edges whose bounds meet them, so placing every
+/// label of a contour costs `O(labels × (2 × 32 + 1) × (log e + k))`.
 #[derive(Debug, Clone)]
 pub(crate) struct Room {
     /// The plot area.
@@ -391,8 +395,8 @@ impl Room {
     }
 
     /// Whether a label's box `bounds`, in its own frame, at `placement` fits in the room: its
-    /// corners lie in the plot area and no edge of the field's boundary meets it, the box first
-    /// widened by a millionth of a point (see [`Room`]).
+    /// corners lie in the plot area, no edge of the field's boundary meets it, the box first
+    /// widened by a millionth of a point, and its centre lies inside the field (see [`Room`]).
     pub(crate) fn holds(&self, placement: Placement, bounds: LabelBox) -> bool {
         let bounds = bounds.widened(SLACK);
         let corners = placement.corners(bounds);
@@ -400,6 +404,38 @@ impl Room {
             return false;
         }
         let around = Bounds::of(&corners);
+        let mut touched = false;
+        self.visit(
+            |node| node.meets(around),
+            |edge| touched |= edge.bounds().meets(around) && edge.meets(placement, bounds),
+        );
+        !touched && self.inside(placement.center)
+    }
+
+    /// Whether `(x, y)` lies inside the field by the even-odd rule: whether a ray from it to the
+    /// right crosses the boundary an odd number of times. An edge is crossed when one of its
+    /// ends lies below the ray's line (`y` greater) and the other does not, at a point right of
+    /// `(x, y)`, so a ray through a corner of the boundary counts it once.
+    fn inside(&self, (x, y): PagePoint) -> bool {
+        let mut odd = false;
+        self.visit(
+            |node| node.top <= y && y <= node.bottom && x <= node.right,
+            |edge| {
+                let (from, to) = (edge.from, edge.to);
+                if (from.1 > y) != (to.1 > y) {
+                    let across = from.0 + (y - from.1) / (to.1 - from.1) * (to.0 - from.0);
+                    if across > x {
+                        odd = !odd;
+                    }
+                }
+            },
+        );
+        odd
+    }
+
+    /// Calls `each` with every edge in a leaf of the tree reached through nodes whose bounds
+    /// are `wanted`, in a fixed order.
+    fn visit(&self, wanted: impl Fn(Bounds) -> bool, mut each: impl FnMut(Edge)) {
         let mut pending: Vec<usize> = Vec::new();
         if !self.nodes.is_empty() {
             pending.push(0);
@@ -408,23 +444,18 @@ impl Room {
             let Some(node) = self.nodes.get(index) else {
                 continue;
             };
-            if !node.bounds.meets(around) {
+            if !wanted(node.bounds) {
                 continue;
             }
             match node.below {
                 Below::Nodes(first, second) => pending.extend([first, second]),
                 Below::Edges { start, end } => {
-                    let near = self.edges.get(start..end).unwrap_or(&[]);
-                    if near
-                        .iter()
-                        .any(|edge| edge.bounds().meets(around) && edge.meets(placement, bounds))
-                    {
-                        return false;
+                    for &edge in self.edges.get(start..end).unwrap_or(&[]) {
+                        each(edge);
                     }
                 }
             }
         }
-        true
     }
 }
 

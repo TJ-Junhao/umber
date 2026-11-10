@@ -7,8 +7,8 @@ use crate::layout::Area;
 use crate::pipeline::plan_figure;
 use crate::scene::{Item, Scene};
 use crate::{
-    ContourLevels, ContourOptions, ContourStyle, Figure, FontLibrary, PathVerb, Rgba, ScaleKind,
-    SvgText, Theme, Triangles,
+    ContourLevels, ContourOptions, ContourStyle, Figure, FontLibrary, LogBase, PathVerb, Rgba,
+    ScaleKind, SvgText, Theme, Triangles,
 };
 
 /// The gap kept clear around a label, in points, as the contour draws it.
@@ -406,18 +406,22 @@ fn a_tie_between_the_text_and_background_colors_takes_the_text_color() {
     let theme = Theme::pigment();
     let (text, background) = (theme.text_color(), theme.background());
     // Across a band in each color, both reach only 1:1 against one of them.
-    assert_eq!(label_color(&theme, Some([text, background])), text);
-    assert_eq!(label_color(&theme, Some([background, text])), text);
+    assert_eq!(label_color(&theme, &[text, background]), text);
+    assert_eq!(label_color(&theme, &[background, text]), text);
     // Equal colors tie on any band.
     let same = theme.with_text_color(background).unwrap();
     assert_eq!(
-        label_color(&same, Some([Rgba::opaque(0x33, 0x66, 0x99); 2])),
+        label_color(&same, &[Rgba::opaque(0x33, 0x66, 0x99); 2]),
         background
     );
-    // Without bands, the text color; on two dark bands in Pigment, the background.
-    assert_eq!(label_color(&theme, None), text);
+    // Without bands, the text color; on two dark bands, or one, in Pigment, the background.
+    assert_eq!(
+        label_color(&theme, &[Rgba::opaque(0x10, 0x10, 0x20)]),
+        background
+    );
+    assert_eq!(label_color(&theme, &[]), text);
     let dark = Rgba::opaque(0x10, 0x10, 0x20);
-    assert_eq!(label_color(&theme, Some([dark, dark])), background);
+    assert_eq!(label_color(&theme, &[dark, dark]), background);
     // A transparent background is taken opaque.
     let clear = theme
         .with_background(Rgba {
@@ -426,7 +430,161 @@ fn a_tie_between_the_text_and_background_colors_takes_the_text_color() {
         })
         .unwrap();
     assert_eq!(
-        label_color(&clear, Some([dark, dark])),
+        label_color(&clear, &[dark, dark]),
         Rgba::opaque(0xFF, 0xFF, 0xFF)
     );
+}
+
+/// The subpaths of the first fill among the marks of `scene`: the band below every level.
+fn first_band(scene: &Scene) -> Vec<Vec<(f64, f64)>> {
+    let path = marks(scene)
+        .iter()
+        .find_map(|item| match item {
+            Item::Fill { path, .. } => Some(path),
+            _ => None,
+        })
+        .expect("a band");
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+    for verb in path.verbs() {
+        match *verb {
+            PathVerb::MoveTo(p) => rings.push(vec![(f64::from(p.x), f64::from(p.y))]),
+            PathVerb::LineTo(p) => {
+                if let Some(last) = rings.last_mut() {
+                    last.push((f64::from(p.x), f64::from(p.y)));
+                }
+            }
+            _ => {}
+        }
+    }
+    rings
+}
+
+/// Whether `(x, y)` lies inside `rings` by the even-odd rule, counted by ray crossings.
+fn inside_even_odd(rings: &[Vec<(f64, f64)>], (x, y): (f64, f64)) -> bool {
+    let mut odd = false;
+    for ring in rings {
+        for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+            if (a.1 > y) != (b.1 > y) && a.0 + (y - a.1) / (b.1 - a.1) * (b.0 - a.0) > x {
+                odd = !odd;
+            }
+        }
+    }
+    odd
+}
+
+#[test]
+fn a_label_on_a_mesh_folded_by_a_log_axis_stays_inside_the_field_as_drawn() {
+    // A mesh valid in the data that a log x axis folds: the middle of its line, near
+    // (31.6, 0.575), lies outside the field as drawn, which starts at y = 0.75 there, so the
+    // label that would sit there clear of every edge moves to where the drawn field holds it.
+    let x = [1.0, 1.0, 100.0, 50.0];
+    let y = [0.0, 1.0, 1.0, 0.51];
+    let z: Vec<f64> = x.iter().map(|v: &f64| v.log10()).collect();
+    let mut f = Figure::new(6.0, 4.0, Theme::midnight()).unwrap();
+    f.add_axes(ScaleKind::Log { base: LogBase::TEN }, ScaleKind::Linear)
+        .unwrap()
+        .tricontour(
+            &x,
+            &y,
+            Triangles::Auto,
+            &z,
+            ContourOptions {
+                levels: ContourLevels::Values(vec![1.5]),
+                style: ContourStyle::Both,
+                annotate: true,
+                ..ContourOptions::default()
+            },
+        )
+        .unwrap();
+    let drawn = scene(&f);
+    let band = first_band(&drawn);
+    let found = labels(&drawn);
+    assert!(found.len() <= 1, "{found:?}");
+    for label in &found {
+        let [left, top, right, bottom] = widened(label.bounds, GAP);
+        let centre = ((left + right) / 2.0, (top + bottom) / 2.0);
+        for point in [
+            centre,
+            (left, top),
+            (right, top),
+            (right, bottom),
+            (left, bottom),
+        ] {
+            assert!(inside_even_odd(&band, point), "{label:?} at {point:?}");
+        }
+    }
+}
+
+/// A ridge on a 3 × 2 grid that only reaches 1 along its middle, filled with lines and labels
+/// at `levels` on Midnight.
+fn ridge(levels: &[f64]) -> Figure {
+    let mut f = figure(Theme::midnight());
+    f.single_axes_mut()
+        .contour(
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0],
+            &[0.0, 1.0, 0.0, 0.0, 1.0, 0.0],
+            ContourOptions {
+                levels: ContourLevels::Values(levels.to_vec()),
+                style: ContourStyle::Both,
+                annotate: true,
+                ..ContourOptions::default()
+            },
+        )
+        .unwrap();
+    f
+}
+
+#[test]
+fn a_label_with_nothing_painted_above_it_takes_the_color_of_the_band_below() {
+    // At level 1 the region at or above it is the ridge line alone: no band is painted above
+    // the label, so only the dark band below it counts and the light text color reads there.
+    let f = ridge(&[1.0]);
+    let (resolved, _) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let scale = resolved.color.unwrap();
+    let below = scale.band_color(None, Some(1.0));
+    let theme = Theme::midnight();
+    let found = labels(&scene(&f));
+    assert!(!found.is_empty());
+    for label in &found {
+        assert_eq!(label.color, theme.text_color(), "{label:?}");
+        assert_eq!(label.color, label_color(&theme, &[below]));
+    }
+    // Against the unpainted light band too, the background would have been chosen.
+    let above = scale.band_color(Some(1.0), None);
+    assert_eq!(label_color(&theme, &[below, above]), theme.background());
+}
+
+#[test]
+fn a_label_at_the_lowest_level_counts_both_painted_bands_beside_it() {
+    // With a level below the ridge's top, the lowest label lies across two painted bands, the
+    // whole field below it and the band from 0.5 to 1 above; the top label counts only the
+    // band below it.
+    let f = ridge(&[0.5, 1.0]);
+    let (resolved, _) = plan_figure(&f, (0, 0), FontLibrary::global());
+    let scale = resolved.color.unwrap();
+    let theme = Theme::midnight();
+    let lowest = label_color(
+        &theme,
+        &[
+            scale.band_color(None, Some(0.5)),
+            scale.band_color(Some(0.5), Some(1.0)),
+        ],
+    );
+    let top = label_color(&theme, &[scale.band_color(Some(0.5), Some(1.0))]);
+    let found = labels(&scene(&f));
+    let colors = |text: &str| -> Vec<Rgba> {
+        found
+            .iter()
+            .filter(|label| label.text == text)
+            .map(|label| label.color)
+            .collect()
+    };
+    let (low_colors, top_colors) = (colors("0.5"), colors("1.0"));
+    assert!(
+        !low_colors.is_empty() && !top_colors.is_empty(),
+        "{found:?}"
+    );
+    assert!(low_colors.iter().all(|&c| c == lowest), "{found:?}");
+    assert!(top_colors.iter().all(|&c| c == top), "{found:?}");
 }

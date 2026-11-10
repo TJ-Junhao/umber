@@ -13,9 +13,9 @@ fn sized(width: f64) -> LabelBox {
     }
 }
 
-/// A plot area from (-1000, -1000) to (1000, 1000) over a field without a boundary in it.
+/// A plot area from (-1000, -1000) to (1000, 1000) filled by a field without holes.
 fn open() -> Room {
-    Room::new((-1000.0, -1000.0, 1000.0, 1000.0), &[])
+    holed(&[])
 }
 
 /// The rectangle from `(left, top)` to `(right, bottom)` as a ring.
@@ -227,7 +227,11 @@ fn the_tree_of_boundary_edges_agrees_with_every_edge() {
             ]
         })
         .collect();
-    let room = Room::new((-10.0, -10.0, 410.0, 410.0), &rings);
+    // The triangles are holes in a field around them; where they overlap, the even-odd rule
+    // fills the overlap again.
+    let mut field = vec![rectangle(-20.0, -20.0, 420.0, 420.0)];
+    field.extend(rings.iter().cloned());
+    let room = Room::new((-10.0, -10.0, 410.0, 410.0), &field);
     let mut agreed = [0, 0];
     for _ in 0..400 {
         let center = (next() * 380.0 + 10.0, next() * 380.0 + 10.0);
@@ -244,11 +248,57 @@ fn the_tree_of_boundary_edges_agrees_with_every_edge() {
                 .zip(ring.iter().cycle().skip(1))
                 .any(|(&a, &b)| crosses(a, b, edge_box))
         });
+        // Inside the field when inside an even number of triangles, tested by the signs of the
+        // areas the centre makes with each side.
+        let covering = rings
+            .iter()
+            .filter(|ring| {
+                let signs: Vec<bool> = (0..3)
+                    .map(|k| orient(ring[k], ring[(k + 1) % 3], center) > 0.0)
+                    .collect();
+                signs.iter().all(|&s| s) || signs.iter().all(|&s| !s)
+            })
+            .count();
         let holds = room.holds(placement, bounds);
-        assert_eq!(holds, !any, "{center:?}");
+        assert_eq!(holds, !any && covering % 2 == 0, "{center:?}");
         agreed[usize::from(holds)] += 1;
     }
     assert!(agreed[0] > 20 && agreed[1] > 20, "{agreed:?}");
+}
+
+#[test]
+fn a_box_outside_the_field_does_not_fit_even_clear_of_its_edges() {
+    let at = |x: f64, y: f64| Placement {
+        center: (x, y),
+        angle: 0.0,
+    };
+    // A field from 0 to 100 with a hole from 20 to 80, in a larger plot area.
+    let room = Room::new(
+        (-1000.0, -1000.0, 1000.0, 1000.0),
+        &[
+            rectangle(0.0, 0.0, 100.0, 100.0),
+            rectangle(20.0, 20.0, 80.0, 80.0),
+        ],
+    );
+    // Between the field's edge and the hole, the box fits.
+    assert!(room.holds(at(10.0, 50.0), sized(10.0)));
+    // Wholly inside the hole, or wholly beyond the field, it touches no edge and still does
+    // not fit.
+    assert!(!room.holds(at(50.0, 50.0), sized(10.0)));
+    assert!(!room.holds(at(500.0, 50.0), sized(10.0)));
+    assert!(!room.holds(at(50.0, -300.0), sized(10.0)));
+    // A ray along a horizontal edge, or through a corner, counts as the even-odd rule does.
+    assert!(!room.holds(at(-50.0, 0.0), sized(10.0)));
+    assert!(room.holds(at(10.0, 20.0), sized(10.0)));
+    let diamond = Room::new(
+        (-1000.0, -1000.0, 1000.0, 1000.0),
+        &[vec![(0.0, -50.0), (50.0, 0.0), (0.0, 50.0), (-50.0, 0.0)]],
+    );
+    assert!(diamond.holds(at(0.0, 0.0), sized(10.0)));
+    assert!(!diamond.holds(at(-100.0, 0.0), sized(10.0)));
+    // Without any boundary there is no field to hold a label.
+    let empty = Room::new((-1000.0, -1000.0, 1000.0, 1000.0), &[]);
+    assert!(!empty.holds(at(0.0, 0.0), sized(10.0)));
 }
 
 #[test]

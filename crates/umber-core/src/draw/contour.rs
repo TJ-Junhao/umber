@@ -25,8 +25,9 @@
 //! inside the field, clear of its holes and of its edge ([`labels::place`], [`labels::Room`]);
 //! a line with no such position has no label and is drawn whole. On the bands of
 //! [`ContourStyle::Both`] a label lies across the band below its level and the band above it,
-//! and takes whichever of the theme's text color and its background color reads better on both
-//! ([`label_color`]); the labels of [`ContourStyle::Lines`] take the theme's text color.
+//! and takes whichever of the theme's text color and its background color reads better on those
+//! of them that are painted ([`label_color`]); the labels of [`ContourStyle::Lines`] take the
+//! theme's text color.
 //!
 //! A line colored by its level whose color comes close to the background is drawn darker, or
 //! lighter on a dark background ([`super::contrast`]): with `w = clamp(1 − d / 0.25, 0, 1)` from
@@ -59,6 +60,9 @@ use crate::{
 const BOTH_LINE_OPACITY: f32 = 0.7;
 /// The length of line left out on each side of a level label, in points.
 const LABEL_GAP: f64 = 3.0;
+/// The area in square points above which a band's ring counts as painted: a ring that encloses
+/// no more, such as the outline of a ridge that only reaches its level, paints nothing.
+const PAINTED_AREA: f64 = 1e-6;
 
 /// A resolved contour, on a grid or a mesh, as [`grid_contour_items`] and
 /// [`mesh_contour_items`] draw it.
@@ -242,9 +246,10 @@ fn contour_items<P: Copy>(
 ) -> Result<()> {
     let spec = contour.spec;
     let levels = spec.levels();
-    if let Some(scale) = &resolved.color {
-        band_items(context, &at, contour.shapes, (&levels, scale), items);
-    }
+    let painted = match &resolved.color {
+        Some(scale) => band_items(context, &at, contour.shapes, (&levels, scale), items),
+        None => Vec::new(),
+    };
     let (width, line_color) = match spec.options().style {
         ContourStyle::Both => (
             BOTH_LINE_WIDTH,
@@ -292,17 +297,21 @@ fn contour_items<P: Copy>(
             .annotate
             .then(|| centered_tick_label(fonts, context.theme, text, (0.0, 0.0)))
             .transpose()?;
-        let label_color = label_color(
-            context.theme,
-            banded.map(|scale| {
-                let below = index.checked_sub(1).and_then(|i| levels.get(i)).copied();
-                let above = levels.get(index + 1).copied();
-                [
-                    scale.band_color(below, Some(level)),
-                    scale.band_color(Some(level), above),
-                ]
-            }),
-        );
+        // The band below the level is band `index`, the one above it band `index + 1`; only
+        // those painted count.
+        let bands: Vec<Rgba> = banded.map_or_else(Vec::new, |scale| {
+            let below = index.checked_sub(1).and_then(|i| levels.get(i)).copied();
+            let above = levels.get(index + 1).copied();
+            [
+                (index, scale.band_color(below, Some(level))),
+                (index + 1, scale.band_color(Some(level), above)),
+            ]
+            .into_iter()
+            .filter(|&(band, _)| painted.get(band) == Some(&true))
+            .map(|(_, color)| color)
+            .collect()
+        });
+        let label_color = label_color(context.theme, &bands);
         let clip = LineClip::of(context, width);
         let mut subpaths: Vec<Vec<PlotPoint>> = Vec::new();
         for line in lines {
@@ -354,18 +363,22 @@ fn contour_items<P: Copy>(
     Ok(())
 }
 
-/// The color of a level label on a contour of `theme` that lies across the two `bands` on
-/// either side of its level, the one below it and the one above, or across no band.
+/// The color of a level label on a contour of `theme` that lies across the painted `bands` on
+/// either side of its level: the band below it and the band above, each only when it is
+/// painted ([`band_items`]), so one of them, both, or none.
 ///
 /// Of the theme's text color and its background color, taken opaque, the label takes the one
-/// whose lower WCAG 2 contrast ratio ([`contrast_ratio`]) against the two band colors is
-/// higher, so it reads on both bands; on a tie it takes the text color. A label across no band,
-/// on the lines of [`ContourStyle::Lines`], takes the text color.
-pub(super) fn label_color(theme: &Theme, bands: Option<[Rgba; 2]>) -> Rgba {
+/// whose lowest WCAG 2 contrast ratio ([`contrast_ratio`]) against the band colors is higher,
+/// so it reads on every band it lies across; on a tie it takes the text color. A label across
+/// no band takes the text color: the labels of [`ContourStyle::Lines`]. On the bands of
+/// [`ContourStyle::Both`] the band below a drawn line is always painted, since the field just
+/// below the level, beside the line, lies in it; only the band above can be missing, as above
+/// a ridge that only reaches the level.
+pub(super) fn label_color(theme: &Theme, bands: &[Rgba]) -> Rgba {
     let text = theme.text_color();
-    let Some(bands) = bands else {
+    if bands.is_empty() {
         return text;
-    };
+    }
     let background = Rgba {
         a: 255,
         ..theme.background()
@@ -423,33 +436,42 @@ fn label_box(label: &Label) -> LabelBox {
 
 /// The bands of `shapes` appended to `items`, each point mapped to axis space by `at`, each band
 /// filled in its color on `scale` between its lower level and the next of `levels`
-/// ([`ResolvedColorScale::band_color`]), clipped in axis space to the plot and a margin.
+/// ([`ResolvedColorScale::band_color`]), clipped in axis space to the plot and a margin: and
+/// whether each band is painted, that is whether one of its rings, so clipped, has an area of
+/// more than [`PAINTED_AREA`] on the page.
 fn band_items<P: Copy>(
     context: &MarkContext<'_>,
     at: &impl Fn(P) -> AxisPoint,
     shapes: &ContourShapes<P>,
     (levels, scale): (&[f64], &ResolvedColorScale),
     items: &mut Vec<Item>,
-) {
+) -> Vec<bool> {
     let clip = LineClip::of(context, 0.0);
+    let mut painted = Vec::with_capacity(shapes.bands.len());
     for (index, band) in shapes.bands.iter().enumerate() {
         let below = index.checked_sub(1).and_then(|i| levels.get(i)).copied();
         let above = levels.get(index).copied();
         let mut path = Path::new();
+        let mut area = false;
         for ring in &band.rings {
             let ring: Vec<AxisPoint> = ring.iter().map(|&p| at(p)).collect();
-            let clipped = clip_ring(&ring, &clip.bounds);
-            let mut points = clipped.iter().map(|&p| clip.plot_point(p).to_scene());
+            let clipped: Vec<PlotPoint> = clip_ring(&ring, &clip.bounds)
+                .into_iter()
+                .map(|p| clip.plot_point(p))
+                .collect();
+            let mut points = clipped.iter().map(|p| p.to_scene());
             let Some(first) = points.next() else {
                 continue;
             };
             if clipped.len() < 3 {
                 continue;
             }
+            area |= ring_area(&clipped) > PAINTED_AREA;
             path.move_to(first);
             points.for_each(|p| path.line_to(p));
             path.close();
         }
+        painted.push(area);
         if !path.is_empty() {
             items.push(Item::Fill {
                 path,
@@ -458,6 +480,17 @@ fn band_items<P: Copy>(
             });
         }
     }
+    painted
+}
+
+/// The area of the ring through `points` on the page, in square points, whichever way round.
+fn ring_area(points: &[PlotPoint]) -> f64 {
+    let twice: f64 = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum();
+    twice.abs() / 2.0
 }
 
 /// The plot points of the page points `points`.
