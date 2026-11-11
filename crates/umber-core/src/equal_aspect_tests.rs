@@ -565,8 +565,8 @@ fn bubbles_widen_the_limits_and_the_scales_stay_equal() {
         assert!(lo < min && hi > max, "{lo} {hi}");
         // Two renders of the same figure are the same.
         assert_eq!(
-            f.to_svg(crate::SvgText::Editable).unwrap(),
-            f.to_svg(crate::SvgText::Editable).unwrap()
+            f.to_svg(crate::SvgText::Editable, 300).unwrap(),
+            f.to_svg(crate::SvgText::Editable, 300).unwrap()
         );
     }
 }

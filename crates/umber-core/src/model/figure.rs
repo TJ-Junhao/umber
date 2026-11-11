@@ -1670,14 +1670,14 @@ mod tests {
         for case in table() {
             let mut f = holding_one(case.grid);
             let before = f.clone();
-            let svg = f.to_svg(SvgText::Editable).unwrap();
+            let svg = f.to_svg(SvgText::Editable, 300).unwrap();
             let result = f
                 .add_axes_at(case.place, ScaleKind::Linear, case.y)
                 .map(drop);
             assert!(result.is_err(), "{}", case.message);
             assert_eq!(f, before, "{}", case.message);
             assert_eq!(
-                f.to_svg(SvgText::Editable).unwrap(),
+                f.to_svg(SvgText::Editable, 300).unwrap(),
                 svg,
                 "{}",
                 case.message

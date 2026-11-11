@@ -129,6 +129,7 @@ _LEGEND_POSITION_HINT: Final = (
 _RENDER_HINT: Final = (
     "use ub.Render.VECTOR or ub.Render.RASTER, or ub.AUTO to choose by the number of cells."
 )
+_MARK_RENDER_HINT: Final = "use ub.Render.VECTOR or ub.Render.RASTER."
 _CONTOUR_HINT: Final = _members_hint(Contour)
 _FORMAT_HINT: Final = (
     "use TickFormat.fixed(2), TickFormat.percent(), TickFormat.scientific() or TickFormat.AUTO."
@@ -960,10 +961,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         dash: Dash = Dash.SOLID,
         width: Size = Size.AUTO,
         by: Values[str] | Auto = AUTO,
+        render: Render = Render.VECTOR,
     ) -> SY:
         """Add a line through the points ``(x[i], y[i])``, in order.
 
-        A NaN in ``x`` or ``y`` leaves a gap in the line.
+        A NaN in ``x`` or ``y`` leaves a gap in the line. ``render=Render.RASTER`` draws the
+        line as one image in SVG and PDF output, at the export's ``raster_dpi``, for a long
+        noisy line that would make the file slow to open (see ``Render``); PNG output stays
+        the same.
 
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
@@ -976,12 +981,14 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 one series. Names supply legend labels and palette colors; do not pass
                 a non-empty ``label`` or an explicit ``color``. Missing or empty names
                 and an empty grouping column are refused. Column names are never read.
+            render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+                and PDF output (one per group with ``by``). There is no ``AUTO``.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If an argument has the wrong type.
+            TypeError: If an argument has the wrong type, such as ``AUTO`` for ``render``.
             DataError: If ``by`` has invalid names or differs in length from the data; or if
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, or names and numbers do not match the x
@@ -997,6 +1004,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> ax = ax.line([0, 1, 2, 3], [1.0, 3.0, float("nan"), 2.0], label="North")
             >>> grouped = ub.Figure().add_axes()
             >>> grouped = grouped.line([0, 0, 1, 1], [1, 2, 3, 4], by=["B", "A", "B", "A"])
+            >>> noisy = ub.Figure().add_axes().line([0, 1, 2], [1, 3, 2], render=ub.Render.RASTER)
         """
         with api_call():
             context = "Axes.line()"
@@ -1006,6 +1014,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             spec = _color_argument(context, color)
             style = instance(context, "dash", dash, Dash, _DASH_HINT)
             extent = _size_argument(context, "width", width)
+            drawn = _mark_render_argument(context, render)
             _group.call(
                 context,
                 by,
@@ -1021,6 +1030,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         color=spec,
                         dash=style.value,
                         width=extent,
+                        render=drawn,
                     ),
                     draw_groups=partial(
                         self._native.grouped_line,
@@ -1028,6 +1038,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         self._col,
                         dash=style.value,
                         width=extent,
+                        render=drawn,
                     ),
                 ),
             )
@@ -1136,6 +1147,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         x_error: tuple[Values[X], Values[X]] | Auto = AUTO,
         y_error: tuple[Values[Y], Values[Y]] | Auto = AUTO,
         connect: bool = False,
+        render: Render = Render.VECTOR,
     ) -> Self:
         """Add a marker at each point ``(x[i], y[i])``.
 
@@ -1186,6 +1198,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
         stand on their own.
 
+        ``render=Render.RASTER`` draws the markers, and the line of ``connect``, as one image in
+        SVG and PDF output, at the export's ``raster_dpi``, for a scatter so dense that the file
+        would be slow to open (see ``Render``); with error bars and ``connect`` the line and the
+        markers are two images, under and over the bars. Value labels, error bars and the legend
+        swatch stay vector, and PNG output stays the same.
+
         Args:
             x: The x values: numbers on a linear or log x axis, names on a category x axis.
             y: The y values, one per x value: numbers on a linear or log y axis, names on a
@@ -1219,13 +1237,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 each per point, in y data units: numbers on a linear or log y axis, times on a
                 time y axis. ``AUTO`` draws no bars.
             connect: Whether a line joins the points in input order.
+            render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+                and PDF output (one per group with ``by``). There is no ``AUTO``.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If an argument has the wrong type, or ``x_error`` or ``y_error`` is not a
-                tuple of two columns.
+            TypeError: If an argument has the wrong type, such as ``AUTO`` for ``render``, or
+                ``x_error`` or ``y_error`` is not a tuple of two columns.
             DataError: If ``by`` has invalid names or differs in length from the data; or if
                 the data cannot be plotted: lengths differ, a value is infinite, a
                 value is not positive on a log axis, names and numbers do not match the
@@ -1272,6 +1292,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             ...     ["Fold 1", "Fold 2", "Mean"], [66.8, 68.1, 67.5],
             ...     y_error=([nan, nan, 66.9], [nan, nan, 68.1]), connect=True,
             ... )
+            >>> import numpy as np
+            >>> rng = np.random.default_rng(0)
+            >>> cloud = ub.Figure().add_axes().scatter(
+            ...     rng.normal(size=100_000), rng.normal(size=100_000), render=ub.Render.RASTER
+            ... )
+            >>> cloud.figure.save_pdf("cloud.pdf")
         """
         with api_call():
             context = "Axes.scatter()"
@@ -1287,6 +1313,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             x_ends = _error_ends(context, "x_error", x_error, self._x)
             y_ends = _error_ends(context, "y_error", y_error, self._y)
             joins = _args.boolean(context, "connect", connect)
+            drawn = _mark_render_argument(context, render)
             _group.call(
                 context,
                 by,
@@ -1309,6 +1336,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         label_size=text_size,
                         place=where,
                         connect=joins,
+                        render=drawn,
                     ),
                     draw_groups=partial(
                         self._native.grouped_scatter,
@@ -1321,6 +1349,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                         label_size=text_size,
                         place=where,
                         connect=joins,
+                        render=drawn,
                     ),
                 ),
             )
@@ -4499,6 +4528,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         cmap: Cmap | Auto = AUTO,
         scale: Scale[float] = Scale.linear(),
         center: float | Auto = AUTO,
+        render: Render = Render.VECTOR,
     ) -> "Axes[float, float]":
         """Add the triangles of a mesh, each filled with one color from its value.
 
@@ -4519,9 +4549,11 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         is on top, whatever else the mesh holds. Triangles of one color that follow one another
         in that order share one fill and one stroke, so a colormap that takes the same color at
         two places apart along it draws that color as several; the same triangles in any order
-        draw the same output. The mesh is always
-        drawn flat, as vector shapes. Automatic limits are the extent of the points, without
-        padding.
+        draw the same output. The mesh is drawn flat, as vector shapes, unless
+        ``render=Render.RASTER`` asks for one image in SVG and PDF output, at the export's
+        ``raster_dpi`` (see ``Render``), for a mesh of so many triangles that the file would be
+        slow to open; NaN triangles stay transparent in it, and PNG output stays the same.
+        Automatic limits are the extent of the points, without padding.
 
         Args:
             x: The x coordinate of each point: finite, positive on a log axis.
@@ -4536,13 +4568,15 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             scale: ``Scale.linear()``, or ``Scale.log()`` for values that are all positive.
             center: The value at the middle of a diverging colormap, as for ``ColorBy``;
                 ``AUTO`` for a sequential mapping.
+            render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
+                and PDF output. There is no ``AUTO``.
 
         Returns:
             These axes.
 
         Raises:
             TypeError: If an argument has the wrong type, such as a float array for
-                ``triangles``, or ``scale`` is not linear or log.
+                ``triangles`` or ``AUTO`` for ``render``, or ``scale`` is not linear or log.
             DataError: If the points or ``triangles`` are invalid, as ``triplot()`` says, or
                 ``values`` does not hold one value per point (``POINTS``) or per triangle
                 (``TRIANGLES``), or a value is infinite, beyond 1e300 in magnitude, or not
@@ -4563,6 +4597,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             >>> strain = x[tri].std(axis=1)
             >>> fem = ub.Figure().add_axes()
             >>> fem = fem.tripcolor(x, y, strain, triangles=tri, on=ub.TriValues.TRIANGLES)
+            >>> image = ub.Figure().add_axes().tripcolor(x, y, x * y, render=ub.Render.RASTER)
         """
         with api_call():
             context = "Axes.tripcolor()"
@@ -4572,6 +4607,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             given = native_triangles(context, triangles)
             belongs = instance(context, "on", on, TriValues, _ON_HINT)
             native_cmap, kind, base, middle = native_color_scale(context, cmap, scale, center)
+            drawn = _mark_render_argument(context, render)
             _numeric_cells(context, self, time=False)
             xs, ys = floats(context, "x", x), floats(context, "y", y)
             data = floats(context, "values", values)
@@ -4588,6 +4624,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 kind,
                 base,
                 middle,
+                drawn,
             )
             return self
 
@@ -4839,6 +4876,23 @@ def _level_count(context: str, levels: object) -> int:
             hint="ask for a few levels, such as levels=7, or pass the level values.",
         )
     return count
+
+
+def _mark_render_argument(context: str, value: object) -> int:
+    """Check the ``render`` argument of a scatter, line or tripcolor and return its native form.
+
+    These marks have no automatic choice, so ``AUTO`` is refused as any value of another type.
+    """
+    if value is AUTO:
+        raise new_error(
+            TypeError,
+            context,
+            "render is ub.AUTO; render must be of type Render, as this mark has no automatic "
+            "choice.",
+            parameter="render",
+            hint=_MARK_RENDER_HINT,
+        )
+    return int(instance(context, "render", value, Render, _MARK_RENDER_HINT).value)
 
 
 def _render_argument(context: str, value: object) -> int | None:

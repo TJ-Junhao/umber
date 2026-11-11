@@ -308,8 +308,8 @@ fn labels_are_placed_the_same_every_time() {
         assert!(!labels(&first).is_empty());
         assert_eq!(scene(&f), first);
         assert_eq!(
-            f.to_svg(SvgText::Editable).unwrap(),
-            f.to_svg(SvgText::Editable).unwrap()
+            f.to_svg(SvgText::Editable, 300).unwrap(),
+            f.to_svg(SvgText::Editable, 300).unwrap()
         );
     }
 }

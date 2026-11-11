@@ -97,7 +97,7 @@ fn arrows_and_barbs_agree_in_png_svg_and_pdf() {
             };
             // SVG: every item of the marks is one path element, in both text modes.
             for text in [SvgText::Editable, SvgText::Outlines] {
-                let svg = figure.to_svg(text).unwrap();
+                let svg = figure.to_svg(text, 300).unwrap();
                 assert!(svg.contains("<path"), "{name} {mark}");
             }
             assert!(!items.is_empty() && items.len() <= 2, "{name} {mark}");
@@ -105,8 +105,8 @@ fn arrows_and_barbs_agree_in_png_svg_and_pdf() {
             let dpi = 144;
             let png = figure.to_png(dpi).unwrap();
             assert!(image::decode_rgba8(&png).is_ok(), "{name} {mark}");
-            let pdf = figure.to_pdf().unwrap();
-            assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+            let pdf = figure.to_pdf(300).unwrap();
+            assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
             if poppler {
                 let dir = pdf_check::scratch(&format!("vector-fields-{name}-{mark}"));
                 let path = pdf_check::write(&dir, "field.pdf", &pdf);

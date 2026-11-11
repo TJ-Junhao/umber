@@ -595,22 +595,22 @@ fn png_svg_and_pdf_draw_the_same_text_in_the_plot() {
         )
         .unwrap();
     let drawn = render(&f);
-    let editable = render_svg(&drawn, SvgText::Editable);
+    let editable = render_svg(&drawn, SvgText::Editable, 300).unwrap();
     assert!(editable.contains(">n = 5 folds<") && editable.contains(">best run<"));
-    let outlines = render_svg(&drawn, SvgText::Outlines);
+    let outlines = render_svg(&drawn, SvgText::Outlines, 300).unwrap();
     assert!(!outlines.contains("n = 5 folds"));
     let png = render_png(&drawn, 72).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
-    let pdf = render_pdf(&drawn).unwrap();
+    let pdf = render_pdf(&drawn, 300).unwrap();
     assert!(pdf.starts_with(b"%PDF-"));
-    assert_eq!(f.to_svg(SvgText::Editable).unwrap(), editable);
+    assert_eq!(f.to_svg(SvgText::Editable, 300).unwrap(), editable);
     assert_eq!(f.to_png(72).unwrap(), png);
-    assert_eq!(f.to_pdf().unwrap(), pdf);
+    assert_eq!(f.to_pdf(300).unwrap(), pdf);
     // The text is in the picture: without it every format differs.
     let plain = lined();
-    assert_ne!(plain.to_svg(SvgText::Editable).unwrap(), editable);
+    assert_ne!(plain.to_svg(SvgText::Editable, 300).unwrap(), editable);
     assert_ne!(plain.to_png(72).unwrap(), png);
-    assert_ne!(plain.to_pdf().unwrap(), pdf);
+    assert_ne!(plain.to_pdf(300).unwrap(), pdf);
 }
 
 #[test]

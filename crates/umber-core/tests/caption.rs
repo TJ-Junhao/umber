@@ -413,23 +413,23 @@ fn png_svg_and_pdf_draw_the_same_caption() {
     line(&mut figure, "");
     figure.caption("Footnote under the chart");
     let drawn = scene(&figure);
-    let editable = render_svg(&drawn, SvgText::Editable);
+    let editable = render_svg(&drawn, SvgText::Editable, 300).unwrap();
     assert!(editable.contains(">Footnote under the chart<"));
-    let outlines = render_svg(&drawn, SvgText::Outlines);
+    let outlines = render_svg(&drawn, SvgText::Outlines, 300).unwrap();
     assert!(!outlines.contains("Footnote under the chart"));
     assert!(!outlines.contains("<text"));
     let png = render_png(&drawn, 72).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
-    let pdf = render_pdf(&drawn).unwrap();
+    let pdf = render_pdf(&drawn, 300).unwrap();
     assert!(pdf.starts_with(b"%PDF-"));
     // The Figure methods render the same scene.
-    assert_eq!(figure.to_svg(SvgText::Editable).unwrap(), editable);
+    assert_eq!(figure.to_svg(SvgText::Editable, 300).unwrap(), editable);
     assert_eq!(figure.to_png(72).unwrap(), png);
-    assert_eq!(figure.to_pdf().unwrap(), pdf);
+    assert_eq!(figure.to_pdf(300).unwrap(), pdf);
     // A figure without the caption renders differently in every format.
     figure.caption("");
     assert_ne!(figure.to_png(72).unwrap(), png);
-    assert_ne!(figure.to_pdf().unwrap(), pdf);
+    assert_ne!(figure.to_pdf(300).unwrap(), pdf);
 }
 
 /// The bounds of the glyphs of `text`: top and bottom of its ink.

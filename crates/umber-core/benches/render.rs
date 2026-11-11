@@ -396,13 +396,13 @@ fn benches(c: &mut Criterion) {
     });
 
     group.bench_function("line_1m_svg", |b| {
-        b.iter(|| black_box(line.to_svg(SvgText::Outlines).unwrap()));
+        b.iter(|| black_box(line.to_svg(SvgText::Outlines, 300).unwrap()));
     });
     group.bench_function("line_1m_svg_from_scene", |b| {
-        b.iter(|| black_box(render_svg(&line_scene, SvgText::Outlines)));
+        b.iter(|| black_box(render_svg(&line_scene, SvgText::Outlines, 300).unwrap()));
     });
     group.bench_function("line_1m_pdf", |b| {
-        b.iter(|| black_box(line.to_pdf().unwrap()));
+        b.iter(|| black_box(line.to_pdf(300).unwrap()));
     });
 
     let hist = hist_figure(1_000_000);
@@ -419,10 +419,10 @@ fn benches(c: &mut Criterion) {
         b.iter(|| black_box(heatmap.to_scene(library).unwrap()));
     });
     group.bench_function("heatmap_1000x1000_svg", |b| {
-        b.iter(|| black_box(heatmap.to_svg(SvgText::Outlines).unwrap()));
+        b.iter(|| black_box(heatmap.to_svg(SvgText::Outlines, 300).unwrap()));
     });
     group.bench_function("heatmap_1000x1000_pdf", |b| {
-        b.iter(|| black_box(heatmap.to_pdf().unwrap()));
+        b.iter(|| black_box(heatmap.to_pdf(300).unwrap()));
     });
     let categories = category_figure();
     group.bench_function("category_200_png", |b| {
@@ -432,7 +432,7 @@ fn benches(c: &mut Criterion) {
         b.iter(|| black_box(categories.to_scene(library).unwrap()));
     });
     group.bench_function("category_200_svg", |b| {
-        b.iter(|| black_box(categories.to_svg(SvgText::Outlines).unwrap()));
+        b.iter(|| black_box(categories.to_svg(SvgText::Outlines, 300).unwrap()));
     });
     let hist2d = hist2d_figure(1_000_000);
     group.bench_function("hist2d_1m_png", |b| {

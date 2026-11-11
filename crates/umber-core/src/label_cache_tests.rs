@@ -85,8 +85,8 @@ fn cached_category_scenes_svg_and_png_are_byte_identical() {
         assert_eq!(cached, uncached, "scene {i}");
         for text in [SvgText::Outlines, SvgText::Editable] {
             assert_eq!(
-                render_svg(&cached, text),
-                render_svg(&uncached, text),
+                render_svg(&cached, text, 300).unwrap(),
+                render_svg(&uncached, text, 300).unwrap(),
                 "SVG {i}"
             );
         }

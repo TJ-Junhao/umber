@@ -439,11 +439,12 @@ fn system_variable_only_bold_fallback_renders_every_bold_role() {
             crate::render::render_png(&expected, 96).unwrap()
         );
         assert_eq!(
-            crate::render::render_svg(&actual, crate::render::SvgText::Outlines),
-            crate::render::render_svg(&expected, crate::render::SvgText::Outlines)
+            crate::render::render_svg(&actual, crate::render::SvgText::Outlines, 300).unwrap(),
+            crate::render::render_svg(&expected, crate::render::SvgText::Outlines, 300).unwrap()
         );
         assert!(
-            !crate::render::render_svg(&actual, crate::render::SvgText::Editable)
+            !crate::render::render_svg(&actual, crate::render::SvgText::Editable, 300)
+                .unwrap()
                 .contains("font-weight=\"600\"")
         );
     }

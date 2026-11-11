@@ -1,7 +1,8 @@
-//! Images: the pixels of an [`Item::Image`](crate::Item::Image) as a Flate-compressed RGB image
-//! XObject, with its alpha as a grayscale soft mask when any pixel is not opaque. Both are
-//! marked `/Interpolate false`, so viewers scale the pixels without smoothing and cells stay
-//! sharp at any zoom.
+//! Images: the pixels of an [`Item::Image`](crate::Item::Image), or of the image of an
+//! [`Item::Raster`](crate::Item::Raster), as a Flate-compressed RGB image XObject, with its alpha
+//! as a grayscale soft mask when any pixel is not opaque. The images of cells are marked
+//! `/Interpolate false`, so viewers scale the pixels without smoothing and cells stay sharp at
+//! any zoom; the images of marks are marked `/Interpolate true`, as their pixels sample shapes.
 //!
 //! Cell images are compressed at low deflate levels, chosen by measurement on cell images (a
 //! heatmap of noisy values, a noisy smooth field, a smooth mesh, a 2-D histogram with empty
@@ -10,7 +11,8 @@
 //! a smooth field, is compressed again at level 3, which costs little on such images and
 //! shrinks them further. The samples are
 //! written as they are: PNG-style prediction made every measured cell image larger, since
-//! neighbouring cells repeat colormap colors rather than vary smoothly in each channel.
+//! neighbouring cells repeat colormap colors rather than vary smoothly in each channel. The
+//! images of marks are compressed the same way.
 
 use pdf_writer::{Chunk, Filter, Finish, Ref};
 
@@ -46,35 +48,91 @@ pub(super) fn side(pixels: u32) -> Option<i32> {
     i32::try_from(pixels).ok()
 }
 
-/// Writes the `width × height` image of `pixels`, row by row from the top, and returns its
-/// object. The sides must fit [`side`].
+/// An image ready to be written: its size, its color samples compressed, its alpha samples
+/// compressed when a pixel is not opaque, and whether viewers may smooth it.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct EncodedImage {
+    /// Columns and rows; both fit [`side`].
+    size: (i32, i32),
+    /// The RGB samples, compressed.
+    color: Vec<u8>,
+    /// The alpha samples, compressed, when a pixel is not opaque.
+    alpha: Option<Vec<u8>>,
+    /// The `/Interpolate` flag of the image and its mask.
+    interpolate: bool,
+}
+
+impl EncodedImage {
+    /// The image of `size` (columns, rows) of `pixels`, row by row from the top, the cells of an
+    /// [`Item::Image`](crate::Item::Image): scaled without smoothing.
+    pub(super) fn cells(size: (i32, i32), pixels: &[Rgba]) -> EncodedImage {
+        let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
+        let alpha = pixels.iter().any(|p| p.a < 255).then(|| {
+            let alpha: Vec<u8> = pixels.iter().map(|p| p.a).collect();
+            compressed(&alpha)
+        });
+        EncodedImage {
+            size,
+            color: compressed(&rgb),
+            alpha,
+            interpolate: false,
+        }
+    }
+
+    /// The image of `size` (columns, rows) of `rgba`, four bytes of straight RGBA per pixel, row
+    /// by row from the top, the image of marks of an [`Item::Raster`](crate::Item::Raster): its
+    /// pixels sample shapes, so viewers may smooth it.
+    pub(super) fn marks(size: (i32, i32), rgba: &[u8]) -> EncodedImage {
+        let rgb: Vec<u8> = rgba
+            .chunks_exact(4)
+            .flat_map(|p| [p[0], p[1], p[2]])
+            .collect();
+        let color = compressed(&rgb);
+        drop(rgb);
+        let alpha = rgba.chunks_exact(4).any(|p| p[3] < 255).then(|| {
+            let alpha: Vec<u8> = rgba.chunks_exact(4).map(|p| p[3]).collect();
+            compressed(&alpha)
+        });
+        EncodedImage {
+            size,
+            color,
+            alpha,
+            interpolate: true,
+        }
+    }
+}
+
+/// Writes the `width × height` image of `pixels`, row by row from the top, the cells of an
+/// [`Item::Image`](crate::Item::Image), and returns its object. The sides must fit [`side`].
 pub(super) fn write_image(
     chunk: &mut Chunk,
     refs: &mut Refs,
-    (width, height): (i32, i32),
+    size: (i32, i32),
     pixels: &[Rgba],
 ) -> Ref {
+    write_encoded(chunk, refs, &EncodedImage::cells(size, pixels))
+}
+
+/// Writes `image`, with its soft mask when it has one, and returns its object.
+pub(super) fn write_encoded(chunk: &mut Chunk, refs: &mut Refs, image: &EncodedImage) -> Ref {
+    let (width, height) = image.size;
     let id = refs.next();
-    let mask = pixels.iter().any(|p| p.a < 255).then(|| refs.next());
-    let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
-    let data = compressed(&rgb);
-    let mut image = chunk.image_xobject(id, &data);
-    image.filter(Filter::FlateDecode);
-    image.width(width).height(height).bits_per_component(8);
-    image.color_space().device_rgb();
-    image.interpolate(false);
-    if let Some(mask) = mask {
-        image.s_mask(mask);
+    let mask = image.alpha.as_ref().map(|alpha| (refs.next(), alpha));
+    let mut xobject = chunk.image_xobject(id, &image.color);
+    xobject.filter(Filter::FlateDecode);
+    xobject.width(width).height(height).bits_per_component(8);
+    xobject.color_space().device_rgb();
+    xobject.interpolate(image.interpolate);
+    if let Some((mask, _)) = mask {
+        xobject.s_mask(mask);
     }
-    image.finish();
-    if let Some(mask) = mask {
-        let alpha: Vec<u8> = pixels.iter().map(|p| p.a).collect();
-        let data = compressed(&alpha);
-        let mut soft = chunk.image_xobject(mask, &data);
+    xobject.finish();
+    if let Some((mask, alpha)) = mask {
+        let mut soft = chunk.image_xobject(mask, alpha);
         soft.filter(Filter::FlateDecode);
         soft.width(width).height(height).bits_per_component(8);
         soft.color_space().device_gray();
-        soft.interpolate(false);
+        soft.interpolate(image.interpolate);
         soft.finish();
     }
     id

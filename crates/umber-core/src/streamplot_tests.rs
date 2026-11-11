@@ -524,8 +524,8 @@ fn the_same_input_draws_the_same_lines_and_pinned_points() {
     assert_eq!(mark.lines(), again.lines());
     assert_eq!(first.to_png(72).unwrap(), second.to_png(72).unwrap());
     assert_eq!(
-        first.to_svg(SvgText::Outlines).unwrap(),
-        second.to_svg(SvgText::Outlines).unwrap()
+        first.to_svg(SvgText::Outlines, 300).unwrap(),
+        second.to_svg(SvgText::Outlines, 300).unwrap()
     );
     // Points pinned to their bits: a different platform or integrator shows here.
     let bits = |line: usize, point: usize| {

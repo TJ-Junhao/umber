@@ -234,7 +234,11 @@ fn bars_far_outside_limits_are_clipped() {
             assert!(f64::from(hi.y) <= plot.bottom() + 4.0, "{hi:?}");
         }
         assert!(render_png(&scene, 72).is_ok());
-        assert!(!render_svg(&scene, SvgText::Outlines).is_empty());
+        assert!(
+            !render_svg(&scene, SvgText::Outlines, 300)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // The same on a log y axis, with heights at both ends of the log range.
@@ -539,7 +543,11 @@ fn stacks_and_groups_far_outside_limits_are_clipped() {
             assert!(f64::from(hi.y) <= plot.bottom() + 4.0, "{hi:?}");
         }
         assert!(render_png(&scene, 72).is_ok());
-        assert!(!render_svg(&scene, SvgText::Outlines).is_empty());
+        assert!(
+            !render_svg(&scene, SvgText::Outlines, 300)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 

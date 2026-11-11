@@ -146,14 +146,17 @@ fn level_labels_agree_in_png_svg_and_pdf() {
             assert!(colors.contains(&text), "{name} {kind}: {colors:?}");
             assert!(colors.contains(&background), "{name} {kind}: {colors:?}");
             for mode in [SvgText::Editable, SvgText::Outlines] {
-                let svg = f.to_svg(mode).unwrap();
-                assert_eq!(svg, umber_core::render::render_svg(&scene, mode));
+                let svg = f.to_svg(mode, 300).unwrap();
+                assert_eq!(
+                    svg,
+                    umber_core::render::render_svg(&scene, mode, 300).unwrap()
+                );
                 for &color in &[text, background] {
                     assert!(svg.contains(&fill(color)), "{name} {kind} {mode:?}");
                 }
             }
             // As editable text, each label is a text element in its own color.
-            let svg = f.to_svg(SvgText::Editable).unwrap();
+            let svg = f.to_svg(SvgText::Editable, 300).unwrap();
             for label in &found {
                 let element = svg
                     .lines()
@@ -168,8 +171,8 @@ fn level_labels_agree_in_png_svg_and_pdf() {
             }
             let png = f.to_png(144).unwrap();
             assert_eq!(png, umber_core::render::render_png(&scene, 144).unwrap());
-            let pdf = f.to_pdf().unwrap();
-            assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+            let pdf = f.to_pdf(300).unwrap();
+            assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
             let content = pdf_check::page_content(&pdf);
             for &color in &[text, background] {
                 assert!(sets_fill(&content, color), "{name} {kind}: {color:?}");

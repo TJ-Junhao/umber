@@ -369,7 +369,11 @@ fn hist_far_outside_limits_is_clipped() {
             assert_eq!(items.len(), 1);
         }
         assert!(render_png(&scene, 72).is_ok());
-        assert!(!render_svg(&scene, SvgText::Outlines).is_empty());
+        assert!(
+            !render_svg(&scene, SvgText::Outlines, 300)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
 

@@ -73,7 +73,7 @@ def _axes(*, log: bool = False) -> AnyAxes:
 def _native(x: int = LINEAR, y: int = LINEAR) -> _umber.Figure:
     fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
     fig.add_axes(*ONLY_CELL, x, 10.0, y, 10.0)
-    fig.line(0, 0, _floats(1, 2, 3), _floats(1, 10, 100), "", AUTO, 0, NO_SIZE)
+    fig.line(0, 0, _floats(1, 2, 3), _floats(1, 10, 100), "", AUTO, 0, NO_SIZE, 0)
     return fig
 
 
@@ -588,7 +588,7 @@ def test_custom_ticks_match_the_native_figure() -> None:
     native_fig = _native()
     native_fig.xticks(0, 0, _floats(1, 1.5, 3))
     native_fig.yticks(0, 0, _floats(0, 25, 100))
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     assert fig.to_svg() != _svg(lambda ax: ax)
 
@@ -601,7 +601,7 @@ def test_labeled_ticks_match_the_native_figure() -> None:
     native_fig = _native()
     native_fig.xticks_labeled(0, 0, _floats(1, 3), ["start", "end"])
     native_fig.yticks_labeled(0, 0, _floats(0, 100), ["none", "all"])
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = _svg(lambda ax: ax.xticks([1, 3]).yticks([0, 100]))
     assert fig.to_svg() != plain
@@ -629,7 +629,7 @@ def test_each_format_matches_the_native_figure(
     native_fig = _native(scale, scale)
     native_fig.xtick_format(0, 0, arg)
     native_fig.ytick_format(0, 0, arg)
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     plain = ub.Figure(4, 3)
     plain.add_axes(x=kind, y=kind).line([1, 2, 3], [1, 10, 100])
     assert fig.to_svg() != plain.to_svg()
@@ -647,7 +647,7 @@ def test_a_format_applies_to_custom_positions() -> None:
     native_fig = _native()
     native_fig.xticks(0, 0, _floats(1, 2, 3))
     native_fig.xtick_format(0, 0, (1, 1, "", ""))
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
 
 
 def test_an_empty_tick_list_removes_the_ticks() -> None:
@@ -656,7 +656,7 @@ def test_an_empty_tick_list_removes_the_ticks() -> None:
     native_fig = _native()
     native_fig.xticks(0, 0, _floats())
     native_fig.yticks(0, 0, _floats())
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_svg() != _svg(lambda ax: ax)
     _axes().xticks_labeled([], [])
 
@@ -719,7 +719,7 @@ def test_native_checks_report_the_core_errors() -> None:
 
 def test_native_methods_report_the_core_errors_and_store_nothing() -> None:
     fig = _native()
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     with pytest.raises(ub.StyleError) as caught:
         fig.xticks(0, 0, _floats(2, 1))
     assert str(caught.value).startswith("Axes.xticks(): positions[1] is 1 but positions[0] is 2")
@@ -727,7 +727,7 @@ def test_native_methods_report_the_core_errors_and_store_nothing() -> None:
         fig.yticks_labeled(0, 0, _floats(1, 2), ["a"])
     with pytest.raises(ub.StyleError):
         fig.xtick_format(0, 0, (1, 13, "", ""))
-    assert fig.to_svg(OUTLINES) == before
+    assert fig.to_svg(OUTLINES, 300) == before
     fig.xticks_labeled(0, 0, _floats(1, 2), ["a", "b"])
     with pytest.raises(ub.UsageError):
         fig.xtick_format(0, 0, (1, 1, "", ""))

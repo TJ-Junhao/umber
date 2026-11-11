@@ -340,6 +340,7 @@ fn grouped_scatters_label_each_group_in_its_readable_color() {
                 ..PointLabels::default()
             },
             false,
+            umber_core::MarkRender::Vector,
         )
         .unwrap();
     let scene = render(&f);
@@ -388,8 +389,11 @@ fn png_svg_and_pdf_agree_on_the_moved_text_color() {
     let label = text(&scene, "3.2");
     assert_ne!(label.color, theme.palette()[2], "the third color moves");
     for mode in [SvgText::Editable, SvgText::Outlines] {
-        let svg = f.to_svg(mode).unwrap();
-        assert_eq!(svg, umber_core::render::render_svg(&scene, mode));
+        let svg = f.to_svg(mode, 300).unwrap();
+        assert_eq!(
+            svg,
+            umber_core::render::render_svg(&scene, mode, 300).unwrap()
+        );
         let hex = format!(
             "fill=\"#{:02X}{:02X}{:02X}\"",
             label.color.r, label.color.g, label.color.b
@@ -398,8 +402,8 @@ fn png_svg_and_pdf_agree_on_the_moved_text_color() {
     }
     let png = f.to_png(144).unwrap();
     assert_eq!(png, umber_core::render::render_png(&scene, 144).unwrap());
-    let pdf = f.to_pdf().unwrap();
-    assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+    let pdf = f.to_pdf(300).unwrap();
+    assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
     if pdf_check::have("pdftoppm") {
         let dir = pdf_check::scratch("series-text");
         let path = pdf_check::write(&dir, "labels.pdf", &pdf);

@@ -544,9 +544,10 @@ mod tests {
             .area(
                 nums(&[0.0, 1.0]),
                 &[1.0, 2.0],
-                LineOptions {
+                crate::model::AreaOptions {
+                    label: "Thin area".to_owned(),
                     width: SizeSpec::pt(0.5).unwrap(),
-                    ..line("Thin area", Dash::Solid)
+                    ..crate::model::AreaOptions::default()
                 },
             )
             .unwrap()

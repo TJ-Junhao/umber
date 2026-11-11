@@ -32,7 +32,7 @@
 //!         },
 //!     )?;
 //!
-//! let svg = figure.to_svg(SvgText::Editable)?;
+//! let svg = figure.to_svg(SvgText::Editable, 300)?;
 //! assert!(svg.starts_with("<svg") && svg.contains(">Signal</text>"));
 //!
 //! let png = figure.to_png(144)?;
@@ -70,7 +70,8 @@
 //! - numeric cells: [`MeshOptions`], [`Hist2dOptions`] and [`HexbinOptions`], with the
 //!   read-only [`MeshMark`], [`Hist2dMark`] and [`HexbinMark`] payloads of [`Mark`], and
 //!   [`Render`], which draws the cells of heatmaps, 2-D histograms and meshes as vector shapes
-//!   or as one image;
+//!   or as one image, and [`MarkRender`], which draws a scatter, a line or a tripcolor as one
+//!   image in SVG and PDF output;
 //! - contours: [`ContourOptions`] with its [`ContourLevels`], [`ContourStyle`] and level limit
 //!   [`MAX_LEVELS`], and the read-only [`ContourMark`] payload of [`Mark`];
 //! - vector fields: [`FieldVectors`] with its [`FieldForm`], [`QuiverOptions`] with its
@@ -220,7 +221,7 @@ pub use figure::{ErrorBarMark, ErrorBarOptions, ErrorBarOrientation, ErrorRange}
 pub use figure::{EventsMark, EventsOptions, StripMark, StripOptions, SwarmMark, SwarmOptions};
 pub use figure::{HeatmapMark, HeatmapOptions};
 pub use figure::{
-    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions, Render,
+    HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MarkRender, MeshMark, MeshOptions, Render,
 };
 pub use figure::{Panel, PieAxesMut, PieOptions, PiePanel};
 pub use figure::{StemMark, StemOptions};

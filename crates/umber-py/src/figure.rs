@@ -30,8 +30,8 @@ use umber_core::HeatmapOptions;
 use umber_core::{Align, AnnotateOptions, InPlot, Place, PointLabels, TextOptions, ValueLabels};
 use umber_core::{
     AreaOptions, AxesMut, BandOptions, BarOptions, Dash, ErrorBarOptions, Grid, GridIndex,
-    HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, Marker, Placement,
-    RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
+    HistOptions, LegendMode, LegendPosition, LegendStyle, LineOptions, MarkRender, Marker,
+    Placement, RuleOptions, ScatterOptions, Series, Share, SpanOptions, Step, StepOptions, SvgText,
 };
 use umber_core::{ArrowKey, ArrowLength, BarbOptions, Direction, FieldForm, FieldVectors, Pivot};
 use umber_core::{AxisValue, BoxOptions, Distribution, StemOptions, time_from_micros};
@@ -266,13 +266,15 @@ pub(crate) fn grid_cells(rows: i64, cols: i64, count: i64) -> PyResult<Vec<(usiz
     Ok(cells.into_iter().map(|cell| (cell.row, cell.col)).collect())
 }
 
-/// Renders `figures` as one PDF with the interpreter released. Errors are reported in the
-/// context of `save_pdf()` when `file` is set, and of `to_pdf()` otherwise.
+/// Renders `figures` as one PDF with the interpreter released, their marks drawn as images at
+/// `raster_dpi`. Errors are reported in the context of `save_pdf()` when `file` is set, and of
+/// `to_pdf()` otherwise.
 #[pyfunction]
 pub(crate) fn pdf_pages<'py>(
     py: Python<'py>,
     figures: Vec<Bound<'py, Figure>>,
     file: bool,
+    raster_dpi: i64,
 ) -> PyResult<Bound<'py, PyBytes>> {
     let snapshots = figures
         .iter()
@@ -282,7 +284,7 @@ pub(crate) fn pdf_pages<'py>(
     let pdf = py
         .detach(move || {
             let figures: Vec<&umber_core::Figure> = snapshots.iter().collect();
-            umber_core::pdf_pages(&figures)
+            umber_core::pdf_pages(&figures, raster_dpi)
         })
         .map_err(|err| core_error(err.with_context(context)))?;
     Ok(PyBytes::new(py, &pdf))
@@ -343,23 +345,32 @@ impl Figure {
         Ok(PyBytes::new(py, &png))
     }
 
-    /// Renders the figure as an SVG document with the interpreter released. Errors are
-    /// reported in `context`.
-    fn svg(slf: &Bound<'_, Self>, text: i64, context: &'static str) -> PyResult<String> {
+    /// Renders the figure as an SVG document with the interpreter released, its marks drawn as
+    /// images at `raster_dpi`. Errors are reported in `context`.
+    fn svg(
+        slf: &Bound<'_, Self>,
+        text: i64,
+        raster_dpi: i64,
+        context: &'static str,
+    ) -> PyResult<String> {
         let text = enum_value::<SvgText>(text)?;
         let figure = Self::snapshot(slf)?;
         slf.py()
-            .detach(move || figure.to_svg(text))
+            .detach(move || figure.to_svg(text, raster_dpi))
             .map_err(|err| core_error(err.with_context(context)))
     }
 
-    /// Renders the figure as a PDF with the interpreter released. Errors are reported in
-    /// `context`.
-    fn pdf<'py>(slf: &Bound<'py, Self>, context: &'static str) -> PyResult<Bound<'py, PyBytes>> {
+    /// Renders the figure as a PDF with the interpreter released, its marks drawn as images at
+    /// `raster_dpi`. Errors are reported in `context`.
+    fn pdf<'py>(
+        slf: &Bound<'py, Self>,
+        raster_dpi: i64,
+        context: &'static str,
+    ) -> PyResult<Bound<'py, PyBytes>> {
         let figure = Self::snapshot(slf)?;
         let py = slf.py();
         let pdf = py
-            .detach(move || figure.to_pdf())
+            .detach(move || figure.to_pdf(raster_dpi))
             .map_err(|err| core_error(err.with_context(context)))?;
         Ok(PyBytes::new(py, &pdf))
     }
@@ -823,7 +834,7 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds a line.
+    /// Adds a line; `render` is a `Render` value.
     fn line(
         &mut self,
         row: AxesRow,
@@ -834,6 +845,7 @@ impl Figure {
         color: ColorArg,
         dash: i64,
         width: SizeArg,
+        render: i64,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.line()";
         let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
@@ -842,7 +854,7 @@ impl Figure {
             color: color_spec(color)?,
             dash: enum_value::<Dash>(dash)?,
             width: size_spec(width)?,
-            ..Default::default()
+            render: enum_value::<MarkRender>(render)?,
         };
         self.axes(row, col)?
             .line_shared(x, y, options)
@@ -877,7 +889,8 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds a scatter series; `x` and `y` each hold numbers, or names on a category axis.
+    /// Adds a scatter series; `x` and `y` each hold numbers, or names on a category axis, and
+    /// `render` is a `Render` value.
     fn scatter(
         &mut self,
         row: AxesRow,
@@ -895,6 +908,7 @@ impl Figure {
         x_error: ErrorArgs<'_>,
         y_error: ErrorArgs<'_>,
         connect: bool,
+        render: i64,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.scatter()";
         let (x, y) = (series_data(CONTEXT, "x", x)?, series_data(CONTEXT, "y", y)?);
@@ -907,6 +921,7 @@ impl Figure {
             x_error: error_range(CONTEXT, "x_error", x_error)?,
             y_error: error_range(CONTEXT, "y_error", y_error)?,
             connect,
+            render: enum_value::<MarkRender>(render)?,
         };
         self.axes(row, col)?
             .scatter_shared(x, y, options)
@@ -1520,14 +1535,15 @@ impl Figure {
         Self::png(slf, dpi, "Figure.to_png()")
     }
 
-    /// Renders the figure as an SVG document, with text as `text` (an `SvgText` value).
-    fn to_svg(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
-        Self::svg(slf, text, "Figure.to_svg()")
+    /// Renders the figure as an SVG document, with text as `text` (an `SvgText` value) and the
+    /// marks drawn as images at `raster_dpi`.
+    fn to_svg(slf: &Bound<'_, Self>, text: i64, raster_dpi: i64) -> PyResult<String> {
+        Self::svg(slf, text, raster_dpi, "Figure.to_svg()")
     }
 
-    /// Renders the figure as a PDF document.
-    fn to_pdf<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyBytes>> {
-        Self::pdf(slf, "Figure.to_pdf()")
+    /// Renders the figure as a PDF document, with the marks drawn as images at `raster_dpi`.
+    fn to_pdf<'py>(slf: &Bound<'py, Self>, raster_dpi: i64) -> PyResult<Bound<'py, PyBytes>> {
+        Self::pdf(slf, raster_dpi, "Figure.to_pdf()")
     }
 
     /// Renders the figure as a PNG at `dpi` for `Figure.save_png()`, which reports its errors.
@@ -1536,13 +1552,13 @@ impl Figure {
     }
 
     /// Renders the figure as an SVG document for `Figure.save_svg()`, which reports its errors.
-    fn svg_for_file(slf: &Bound<'_, Self>, text: i64) -> PyResult<String> {
-        Self::svg(slf, text, "Figure.save_svg()")
+    fn svg_for_file(slf: &Bound<'_, Self>, text: i64, raster_dpi: i64) -> PyResult<String> {
+        Self::svg(slf, text, raster_dpi, "Figure.save_svg()")
     }
 
     /// Renders the figure as a PDF document for `Figure.save_pdf()`, which reports its errors.
-    fn pdf_for_file<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyBytes>> {
-        Self::pdf(slf, "Figure.save_pdf()")
+    fn pdf_for_file<'py>(slf: &Bound<'py, Self>, raster_dpi: i64) -> PyResult<Bound<'py, PyBytes>> {
+        Self::pdf(slf, raster_dpi, "Figure.save_pdf()")
     }
 
     /// Replaces the axes' colorbar label and optional overrides.
@@ -1801,8 +1817,8 @@ impl Figure {
     }
 
     /// Adds the triangles of a mesh filled by value: `triangles` as for `triplot`, `on` a
-    /// `TriValues` value.
-    #[pyo3(signature = (row, col, x, y, triangles, values, on, cmap, scale, base, center))]
+    /// `TriValues` value and `render` a `Render` value.
+    #[pyo3(signature = (row, col, x, y, triangles, values, on, cmap, scale, base, center, render))]
     fn tripcolor(
         &mut self,
         row: AxesRow,
@@ -1816,6 +1832,7 @@ impl Figure {
         scale: i64,
         base: f64,
         center: Option<f64>,
+        render: i64,
     ) -> PyResult<()> {
         let given = triangles.map(index_triples).transpose()?;
         let triangles = given.as_deref().map_or(Triangles::Auto, Triangles::Given);
@@ -1824,6 +1841,7 @@ impl Figure {
             cmap: cmap_choice(cmap),
             scale: color_transform(scale, base)?,
             center,
+            render: enum_value::<MarkRender>(render)?,
         };
         let (x, y, values) = (floats(x)?, floats(y)?, floats(values)?);
         self.axes(row, col)?
@@ -2421,7 +2439,8 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds named lines atomically, with palette colors in group order.
+    /// Adds named lines atomically, with palette colors in group order; `render` is a
+    /// `Render` value.
     fn grouped_line(
         &mut self,
         row: AxesRow,
@@ -2429,11 +2448,13 @@ impl Figure {
         groups: XyGroupArgs<'_>,
         dash: i64,
         width: SizeArg,
+        render: i64,
     ) -> PyResult<()> {
         let groups = xy_groups("Axes.line()", groups)?;
         let (dash, width) = (enum_value::<Dash>(dash)?, size_spec(width)?);
+        let render = enum_value::<MarkRender>(render)?;
         self.axes(row, col)?
-            .grouped_line(groups, dash, width)
+            .grouped_line(groups, dash, width, render)
             .map(drop)
             .map_err(core_error)
     }
@@ -2455,7 +2476,8 @@ impl Figure {
             .map_err(core_error)
     }
 
-    /// Adds named scatter series atomically, with palette colors in group order.
+    /// Adds named scatter series atomically, with palette colors in group order; `render` is a
+    /// `Render` value.
     fn grouped_scatter(
         &mut self,
         row: AxesRow,
@@ -2468,12 +2490,14 @@ impl Figure {
         label_size: SizeArg,
         place: i64,
         connect: bool,
+        render: i64,
     ) -> PyResult<()> {
         let groups = scatter_groups("Axes.scatter()", groups)?;
         let (marker, size) = (enum_value::<Marker>(marker)?, size_spec(size)?);
         let labels = point_labels(annotate, format, label_size, place)?;
+        let render = enum_value::<MarkRender>(render)?;
         self.axes(row, col)?
-            .grouped_scatter(groups, marker, size, labels, connect)
+            .grouped_scatter(groups, marker, size, labels, connect, render)
             .map(drop)
             .map_err(core_error)
     }

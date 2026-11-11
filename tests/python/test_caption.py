@@ -224,7 +224,7 @@ def test_caption_matches_native_rendering() -> None:
     expected.figure_caption("Note", (0, 0.0))
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     expected.title(0, 0, "Panel", (0, 0.0))
-    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
+    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value, 300)
 
 
 def test_an_annotation_cannot_reach_into_the_caption() -> None:

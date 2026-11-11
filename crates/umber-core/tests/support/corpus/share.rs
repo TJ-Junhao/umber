@@ -205,7 +205,9 @@ fn state(rec: &mut Log, f: &Figure, before: &Figure, lib: &FontLibrary) {
         umber_core::render::render_svg(
             &f.to_scene(lib).unwrap(),
             umber_core::render::SvgText::Editable,
+            300,
         )
+        .unwrap()
     };
     rec.raw(&format!(
         "figure unchanged={} svg unchanged={}\n",

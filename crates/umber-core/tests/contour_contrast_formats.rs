@@ -67,7 +67,7 @@ fn contrasting_contour_lines_agree_in_png_svg_and_pdf() {
 
         // SVG: each line's color and width, in both text modes.
         for text in [SvgText::Editable, SvgText::Outlines] {
-            let svg = f.to_svg(text).unwrap();
+            let svg = f.to_svg(text, 300).unwrap();
             for (_, style) in &strokes {
                 let attributes =
                     format!(r#"stroke="{}" stroke-width="1.25""#, style.color.to_hex());
@@ -100,8 +100,8 @@ fn contrasting_contour_lines_agree_in_png_svg_and_pdf() {
         );
 
         // PDF: the same scene; each line stroked in its color at its width.
-        let pdf = f.to_pdf().unwrap();
-        assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+        let pdf = f.to_pdf(300).unwrap();
+        assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
         let content = pdf_check::page_content(&pdf);
         let lines: Vec<_> = content.lines().collect();
         let pdf_colors: Vec<Vec<f32>> = lines

@@ -77,7 +77,7 @@ def test_figure_text_matches_native_rendering() -> None:
     expected.figure_subtitle("Figure subtitle", (0, 0.0))
     expected.add_axes(0, 0, 0, 0, 1, 1, 0, 10.0, 0, 10.0)
     expected.title(0, 0, "Panel", (0, 0.0))
-    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
+    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value, 300)
 
 
 @pytest.mark.parametrize("name", ["title", "subtitle"])

@@ -211,7 +211,7 @@ fn highlighted_labels_are_set_in_the_bold_face() {
         width(&bold),
         width(&plain)
     );
-    let svg = bold.to_svg(SvgText::Editable).unwrap();
+    let svg = bold.to_svg(SvgText::Editable, 300).unwrap();
     assert!(
         svg.contains(r#"font-weight="600""#) && svg.contains(">Washing machine</text>"),
         "the label stays editable text in the bold weight"
@@ -1054,7 +1054,7 @@ fn png_svg_and_pdf_agree() {
 
         // SVG: the four highlighted labels stay text in the bold weight and emphasis color,
         // in editable mode; both modes stroke the outlines and edges.
-        let editable = f.to_svg(SvgText::Editable).unwrap();
+        let editable = f.to_svg(SvgText::Editable, 300).unwrap();
         let fill = format!(r#"fill="{}""#, emphasis.to_hex());
         let bold_labels = editable
             .lines()
@@ -1066,7 +1066,7 @@ fn png_svg_and_pdf_agree() {
             .count();
         assert_eq!(bold_labels, 4, "{name}");
         for mode in [SvgText::Editable, SvgText::Outlines] {
-            let svg = f.to_svg(mode).unwrap();
+            let svg = f.to_svg(mode, 300).unwrap();
             let outline = format!(r#"stroke="{}" stroke-width="1.5""#, emphasis.to_hex());
             assert_eq!(svg.matches(&outline).count(), 2, "{name} {mode:?}");
             // Six edges between the four rows and the four columns; the colorbar may draw
@@ -1075,13 +1075,17 @@ fn png_svg_and_pdf_agree() {
                 r#"stroke="{}" stroke-width="0.5""#,
                 Theme::pigment().grid_color().to_hex()
             );
-            let others = without_edges.to_svg(mode).unwrap().matches(&edge).count();
+            let others = without_edges
+                .to_svg(mode, 300)
+                .unwrap()
+                .matches(&edge)
+                .count();
             assert_eq!(svg.matches(&edge).count(), others + 6, "{name} {mode:?}");
         }
 
         // PDF: the same scene, the bold face embedded for the labels.
-        let pdf = f.to_pdf().unwrap();
-        assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+        let pdf = f.to_pdf(300).unwrap();
+        assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
         let body = String::from_utf8_lossy(&pdf);
         let base_fonts: Vec<&str> = body
             .match_indices("/BaseFont /")

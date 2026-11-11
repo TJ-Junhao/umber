@@ -14,7 +14,7 @@ from umber._args import instance
 from umber._axes import Axes
 from umber._color import Color
 from umber._color_by import ColorBy
-from umber._enums import AUTO, Auto, Dash, Hist, Marker, Place, Stat
+from umber._enums import AUTO, Auto, Dash, Hist, Marker, Place, Render, Stat
 from umber._figure import Figure
 from umber._pie import PieAxes
 from umber._report import api_call
@@ -96,6 +96,7 @@ def line(
     width: Size = Size.AUTO,
     theme: Theme = Theme.PIGMENT,
     by: Values[str] | Auto = AUTO,
+    render: Render = Render.VECTOR,
 ) -> Axes[float, float]:
     """Plot a line on a new figure and return its axes.
 
@@ -114,6 +115,8 @@ def line(
             appearance, supplying their labels and palette colors. Do not pass an explicit
             color or a non-empty label. Missing or empty names and an empty grouping column
             are refused.
+        render: ``Render.RASTER`` draws the line as one image in SVG and PDF output, as in
+            ``Axes.line()``.
 
     Returns:
         The axes of the new figure.
@@ -135,7 +138,9 @@ def line(
     with api_call():
         instance("line()", "theme", theme, Theme, _THEME_HINT)
         axes = Figure(theme=theme).add_axes()
-        return axes.line(x, y, by=by, label=label, color=color, dash=dash, width=width)
+        return axes.line(
+            x, y, by=by, label=label, color=color, dash=dash, width=width, render=render
+        )
 
 
 def scatter(
@@ -155,6 +160,7 @@ def scatter(
     x_error: tuple[Values[float], Values[float]] | Auto = AUTO,
     y_error: tuple[Values[float], Values[float]] | Auto = AUTO,
     connect: bool = False,
+    render: Render = Render.VECTOR,
 ) -> Axes[float, float]:
     """Plot a marker at each point on a new figure and return its axes.
 
@@ -184,6 +190,8 @@ def scatter(
         y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
             ``Axes.scatter()``.
         connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
+        render: ``Render.RASTER`` draws the markers as one image in SVG and PDF output, as in
+            ``Axes.scatter()``.
 
     Returns:
         The axes of the new figure.
@@ -227,6 +235,7 @@ def scatter(
             x_error=x_error,
             y_error=y_error,
             connect=connect,
+            render=render,
         )
 
 

@@ -26,6 +26,7 @@ mod marker;
 mod marks;
 mod oracle;
 mod raster;
+mod raster_marks;
 mod rule;
 mod scatter;
 mod stacked_area;
@@ -107,7 +108,7 @@ fn chrome_snapshot() {
     // The snapshot file is kept in `src/snapshots`, under the name of this module path.
     let snapshot_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/snapshots");
     insta::with_settings!({ snapshot_path => snapshot_path }, {
-        insta::assert_snapshot!(render_svg(&scene, SvgText::Editable));
+        insta::assert_snapshot!(render_svg(&scene, SvgText::Editable, 300).unwrap());
     });
 }
 

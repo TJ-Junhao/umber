@@ -421,6 +421,6 @@ fn violin_coverage_counts_density_and_quantile_lines() {
             ..candidate
         };
         assert_eq!(prepared.coverage(&layout.plot, &outside), 0.0);
-        assert!(!f.to_svg(crate::SvgText::Editable).unwrap().is_empty());
+        assert!(!f.to_svg(crate::SvgText::Editable, 300).unwrap().is_empty());
     }
 }

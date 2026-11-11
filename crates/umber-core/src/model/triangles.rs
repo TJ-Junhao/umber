@@ -163,6 +163,9 @@ pub struct TripcolorOptions {
     pub scale: Transform,
     /// The middle value of a symmetric, linear diverging mapping.
     pub center: Option<f64>,
+    /// Whether SVG and PDF output draw the triangles as vector shapes or as one image (see
+    /// [`MarkRender`](crate::MarkRender)); vector shapes by default.
+    pub render: crate::MarkRender,
 }
 
 impl Default for TripcolorOptions {
@@ -172,6 +175,7 @@ impl Default for TripcolorOptions {
             cmap: CmapChoice::Theme,
             scale: Transform::Linear,
             center: None,
+            render: crate::MarkRender::Vector,
         }
     }
 }
@@ -190,7 +194,8 @@ impl Default for TripcolorOptions {
 /// edge of a blank triangle, grow by half the hairline, 0.375 pt. Triangles are drawn by value,
 /// lowest first, so where triangles overlap the higher value is on top, whatever else the mesh
 /// holds; triangles of one color drawn one after another are one filled and one stroked path,
-/// two scene items per color. The mesh is always drawn as vector shapes.
+/// two scene items per color. SVG and PDF output draw the mesh as vector shapes, or as one image
+/// when its options ask for one ([`TripcolorOptions::render`]).
 /// Automatic limits are the extent of the points, without padding.
 ///
 /// # Examples

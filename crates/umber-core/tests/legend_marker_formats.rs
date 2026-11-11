@@ -74,12 +74,12 @@ fn marker_swatches_agree_in_png_svg_and_pdf() {
 
         for text in [SvgText::Editable, SvgText::Outlines] {
             assert_eq!(
-                f.to_svg(text).unwrap(),
-                umber_core::render::render_svg(&scene, text)
+                f.to_svg(text, 300).unwrap(),
+                umber_core::render::render_svg(&scene, text, 300).unwrap()
             );
         }
-        let pdf = f.to_pdf().unwrap();
-        assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+        let pdf = f.to_pdf(300).unwrap();
+        assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
         if poppler {
             let dir = pdf_check::scratch(&format!("legend-marker-{marker:?}"));
             let path = pdf_check::write(&dir, "legend.pdf", &pdf);

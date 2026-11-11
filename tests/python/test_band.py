@@ -420,7 +420,7 @@ def test_a_band_matches_the_native_figure(theme: ub.Theme, native_theme: Any) ->
     native_fig = _umber.Figure(4.0, 3.0, native_theme(), *ONE_CELL)
     native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     native_fig.band(0, 0, floats(0, 1, 2, 3), floats(1, 2, NAN, 1), floats(3, 4, 5, 3), "a", AUTO)
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
 
 

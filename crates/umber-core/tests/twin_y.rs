@@ -104,8 +104,8 @@ fn twin_baseline_rejects_shown_without_changing_either_axes() {
 #[test]
 fn twin_pdf_is_valid_and_matches_png() {
     let f = figure().unwrap();
-    let pdf = f.to_pdf().unwrap();
-    assert_eq!(pdf, f.to_pdf().unwrap());
+    let pdf = f.to_pdf(300).unwrap();
+    assert_eq!(pdf, f.to_pdf(300).unwrap());
     let dir = pdf_check::scratch("twin-y");
     let path = pdf_check::write(&dir, "axes.pdf", &pdf);
     if pdf_check::have("qpdf") {
@@ -120,5 +120,9 @@ fn twin_pdf_is_valid_and_matches_png() {
     if pdf_check::have("pdftoppm") {
         pdf_check::assert_matches_png(&path, &f.to_png(144).unwrap(), 144);
     }
-    assert!(f.to_svg(SvgText::Editable).unwrap().contains("Right units"));
+    assert!(
+        f.to_svg(SvgText::Editable, 300)
+            .unwrap()
+            .contains("Right units")
+    );
 }

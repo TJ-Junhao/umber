@@ -209,8 +209,8 @@ fn contour_degenerate_grids() {
             ..ContourOptions::default()
         },
     );
-    let first = saddle.to_svg(SvgText::Editable).unwrap();
-    assert_eq!(saddle.to_svg(SvgText::Editable).unwrap(), first);
+    let first = saddle.to_svg(SvgText::Editable, 300).unwrap();
+    assert_eq!(saddle.to_svg(SvgText::Editable, 300).unwrap(), first);
     assert_eq!(stroke_count(&mark_items(&scene(&saddle))), 3);
 }
 
@@ -401,7 +401,7 @@ fn level_labels_sit_on_long_lines_and_break_them() {
     };
     assert!(pieces(&items) > pieces(&mark_items(&plain)));
     // In SVG as editable text, each label is turned about its origin.
-    let svg = f.to_svg(SvgText::Editable).unwrap();
+    let svg = f.to_svg(SvgText::Editable, 300).unwrap();
     assert_eq!(
         svg.matches("transform=\"rotate(").count(),
         labels.iter().filter(|(_, a)| *a != 0.0).count()

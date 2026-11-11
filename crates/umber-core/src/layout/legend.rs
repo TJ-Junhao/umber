@@ -1178,7 +1178,11 @@ mod tests {
             .area(
                 x(),
                 &[0.5, 1.0],
-                line("Thin", Dash::Solid, SizeSpec::pt(0.5).unwrap()),
+                crate::model::AreaOptions {
+                    label: "Thin".into(),
+                    width: SizeSpec::pt(0.5).unwrap(),
+                    ..crate::model::AreaOptions::default()
+                },
             )
             .unwrap()
             .scatter(
@@ -2025,6 +2029,10 @@ mod tests {
                 if as_areas {
                     axes.area(x, y, options).unwrap();
                 } else {
+                    let options = LineOptions {
+                        label: options.label,
+                        ..LineOptions::default()
+                    };
                     axes.line(x, y, options).unwrap();
                 }
             }

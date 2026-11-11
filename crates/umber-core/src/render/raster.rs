@@ -1,0 +1,795 @@
+//! Items drawn as one image in SVG and PDF output ([`Item::Raster`]): the pixel grid of the
+//! image, and its pixels, drawn by the PNG backend.
+//!
+//! The image lies on the grid of device pixels that a PNG of the scene at the raster resolution
+//! has: it covers the item's rectangle widened outward to whole pixels of that grid and then to
+//! a grid of quarter inches from the page's corner ([`aligned`]), and cut to the scene. Its pixels are those the PNG backend draws for the items there, on a transparent
+//! background ([`super::png::draw_region`]), so at the raster resolution the image is what a PNG
+//! shows of the items, and the edges of the shapes are antialiased as in a PNG. The image is not
+//! clipped while it is drawn: it reaches past the rectangle by less than a pixel, and the clip
+//! of the groups around the item cuts it exactly where it cuts vector shapes, antialiased by the
+//! viewer as theirs are. Fully transparent pixels take the color of the nearest drawn pixel
+//! ([`pad_transparent`]), so viewers that scale colors and alpha apart draw no dark halos.
+//!
+//! An image is at most as large as a PNG may be: 32,767 pixels per side and 2^26 pixels in all,
+//! and a larger one fails with `Error::Style`. Its pixmap takes 4 bytes per pixel, 256 MiB at
+//! that limit. Writing it takes up to about four times as much again for an image that does not
+//! compress (the PNG encodings and base64 text of an SVG `<image>`, the color and alpha samples
+//! of a PDF image and their compressed streams); the images of marks, mostly transparent,
+//! compress to a small part of their pixmap.
+
+use super::normalize::{clip_is_valid, valid_point};
+use super::png::{DeviceOrigin, MAX_PIXELS, MAX_SIDE, draw_region};
+use crate::error::{Error, Result};
+use crate::geometry::Point;
+use crate::scene::{Item, MAX_GROUP_DEPTH, Rect};
+
+/// An [`Item::Raster`] drawn: the rectangle its image covers, in points, the image's size in
+/// pixels, and its pixels, row by row from the top, as straight (not premultiplied) RGBA bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RasterImage {
+    /// The rectangle the pixels cover, in points: whole pixels of the device grid.
+    pub(super) rect: Rect,
+    /// The number of pixel columns and rows.
+    pub(super) size: (u32, u32),
+    /// `4 * columns * rows` bytes, RGBA, not premultiplied; a fully transparent pixel has the
+    /// color of the nearest pixel that is not ([`pad_transparent`]).
+    pub(super) rgba: Vec<u8>,
+}
+
+/// Gives every fully transparent pixel of `rgba`, `width` by `height` pixels of four bytes of
+/// straight RGBA, the color of the nearest pixel that is not fully transparent, by city-block
+/// distance (steps between edge neighbours); its alpha stays 0. Of equally near pixels it takes
+/// the one a scan from the top-left reaches first, then the one a scan from the bottom-right
+/// reaches first, so the same pixels always give the same colors.
+///
+/// Viewers scale the colors and the alpha of an image apart, as the PDF soft mask and the
+/// straight samples of a PNG store them: a transparent pixel's color is averaged in as if it
+/// were opaque. Transparent black would darken every edge as a halo; the color of the nearest
+/// drawn pixel keeps edges their own color at any scale.
+///
+/// Two scans give the exact distance: the first takes each pixel's left and upper neighbours,
+/// the second its right and lower ones. A side is at most 32,767 pixels, so every distance
+/// fits a `u16`.
+fn pad_transparent(rgba: &mut [u8], (width, height): (usize, usize)) {
+    let mut distance: Vec<u16> = rgba
+        .chunks_exact(4)
+        .map(|pixel| if pixel[3] == 0 { u16::MAX } else { 0 })
+        .collect();
+    let take = |rgba: &mut [u8], distance: &mut [u16], at: usize, from: usize| {
+        let reach = distance[from].saturating_add(1);
+        if reach < distance[at] {
+            distance[at] = reach;
+            rgba.copy_within(from * 4..from * 4 + 3, at * 4);
+        }
+    };
+    for y in 0..height {
+        for x in 0..width {
+            let at = y * width + x;
+            if x > 0 {
+                take(rgba, &mut distance, at, at - 1);
+            }
+            if y > 0 {
+                take(rgba, &mut distance, at, at - width);
+            }
+        }
+    }
+    for y in (0..height).rev() {
+        for x in (0..width).rev() {
+            let at = y * width + x;
+            if x + 1 < width {
+                take(rgba, &mut distance, at, at + 1);
+            }
+            if y + 1 < height {
+                take(rgba, &mut distance, at, at + width);
+            }
+        }
+    }
+}
+
+/// The pixels of the device grid at `dpi` that an image covering `rect` takes on a scene of
+/// `scene` (width and height) points: the first column and row, and the number of columns and
+/// rows. `None` when `rect` cannot be drawn (not finite, not positive in size, or beyond the
+/// renderers' coordinate limit) or leaves nothing of the scene.
+fn pixel_region(rect: &Rect, scene: (f32, f32), dpi: u32) -> Option<(DeviceOrigin, (f64, f64))> {
+    let corner = Point {
+        x: rect.x + rect.width,
+        y: rect.y + rect.height,
+    };
+    if !clip_is_valid(rect)
+        || !valid_point(Point {
+            x: rect.x,
+            y: rect.y,
+        })
+        || !valid_point(corner)
+    {
+        return None;
+    }
+    // The grid of the PNG backend, `dpi / 72` pixels per point. Its own scale is the `f32`
+    // nearest to that; a shape that ends on a pixel edge in the exact scale may reach past it
+    // by a millionth of a pixel there, which draws nothing.
+    let s = f64::from(dpi) / 72.0;
+    let page = |side: f32| {
+        if side.is_finite() && side > 0.0 {
+            (f64::from(side) * s).ceil()
+        } else {
+            0.0
+        }
+    };
+    let left = (f64::from(rect.x) * s).floor().max(0.0);
+    let top = (f64::from(rect.y) * s).floor().max(0.0);
+    let right = ((f64::from(rect.x) + f64::from(rect.width)) * s)
+        .ceil()
+        .min(page(scene.0));
+    let bottom = ((f64::from(rect.y) + f64::from(rect.height)) * s)
+        .ceil()
+        .min(page(scene.1));
+    if left >= right || top >= bottom {
+        return None;
+    }
+    // Both corners are within the coordinate limit, so the grid coordinates fit an i32.
+    let origin = DeviceOrigin {
+        x: left as i32,
+        y: top as i32,
+    };
+    Some((origin, (right - left, bottom - top)))
+}
+
+/// The step, in pixels at `dpi`, of the grid the edges of an image of marks are aligned to: a
+/// quarter inch (18 pt) when that is a whole number of pixels, else half an inch, else an inch.
+fn alignment_step(dpi: u32) -> f64 {
+    let step = if dpi.is_multiple_of(4) {
+        dpi / 4
+    } else if dpi.is_multiple_of(2) {
+        dpi / 2
+    } else {
+        dpi
+    };
+    f64::from(step)
+}
+
+/// `region` (its origin and size in pixels at `dpi`) widened outward to
+/// the grid of [`alignment_step`] from the page's top-left corner, and cut to the scene of
+/// `scene` points; `region` itself when the widened image would be larger than a PNG may be.
+///
+/// PDF readers and browsers draw an image on their own pixel grid, which starts at the page's
+/// corner, and resample it there. An image whose edges lie on their grid lines is resampled in
+/// step with their pixels; one that starts a fraction of a pixel off is resampled out of step,
+/// which Poppler draws measurably farther from the shapes. At 72, 96, 100, 144, 200, 300 and
+/// 600 dpi a quarter inch is a whole number of pixels, so these edges lie on the readers' grid
+/// lines. The widening adds less than one step on each side.
+fn aligned(
+    (origin, (width, height)): (DeviceOrigin, (f64, f64)),
+    scene: (f32, f32),
+    dpi: u32,
+) -> (DeviceOrigin, (f64, f64)) {
+    let step = alignment_step(dpi);
+    let s = f64::from(dpi) / 72.0;
+    let page = |side: f32| {
+        if side.is_finite() && side > 0.0 {
+            (f64::from(side) * s).ceil()
+        } else {
+            0.0
+        }
+    };
+    let (left, top) = (f64::from(origin.x), f64::from(origin.y));
+    let (right, bottom) = (left + width, top + height);
+    let widened = [
+        (left / step).floor() * step,
+        (top / step).floor() * step,
+        ((right / step).ceil() * step).min(page(scene.0)).max(right),
+        ((bottom / step).ceil() * step)
+            .min(page(scene.1))
+            .max(bottom),
+    ];
+    let (w, h) = (widened[2] - widened[0], widened[3] - widened[1]);
+    if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS {
+        return (origin, (width, height));
+    }
+    // Whole numbers no further from zero than the region's own corners.
+    let origin = DeviceOrigin {
+        x: widened[0] as i32,
+        y: widened[1] as i32,
+    };
+    (origin, (w, h))
+}
+
+/// The box `[left, top, right, bottom]`, in points, that `items` can draw into: their paths,
+/// marker copies and text outlines, strokes widened by twice their width (the reach of a miter
+/// at the renderers' miter limit of 4), and images. Points that are not finite are left out;
+/// `None` when nothing is left. `depth` is the number of groups around `items`: as in the
+/// renderers, the content of a group or image item nested [`MAX_GROUP_DEPTH`] deep is not
+/// drawn, so it is not looked into either, which also bounds the recursion.
+fn reach(items: &[Item], depth: usize) -> Option<[f64; 4]> {
+    let mut out: Option<[f64; 4]> = None;
+    let mut add = |left: f32, top: f32, right: f32, bottom: f32, grow: f32| {
+        let side = [left - grow, top - grow, right + grow, bottom + grow].map(f64::from);
+        if side.iter().all(|v| v.is_finite()) {
+            out = Some(out.map_or(side, |[l, t, r, b]| {
+                [
+                    l.min(side[0]),
+                    t.min(side[1]),
+                    r.max(side[2]),
+                    b.max(side[3]),
+                ]
+            }));
+        }
+    };
+    let stroke_reach = |style: Option<&crate::scene::StrokeStyle>| {
+        style.map_or(0.0, |style| 2.0 * style.width.abs())
+    };
+    for item in items {
+        match item {
+            Item::Fill { path, .. } => {
+                if let Some((min, max)) = path.bounds() {
+                    add(min.x, min.y, max.x, max.y, 0.0);
+                }
+            }
+            Item::Stroke { path, style } => {
+                if let Some((min, max)) = path.bounds() {
+                    add(min.x, min.y, max.x, max.y, stroke_reach(Some(style)));
+                }
+            }
+            Item::Markers {
+                shape,
+                stroke,
+                positions,
+                ..
+            } => {
+                let Some((min, max)) = shape.bounds() else {
+                    continue;
+                };
+                let grow = stroke_reach(stroke.as_ref());
+                for p in positions.iter().filter(|p| valid_point(**p)) {
+                    add(min.x + p.x, min.y + p.y, max.x + p.x, max.y + p.y, grow);
+                }
+            }
+            Item::Text(text) | Item::RotatedText { text, .. } => {
+                if let Some((min, max)) = text.outline.bounds() {
+                    add(min.x, min.y, max.x, max.y, 0.0);
+                }
+            }
+            Item::Image { rect, .. } => {
+                add(
+                    rect.x,
+                    rect.y,
+                    rect.x + rect.width,
+                    rect.y + rect.height,
+                    0.0,
+                );
+            }
+            Item::Group { items, .. } | Item::Raster { items, .. } => {
+                if depth >= MAX_GROUP_DEPTH {
+                    continue;
+                }
+                if let Some([l, t, r, b]) = reach(items, depth + 1) {
+                    add(l as f32, t as f32, r as f32, b as f32, 0.0);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The pixmap the items of an image of `region` (its origin and size), inside `depth` groups,
+/// are drawn on, on a scene of `scene` points at `dpi`: the region, widened to everything the items draw ([`reach`]) as
+/// far as the pixels of a PNG of the scene, and as large as a PNG may be at most.
+///
+/// The PNG backend cuts a path at the edges of its pixmap before it rasterizes it, and the cut
+/// moves the ends of the path's edges by rounding; so a path cut at the edges of the image
+/// would not be drawn as in a PNG. Drawn on this pixmap, a path is cut where a PNG of the scene
+/// cuts it, or not at all, and the image is the PNG's pixels.
+fn canvas(
+    (items, depth): (&[Item], usize),
+    scene: (f32, f32),
+    dpi: u32,
+    (origin, (width, height)): (DeviceOrigin, (u32, u32)),
+) -> (DeviceOrigin, (u32, u32)) {
+    let region = [
+        f64::from(origin.x),
+        f64::from(origin.y),
+        f64::from(origin.x) + f64::from(width),
+        f64::from(origin.y) + f64::from(height),
+    ];
+    let Some([left, top, right, bottom]) = reach(items, depth) else {
+        return (origin, (width, height));
+    };
+    // The pixels of a PNG of the scene, as the PNG backend sizes it.
+    let page = |side: f32| (f64::from(side) / 72.0 * f64::from(dpi)).round().max(1.0);
+    let s = f64::from(dpi) / 72.0;
+    // Two pixels more on each side for antialiasing.
+    let drawn = [
+        (left * s).floor() - 2.0,
+        (top * s).floor() - 2.0,
+        (right * s).ceil() + 2.0,
+        (bottom * s).ceil() + 2.0,
+    ];
+    let bounds = [0.0, 0.0, page(scene.0), page(scene.1)];
+    let widened = [
+        region[0].min(drawn[0].max(bounds[0])),
+        region[1].min(drawn[1].max(bounds[1])),
+        region[2].max(drawn[2].min(bounds[2])),
+        region[3].max(drawn[3].min(bounds[3])),
+    ];
+    let (w, h) = (widened[2] - widened[0], widened[3] - widened[1]);
+    if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS {
+        return (origin, (width, height));
+    }
+    // Whole numbers within the coordinate limit and the PNG limits here.
+    let origin = DeviceOrigin {
+        x: widened[0] as i32,
+        y: widened[1] as i32,
+    };
+    (origin, (w as u32, h as u32))
+}
+
+/// The RGBA bytes of an image of `size` pixels, transparent but for the `inner` (columns, rows)
+/// pixels `rgba`, placed at `offset`.
+fn placed(
+    rgba: &[u8],
+    inner: (u32, u32),
+    (dx, dy): (i32, i32),
+    (width, height): (f64, f64),
+) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let (iw, ih) = (inner.0 as usize, inner.1 as usize);
+    let (dx, dy) = (dx as usize, dy as usize);
+    let mut out = vec![0; w * h * 4];
+    for row in 0..ih {
+        let to = ((dy + row) * w + dx) * 4;
+        out[to..to + iw * 4].copy_from_slice(&rgba[row * iw * 4..(row + 1) * iw * 4]);
+    }
+    out
+}
+
+/// The `size` pixels at `offset` of the RGBA bytes `rgba` of a pixmap `width` pixels wide.
+fn crop(rgba: &[u8], width: u32, (dx, dy): (i32, i32), (w, h): (u32, u32)) -> Vec<u8> {
+    let (width, dx, dy) = (width as usize, dx as usize, dy as usize);
+    let (w, h) = (w as usize, h as usize);
+    (0..h)
+        .flat_map(|row| {
+            let at = ((dy + row) * width + dx) * 4;
+            rgba[at..at + w * 4].iter().copied()
+        })
+        .collect()
+}
+
+/// The image of the items of an [`Item::Raster`] covering `rect`, on a scene of `scene` (width
+/// and height) points, at `dpi`, for a render whose errors have `context`. `depth` is the number
+/// of groups around the items, the item itself counted as one, as the PNG backend counts it.
+/// `Ok(None)` when there is nothing to draw: `rect` cannot be drawn or leaves nothing of the
+/// scene, or no pixel of the image is visible.
+///
+/// # Errors
+///
+/// `Error::Style` under `context`, with the parameter `raster_dpi`, when the image would have
+/// more than 32,767 pixels on a side or 2^26 pixels in all, or cannot be allocated.
+pub(super) fn raster_image(
+    rect: &Rect,
+    items: &[Item],
+    scene: (f32, f32),
+    dpi: u32,
+    context: &'static str,
+    depth: usize,
+) -> Result<Option<RasterImage>> {
+    let Some((origin, (width, height))) = pixel_region(rect, scene, dpi) else {
+        return Ok(None);
+    };
+    let too_large = |message: String| {
+        Error::style(context, message)
+            .with_parameter("raster_dpi")
+            .with_hint("use a lower raster_dpi, a smaller figure, or render=ub.Render.VECTOR.")
+    };
+    if width > MAX_SIDE || height > MAX_SIDE {
+        return Err(too_large(format!(
+            "a mark drawn as an image would be {width} by {height} pixels at raster_dpi {dpi}, \
+             over {MAX_SIDE} on one side."
+        )));
+    }
+    if width * height > MAX_PIXELS {
+        return Err(too_large(format!(
+            "a mark drawn as an image would have {} pixels at raster_dpi {dpi}, over \
+             {MAX_PIXELS}.",
+            width * height
+        )));
+    }
+    // Both are whole numbers in 1..=32767 here.
+    let size = (width as u32, height as u32);
+    let (canvas_origin, canvas_size) = canvas((items, depth), scene, dpi, (origin, size));
+    let Some(pixmap) = draw_region(items, dpi, canvas_origin, canvas_size, depth) else {
+        return Err(too_large(format!(
+            "a mark drawn as an image of {width} by {height} pixels at raster_dpi {dpi} cannot \
+             be allocated."
+        )));
+    };
+    let mut rgba = crop(
+        &pixmap.take_demultiplied(),
+        canvas_size.0,
+        (origin.x - canvas_origin.x, origin.y - canvas_origin.y),
+        size,
+    );
+    if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+        return Ok(None);
+    }
+    // The pixels around the region that the alignment adds are transparent.
+    let drawn = origin;
+    let (origin, (width, height)) = aligned((origin, (width, height)), scene, dpi);
+    if (origin, (width as u32, height as u32)) != (drawn, size) {
+        rgba = placed(
+            &rgba,
+            size,
+            (drawn.x - origin.x, drawn.y - origin.y),
+            (width, height),
+        );
+    }
+    let size = (width as u32, height as u32);
+    pad_transparent(&mut rgba, (size.0 as usize, size.1 as usize));
+    let s = f64::from(dpi) / 72.0;
+    let (left, top) = (f64::from(origin.x), f64::from(origin.y));
+    let rect = Rect {
+        x: (left / s) as f32,
+        y: (top / s) as f32,
+        width: (width / s) as f32,
+        height: (height / s) as f32,
+    };
+    Ok(Some(RasterImage { rect, size, rgba }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::color::Rgba;
+    use crate::geometry::Path;
+    use crate::render::png::render_png;
+    use crate::scene::{FillRule, LineCap, LineJoin, Paint, Scene, StrokeStyle};
+    use crate::test_support::image::decode_rgba8;
+
+    const CLEAR: Rgba = Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
+
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// Markers, a stroke and a fill that reach past `rect(10.3, 7.7, 50.0, 30.0)`.
+    fn items() -> Vec<Item> {
+        let mut shape = Path::new();
+        shape.move_to(Point { x: -2.0, y: -2.0 });
+        shape.line_to(Point { x: 2.0, y: -2.0 });
+        shape.line_to(Point { x: 0.0, y: 2.5 });
+        shape.close();
+        let mut line = Path::new();
+        line.move_to(Point { x: 0.0, y: 40.0 });
+        line.line_to(Point { x: 70.0, y: 3.0 });
+        let mut square = Path::new();
+        square.move_to(Point { x: 20.0, y: 10.0 });
+        square.line_to(Point { x: 45.5, y: 10.0 });
+        square.line_to(Point { x: 45.5, y: 33.25 });
+        square.close();
+        let positions = (0..300)
+            .map(|i| Point {
+                x: 8.0 + (i * 37 % 563) as f32 / 10.0,
+                y: 5.0 + (i * 53 % 347) as f32 / 10.0,
+            })
+            .collect();
+        vec![
+            Item::Fill {
+                path: square,
+                paint: Paint::Solid(Rgba {
+                    r: 40,
+                    g: 90,
+                    b: 200,
+                    a: 140,
+                }),
+                rule: FillRule::NonZero,
+            },
+            Item::Stroke {
+                path: line,
+                style: StrokeStyle {
+                    color: Rgba::opaque(200, 60, 20),
+                    width: 1.7,
+                    dash: vec![3.0, 1.5],
+                    cap: LineCap::Round,
+                    join: LineJoin::Round,
+                },
+            },
+            Item::Markers {
+                shape,
+                fill: Some(Rgba::opaque(20, 140, 60)),
+                stroke: Some(StrokeStyle {
+                    color: Rgba::opaque(250, 250, 250),
+                    width: 0.6,
+                    dash: Vec::new(),
+                    cap: LineCap::Butt,
+                    join: LineJoin::Miter,
+                }),
+                positions,
+            },
+        ]
+    }
+
+    /// Markers of `shape` that cross the edges of `rect(10.0, 10.0, 50.0, 30.0)` at whole, half
+    /// and other sixteenths of a point, from both sides, and with `paths` a fill and a stroke
+    /// that cross them too.
+    fn edge_items(shape: &Path, paths: bool) -> Vec<Item> {
+        let mut positions = Vec::new();
+        for k in -12..=12 {
+            let d = k as f32 / 16.0;
+            for (x, y) in [
+                (10.0 + d, 20.0),
+                (60.0 + d, 25.0),
+                (30.0, 10.0 + d),
+                (35.0, 40.0 + d),
+            ] {
+                positions.push(Point { x, y });
+            }
+        }
+        let mut bar = Path::new();
+        bar.move_to(Point { x: 9.5, y: 9.5 });
+        bar.line_to(Point { x: 60.5, y: 9.5 });
+        bar.line_to(Point { x: 60.5, y: 12.25 });
+        bar.line_to(Point { x: 9.5, y: 12.25 });
+        bar.close();
+        let mut slant = Path::new();
+        slant.move_to(Point { x: 9.75, y: 39.5 });
+        slant.line_to(Point { x: 60.25, y: 10.5 });
+        let mut items = vec![
+            Item::Fill {
+                path: bar,
+                paint: Paint::Solid(Rgba::opaque(90, 30, 160)),
+                rule: FillRule::NonZero,
+            },
+            Item::Stroke {
+                path: slant,
+                style: StrokeStyle {
+                    color: Rgba::opaque(10, 120, 200),
+                    width: 1.25,
+                    dash: Vec::new(),
+                    cap: LineCap::Butt,
+                    join: LineJoin::Miter,
+                },
+            },
+            Item::Markers {
+                shape: shape.clone(),
+                fill: Some(Rgba::opaque(220, 120, 20)),
+                stroke: Some(StrokeStyle {
+                    color: Rgba::opaque(250, 250, 250),
+                    width: 0.5,
+                    dash: Vec::new(),
+                    cap: LineCap::Butt,
+                    join: LineJoin::Miter,
+                }),
+                positions,
+            },
+        ];
+        if !paths {
+            items.drain(..2);
+        }
+        items
+    }
+
+    /// A triangle of `side` points centered on (0, 0).
+    fn triangle(side: f32) -> Path {
+        let mut shape = Path::new();
+        shape.move_to(Point {
+            x: -side / 2.0,
+            y: side / 2.0,
+        });
+        shape.line_to(Point {
+            x: side / 2.0,
+            y: side / 2.0,
+        });
+        shape.line_to(Point {
+            x: 0.0,
+            y: -side / 2.0,
+        });
+        shape.close();
+        shape
+    }
+
+    #[test]
+    fn the_image_is_the_png_of_the_items_on_its_pixels() {
+        let cases = [
+            ("mixed items", items(), rect(10.3, 7.7, 50.0, 30.0)),
+            (
+                "edge markers",
+                edge_items(&triangle(4.0), false),
+                rect(10.0, 10.0, 50.0, 30.0),
+            ),
+            (
+                "tiny edge markers",
+                edge_items(&triangle(0.75), false),
+                rect(10.0, 10.0, 50.0, 30.0),
+            ),
+            (
+                "edge markers, offset",
+                edge_items(&triangle(3.0), false),
+                rect(9.9, 10.03, 50.2, 30.1),
+            ),
+            (
+                "edge paths",
+                edge_items(&triangle(4.0), true),
+                rect(10.0, 10.0, 50.0, 30.0),
+            ),
+        ];
+        for ((name, items, area), dpi) in cases
+            .iter()
+            .flat_map(|case| [72, 96, 144, 150, 300, 317].map(|dpi| (case, dpi)))
+        {
+            let (name, items, area) = (*name, items, *area);
+            let mut scene = Scene::new(80.0, 50.0, CLEAR);
+            scene.items = items.clone();
+            let png = decode_rgba8(&render_png(&scene, dpi).unwrap()).unwrap();
+            let image = raster_image(&area, items, (80.0, 50.0), dpi, "test", 1)
+                .unwrap()
+                .unwrap();
+            let s = f64::from(dpi) / 72.0;
+            let step = alignment_step(dpi);
+            let down = |v: f64| ((v * s).floor() / step).floor() * step;
+            let up =
+                |v: f64, page: f64| (((v * s).ceil() / step).ceil() * step).min((page * s).ceil());
+            let left = down(f64::from(area.x)) as u32;
+            let top = down(f64::from(area.y)) as u32;
+            let right = up(f64::from(area.x) + f64::from(area.width), 80.0) as u32;
+            let bottom = up(f64::from(area.y) + f64::from(area.height), 50.0) as u32;
+            assert_eq!(
+                image.size,
+                (right - left, bottom - top),
+                "{name} at dpi {dpi}"
+            );
+            // The pixels the area covers, widened to whole pixels; the alignment around them
+            // is transparent.
+            let drawn = |x: u32, y: u32| {
+                (f64::from(x) >= (f64::from(area.x) * s).floor())
+                    && (f64::from(x) < ((f64::from(area.x) + f64::from(area.width)) * s).ceil())
+                    && (f64::from(y) >= (f64::from(area.y) * s).floor())
+                    && (f64::from(y) < ((f64::from(area.y) + f64::from(area.height)) * s).ceil())
+            };
+            for row in 0..image.size.1 {
+                for column in 0..image.size.0 {
+                    let at = ((row * image.size.0 + column) * 4) as usize;
+                    let pixel = &image.rgba[at..at + 4];
+                    let (x, y) = (left + column, top + row);
+                    let expected = if drawn(x, y) { png.at(x, y) } else { [0; 4] };
+                    // A transparent pixel's color is padding (see `pad_transparent`).
+                    let visible = |p: &[u8]| {
+                        if p[3] == 0 {
+                            [0; 4]
+                        } else {
+                            [p[0], p[1], p[2], p[3]]
+                        }
+                    };
+                    assert_eq!(
+                        visible(pixel),
+                        expected,
+                        "{name} at dpi {dpi}, pixel {column}, {row}"
+                    );
+                }
+            }
+            // The rectangle in points is the pixels' own.
+            assert!((f64::from(image.rect.x) * s - f64::from(left)).abs() < 1e-3);
+            assert!((f64::from(image.rect.width) * s - f64::from(right - left)).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn transparent_pixels_take_the_color_of_the_nearest_drawn_pixel() {
+        let red = [200, 10, 10, 255];
+        let blue = [10, 10, 200, 128];
+        let clear = [0, 0, 0, 0];
+        // A row of five: red at 0, blue at 4.
+        let mut rgba: Vec<u8> = [red, clear, clear, clear, blue].concat();
+        pad_transparent(&mut rgba, (5, 1));
+        let colors: Vec<[u8; 4]> = rgba
+            .chunks_exact(4)
+            .map(|p| [p[0], p[1], p[2], p[3]])
+            .collect();
+        // Equally near red and blue, the middle pixel takes the one the first scan reaches.
+        let (r, b) = ([200, 10, 10, 0], [10, 10, 200, 0]);
+        assert_eq!(colors, [red, r, r, b, blue]);
+        // In two dimensions the distance counts steps between edge neighbours.
+        let mut rgba = vec![0; 4 * 3 * 3];
+        rgba[4 * 8..4 * 9].copy_from_slice(&blue);
+        pad_transparent(&mut rgba, (3, 3));
+        assert!(rgba.chunks_exact(4).all(|p| p[..3] == blue[..3]));
+        assert_eq!(rgba.chunks_exact(4).filter(|p| p[3] != 0).count(), 1);
+    }
+
+    #[test]
+    fn image_edges_lie_on_quarter_inches_where_they_are_whole_pixels() {
+        assert_eq!(alignment_step(300), 75.0);
+        assert_eq!(alignment_step(72), 18.0);
+        assert_eq!(alignment_step(150), 75.0);
+        assert_eq!(alignment_step(317), 317.0);
+        let origin = DeviceOrigin { x: 117, y: 73 };
+        let (at, size) = aligned((origin, (1622.0, 1015.0)), (432.0, 288.0), 300);
+        assert_eq!((at, size), (DeviceOrigin { x: 75, y: 0 }, (1725.0, 1125.0)));
+        // Past the limits of a PNG, the region stays as it is.
+        let big = (DeviceOrigin { x: 1, y: 1 }, (8190.0, 8190.0));
+        assert_eq!(aligned(big, (10_000.0, 10_000.0), 1200), big);
+    }
+
+    #[test]
+    fn the_image_is_cut_to_the_scene() {
+        let image = raster_image(
+            &rect(-10.0, 40.0, 200.0, 30.0),
+            &items(),
+            (80.0, 50.0),
+            72,
+            "t",
+            1,
+        )
+        .unwrap()
+        .unwrap();
+        // Cut to the scene, widened to quarter inches inside it: 18 pt at 72 dpi.
+        assert_eq!(image.size, (80, 14));
+        assert_eq!(image.rect, rect(0.0, 36.0, 80.0, 14.0));
+    }
+
+    #[test]
+    fn nothing_to_draw_is_no_image() {
+        let scene = (80.0, 50.0);
+        for area in [
+            rect(f32::NAN, 0.0, 10.0, 10.0),
+            rect(0.0, 0.0, 0.0, 10.0),
+            rect(2.0e6, 0.0, 10.0, 10.0),
+            rect(100.0, 0.0, 10.0, 10.0),
+        ] {
+            assert_eq!(
+                raster_image(&area, &items(), scene, 300, "t", 1).unwrap(),
+                None
+            );
+        }
+        // Nothing visible inside the rectangle.
+        assert_eq!(
+            raster_image(&rect(70.0, 45.0, 5.0, 4.0), &items(), scene, 300, "t", 1).unwrap(),
+            None
+        );
+        assert_eq!(
+            raster_image(&rect(0.0, 0.0, 80.0, 50.0), &[], scene, 300, "t", 1).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn images_beyond_the_png_limits_are_refused() {
+        // 1,000 pt at 2,400 dpi is 33,334 pixels.
+        let wide = rect(0.0, 0.0, 1000.0, 10.0);
+        let err =
+            raster_image(&wide, &items(), (1000.0, 10.0), 2400, "Figure.to_svg()", 1).unwrap_err();
+        assert_eq!(err.parameter(), Some("raster_dpi"));
+        assert_eq!(
+            err.to_string(),
+            "Figure.to_svg(): a mark drawn as an image would be 33334 by 334 pixels at \
+             raster_dpi 2400, over 32767 on one side."
+        );
+        let square = rect(0.0, 0.0, 540.0, 540.0);
+        let err = raster_image(
+            &square,
+            &items(),
+            (540.0, 540.0),
+            1200,
+            "Figure.to_pdf()",
+            1,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("at raster_dpi 1200, over 67108864."),
+            "{err}"
+        );
+        assert_eq!(
+            err.hint(),
+            Some("use a lower raster_dpi, a smaller figure, or render=ub.Render.VECTOR.")
+        );
+    }
+}

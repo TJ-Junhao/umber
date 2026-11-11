@@ -245,14 +245,14 @@ fn tricontours_agree_in_png_svg_and_pdf() {
         axes.equal_aspect().unwrap();
         let scene = figure.to_scene(FontLibrary::global()).unwrap();
         for text in [SvgText::Editable, SvgText::Outlines] {
-            let svg = figure.to_svg(text).unwrap();
+            let svg = figure.to_svg(text, 300).unwrap();
             assert!(svg.contains("evenodd"), "{name}");
         }
         let dpi: u32 = 144;
         let png = figure.to_png(i64::from(dpi)).unwrap();
         assert!(image::decode_rgba8(&png).is_ok(), "{name}");
-        let pdf = figure.to_pdf().unwrap();
-        assert_eq!(pdf, umber_core::render::render_pdf(&scene).unwrap());
+        let pdf = figure.to_pdf(300).unwrap();
+        assert_eq!(pdf, umber_core::render::render_pdf(&scene, 300).unwrap());
         if poppler {
             let dir = pdf_check::scratch(&format!("tricontour-{name}"));
             let path = pdf_check::write(&dir, "tricontour.pdf", &pdf);
@@ -303,8 +303,8 @@ fn a_large_mesh_is_one_fill_per_band_and_one_stroke_per_level() {
     assert_eq!(fills, strokes + 1, "{fills} bands and {strokes} levels");
     assert!((5..=12).contains(&strokes), "{strokes}");
     for text in [SvgText::Editable, SvgText::Outlines] {
-        assert!(figure.to_svg(text).is_ok());
+        assert!(figure.to_svg(text, 300).is_ok());
     }
     assert!(figure.to_png(72).is_ok());
-    assert!(figure.to_pdf().is_ok());
+    assert!(figure.to_pdf(300).is_ok());
 }

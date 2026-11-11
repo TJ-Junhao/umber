@@ -67,7 +67,7 @@ def test_explicit_position_matches_native(
     expected.title(0, 0, "Panel", (0, 0.0))
     expected.hline(0, 0, 1, "North", (0, 0, 1.0), ub.Dash.SOLID.value, (0, 0.0))
     expected.legend_at(0, 0, style.value, position.value, (0, 0.0))
-    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value)
+    assert fig.to_svg() == expected.to_svg(ub.SvgText.OUTLINES.value, 300)
 
 
 @pytest.mark.parametrize("position", list(ub.LegendPosition))

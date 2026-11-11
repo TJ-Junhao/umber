@@ -669,7 +669,7 @@ mod tests {
         };
 
         fn render(scene: &Scene) -> (String, DecodedPng) {
-            let svg = render_svg(scene, SvgText::Outlines);
+            let svg = render_svg(scene, SvgText::Outlines, 300).unwrap();
             let png = decode_rgba8(&render_png(scene, 72).expect("renders")).expect("decodes");
             (svg, png)
         }
@@ -816,7 +816,7 @@ mod tests {
                 let mut scene = Scene::new(40.0, 20.0, WHITE);
                 scene.push_text(&fonts, "Hi", style, origin, color).unwrap();
                 for mode in [SvgText::Editable, SvgText::Outlines] {
-                    let svg = render_svg(&scene, mode);
+                    let svg = render_svg(&scene, mode, 300).unwrap();
                     let drawn = svg.contains("<text") || svg.contains("<path");
                     assert_eq!(drawn, visible, "svg {mode:?}, {origin:?}");
                 }

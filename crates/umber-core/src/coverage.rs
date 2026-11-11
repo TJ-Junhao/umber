@@ -97,7 +97,8 @@ impl Geometry {
 
     fn append(&mut self, item: &Item) {
         match item {
-            Item::Group { items, .. } => {
+            // The items of a mark drawn as one image cover the plot as they do drawn as shapes.
+            Item::Group { items, .. } | Item::Raster { items, .. } => {
                 for item in items {
                     self.append(item);
                 }

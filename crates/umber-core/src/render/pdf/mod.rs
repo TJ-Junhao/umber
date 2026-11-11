@@ -4,7 +4,9 @@
 //! points. Everything stays vector: paths are filled and stroked as paths, gradients are axial
 //! shadings, clip groups are clip paths, and opacity is an `ExtGState` alpha (a soft mask for a
 //! gradient whose opacity varies). Marker shapes are form XObjects drawn at each position, and
-//! images are Flate-compressed image XObjects scaled without interpolation. Text is real text:
+//! images are Flate-compressed image XObjects scaled without interpolation. Only marks drawn
+//! as one image ([`Item::Raster`]) are not vector: the PNG backend draws them at the raster
+//! resolution the call is given, into an image XObject with a soft mask. Text is real text:
 //! every font the scene's text runs use is embedded as a subset of exactly the glyphs drawn
 //! (TrueType outlines as `CIDFontType2`, CFF outlines as `CIDFontType0`), with a `ToUnicode`
 //! map, so it can be selected, searched and copied.
@@ -20,7 +22,7 @@
 //! use umber_core::{Rgba, Scene};
 //!
 //! let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
-//! let pdf = render_pdf(&Scene::new(100.0, 50.0, white))?;
+//! let pdf = render_pdf(&Scene::new(100.0, 50.0, white), 300)?;
 //! assert!(pdf.starts_with(b"%PDF-"));
 //! # Ok::<(), umber_core::Error>(())
 //! ```
@@ -38,6 +40,7 @@ mod write;
 
 use pdf_writer::{Chunk, Filter, Finish, Pdf, Rect as PdfRect, Ref, TextStr};
 
+use super::check_raster_dpi;
 use super::normalize::clip_is_valid;
 use crate::error::number;
 use crate::scene::{Item, MAX_GROUP_DEPTH, Rect, Scene};
@@ -66,10 +69,22 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 /// [`MAX_GROUP_DEPTH`] is omitted. The same scene always gives the same bytes: the fonts come
 /// from the scene's text items, which hold them (see [`TextGlyphs`](crate::TextGlyphs)).
 ///
+/// The items of an [`Item::Raster`] are drawn by the PNG backend at `raster_dpi`, over the whole
+/// pixels they cover, into one image XObject in their place, with a soft mask for the pixels
+/// that are not opaque and `/Interpolate true`, so viewers may smooth it. The image is placed
+/// 0.001 pt, one step of the written coordinates, inside its pixel edges, whatever `raster_dpi`:
+/// Poppler and MuPDF widen an image to every device pixel its edges touch, so placed on its
+/// pixel edges it would be drawn one pixel larger, and resampled, at its own resolution.
+/// `raster_dpi` changes nothing else: a scene without such an item gives the same bytes at
+/// every `raster_dpi`.
+///
 /// # Errors
 ///
 /// [`Error::Style`] with context `"Figure.to_pdf()"` when the scene's width or height is not
-/// finite, below 0.001 pt or above 14,400 pt (200 in), the largest page PDF readers accept.
+/// finite, below 0.001 pt or above 14,400 pt (200 in), the largest page PDF readers accept;
+/// with the parameter `raster_dpi` too when `raster_dpi` is outside `10..=2400`, or when the
+/// image of an [`Item::Raster`] would have more than 32,767 pixels on a side or 2^26 pixels in
+/// all, the limits of a PNG.
 ///
 /// # Examples
 ///
@@ -78,29 +93,33 @@ const MIN_PAGE_SIDE: f32 = 0.001;
 /// use umber_core::{Rgba, Scene};
 ///
 /// let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
-/// let pdf = render_pdf(&Scene::new(432.0, 288.0, white))?;
+/// let pdf = render_pdf(&Scene::new(432.0, 288.0, white), 300)?;
 /// assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 432 288]"));
-/// assert!(render_pdf(&Scene::new(f32::NAN, 288.0, white)).is_err());
+/// assert!(render_pdf(&Scene::new(f32::NAN, 288.0, white), 300).is_err());
+/// assert!(render_pdf(&Scene::new(432.0, 288.0, white), 2401).is_err());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
-pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>> {
+pub fn render_pdf(scene: &Scene, raster_dpi: u32) -> Result<Vec<u8>> {
+    let raster_dpi = check_raster_dpi(CONTEXT, i64::from(raster_dpi))?;
     let size = page_size(scene)?;
-    Ok(document(&[(scene, size)]))
+    document(&[(scene, size)], raster_dpi, None)
 }
 
 /// Writes `scenes` as one PDF document with a page for each, in order.
 ///
 /// Every page is the size of its scene and is painted exactly as [`render_pdf`] paints that
-/// scene. A font used on several pages is embedded once, as a subset of the glyphs of all the
-/// pages that use it; raster images stay with their page. Nothing is written unless every
-/// scene can be a page. The same scenes always give the same bytes, and one scene gives the
-/// bytes of [`render_pdf`].
+/// scene at `raster_dpi`. A font used on several pages is embedded once, as a subset of the
+/// glyphs of all the pages that use it; raster images stay with their page. Nothing is written
+/// unless every scene can be a page. The same scenes always give the same bytes, and one scene
+/// gives the bytes of [`render_pdf`].
 ///
 /// # Errors
 ///
 /// [`Error::Style`] with context `"Figure.to_pdf()"` when the width or height of a scene is
-/// not finite, below 0.001 pt or above 14,400 pt (200 in); the message begins with
-/// `scenes[i]: `, where `i` is the 0-based index of the first such scene.
+/// not finite, below 0.001 pt or above 14,400 pt (200 in), or the image of a mark on it is too
+/// large, as [`render_pdf`] says; the message begins with `scenes[i]: `, where `i` is the
+/// 0-based index of the first such scene. The same error, without a prefix, when `raster_dpi`
+/// is outside `10..=2400`.
 /// [`Error::Data`] with the same context when `scenes` is empty, as a document needs a page.
 ///
 /// # Examples
@@ -111,43 +130,72 @@ pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>> {
 ///
 /// let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
 /// let (wide, tall) = (Scene::new(432.0, 288.0, white), Scene::new(288.0, 432.0, white));
-/// let pdf = render_pdf_pages(&[&wide, &tall])?;
+/// let pdf = render_pdf_pages(&[&wide, &tall], 300)?;
 /// let text = String::from_utf8_lossy(&pdf);
 /// assert!(text.contains("/MediaBox [0 0 432 288]"));
 /// assert!(text.contains("/MediaBox [0 0 288 432]"));
-/// assert!(render_pdf_pages(&[]).is_err());
+/// assert!(render_pdf_pages(&[], 300).is_err());
 /// # Ok::<(), umber_core::Error>(())
 /// ```
-pub fn render_pdf_pages(scenes: &[&Scene]) -> Result<Vec<u8>> {
+pub fn render_pdf_pages(scenes: &[&Scene], raster_dpi: u32) -> Result<Vec<u8>> {
     if scenes.is_empty() {
         return Err(Error::data(
             CONTEXT,
             "a PDF document needs at least one page.",
         ));
     }
+    let raster_dpi = check_raster_dpi(CONTEXT, i64::from(raster_dpi))?;
+    pages_document(scenes, raster_dpi, "scenes")
+}
+
+/// The document of [`render_pdf_pages`] for at least one scene and a checked `raster_dpi`,
+/// whose errors about one scene begin with `{list}[i]: `, `list` naming the scenes as the caller
+/// knows them.
+///
+/// # Errors
+///
+/// As [`render_pdf_pages`], for the first scene that cannot be a page and then for the first
+/// image of marks that cannot be drawn.
+pub(crate) fn pages_document(scenes: &[&Scene], raster_dpi: u32, list: &str) -> Result<Vec<u8>> {
+    let prefix = |index: usize| format!("{list}[{index}]: ");
     let pages = scenes
         .iter()
         .enumerate()
         .map(|(index, scene)| {
-            let size = page_size(scene)
-                .map_err(|err| err.with_message_prefix(&format!("scenes[{index}]: ")))?;
+            let size = page_size(scene).map_err(|err| err.with_message_prefix(&prefix(index)))?;
             Ok((*scene, size))
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(document(&pages))
+    document(&pages, raster_dpi, Some(&prefix))
 }
 
-/// The PDF document of `pages`, each a scene with its page size from [`page_size`].
+/// The PDF document of `pages`, each a scene with its page size from [`page_size`], with the
+/// marks drawn as images at `raster_dpi`.
 ///
 /// Objects are numbered in this order: the catalog, the page tree, each page with its content,
 /// the document information, then the resources of each page in the order its content first
 /// uses them, and last the fonts, which the pages share.
-fn document(pages: &[(&Scene, (f32, f32))]) -> Vec<u8> {
+///
+/// # Errors
+///
+/// As [`Page::item`], for the first image of marks that cannot be drawn; the message begins
+/// with `prefix` of the page's index when there is one.
+fn document(
+    pages: &[(&Scene, (f32, f32))],
+    raster_dpi: u32,
+    prefix: Option<&dyn Fn(usize) -> String>,
+) -> Result<Vec<u8>> {
     let fonts = fonts_of(pages);
     let contents: Vec<_> = pages
         .iter()
-        .map(|&(scene, size)| page_content(scene, &fonts, size))
-        .collect();
+        .enumerate()
+        .map(|(index, &(scene, size))| {
+            page_content(scene, &fonts, size, raster_dpi).map_err(|err| match prefix {
+                Some(prefix) => err.with_message_prefix(&prefix(index)),
+                None => err,
+            })
+        })
+        .collect::<Result<_>>()?;
 
     let mut refs = Refs::new();
     let (catalog, tree) = (refs.next(), refs.next());
@@ -187,14 +235,14 @@ fn document(pages: &[(&Scene, (f32, f32))]) -> Vec<u8> {
     pdf.extend(&chunk);
     let id = document_id(pdf.as_bytes());
     pdf.set_file_id((id.clone(), id));
-    pdf.finish()
+    Ok(pdf.finish())
 }
 
 /// The fonts of the text that `pages` draw, subset to the glyphs drawn on any of them.
 fn fonts_of(pages: &[(&Scene, (f32, f32))]) -> Fonts {
     let mut fonts = FontSet::default();
     for &(scene, size) in pages {
-        walk_page(scene, size, &mut |item, _| {
+        walk_page(scene, size, &mut |item, _, _| {
             if let Item::Text(text) | Item::RotatedText { text, .. } = item {
                 fonts.collect(text);
             }
@@ -203,19 +251,28 @@ fn fonts_of(pages: &[(&Scene, (f32, f32))]) -> Fonts {
     fonts.embed()
 }
 
-/// The content stream of `scene` on a page of `size` whose text is set in `fonts`, and the
-/// resources it uses.
+/// The content stream of `scene` on a page of `size` whose text is set in `fonts` and whose
+/// marks drawn as images are drawn at `raster_dpi`, and the resources it uses.
+///
+/// # Errors
+///
+/// As [`Page::item`], for the first image of marks that cannot be drawn.
 fn page_content<'s>(
     scene: &'s Scene,
     fonts: &Fonts,
     (width, height): (f32, f32),
-) -> (Vec<u8>, Resources<'s>) {
-    let mut page = Page::new(width, height, fonts);
+    raster_dpi: u32,
+) -> Result<(Vec<u8>, Resources<'s>)> {
+    let mut page = Page::new(width, height, fonts, raster_dpi);
     page.background(scene.background);
-    walk_page(scene, (width, height), &mut |item, clip| {
-        page.item(item, clip)
+    let mut drawn = Ok(());
+    walk_page(scene, (width, height), &mut |item, clip, depth| {
+        if drawn.is_ok() {
+            drawn = page.item(item, clip, depth);
+        }
     });
-    page.finish()
+    drawn?;
+    Ok(page.finish())
 }
 
 /// The page width and height in points, rounded as the document writes them.
@@ -288,7 +345,7 @@ fn page_bounds(width: f32, height: f32) -> Clip {
 fn walk_page<'s>(
     scene: &'s Scene,
     (width, height): (f32, f32),
-    f: &mut impl FnMut(&'s Item, Option<Clip>),
+    f: &mut impl FnMut(&'s Item, Option<Clip>, usize),
 ) {
     walk(&scene.items, None, 0, page_bounds(width, height), f);
 }
@@ -297,17 +354,21 @@ fn walk_page<'s>(
 /// effect for it: the intersection of the clips of its groups and the page, `None` when no
 /// group clips it. A group whose clip cannot clip, or whose clip leaves nothing of the page or
 /// of the clip around it, draws nothing, as in the other backends; so does the content of
-/// groups nested [`MAX_GROUP_DEPTH`] deep.
+/// groups nested [`MAX_GROUP_DEPTH`] deep. An [`Item::Raster`] is one leaf, whose items are
+/// drawn into its image; it counts as a group in the nesting depth, as in the other backends.
+/// `f` also gets the number of groups around the item.
 fn walk<'s>(
     items: &'s [Item],
     clip: Option<Clip>,
     depth: usize,
     page: Clip,
-    f: &mut impl FnMut(&'s Item, Option<Clip>),
+    f: &mut impl FnMut(&'s Item, Option<Clip>, usize),
 ) {
     for item in items {
         let Item::Group { clip: own, items } = item else {
-            f(item, clip);
+            if !matches!(item, Item::Raster { .. }) || depth < MAX_GROUP_DEPTH {
+                f(item, clip, depth);
+            }
             continue;
         };
         if depth >= MAX_GROUP_DEPTH {
@@ -382,7 +443,7 @@ mod tests {
     fn content(scene: &Scene) -> String {
         let size = page_size(scene).unwrap();
         let fonts = fonts_of(&[(scene, size)]);
-        let (content, _) = page_content(scene, &fonts, size);
+        let (content, _) = page_content(scene, &fonts, size, 300).unwrap();
         String::from_utf8(content).unwrap()
     }
 
@@ -586,7 +647,7 @@ mod tests {
         assert!(state_depth(&text) <= 2);
         // One marker of three is drawn; neither image is.
         assert_eq!(operators(&text).iter().filter(|op| **op == "Do").count(), 1);
-        assert!(render_pdf(&scene).is_ok());
+        assert!(render_pdf(&scene, 300).is_ok());
     }
 
     #[test]
@@ -636,7 +697,7 @@ mod tests {
             rule: FillRule::NonZero,
         });
         let fonts = fonts_of(&[(&scene, (120.0, 80.0))]);
-        let (stream, resources) = page_content(&scene, &fonts, (120.0, 80.0));
+        let (stream, resources) = page_content(&scene, &fonts, (120.0, 80.0), 300).unwrap();
         let mut chunk = Chunk::new();
         resources.write(&mut chunk, &mut Refs::new());
         for bytes in [stream.as_slice(), chunk.as_bytes()] {
@@ -699,7 +760,7 @@ mod tests {
         let text = content(&scene);
         assert!(!text.contains("BT"), "{text}");
         assert_eq!(operators(&text).iter().filter(|op| **op == "f").count(), 2);
-        let pdf = String::from_utf8_lossy(&render_pdf(&scene).unwrap()).into_owned();
+        let pdf = String::from_utf8_lossy(&render_pdf(&scene, 300).unwrap()).into_owned();
         assert!(!pdf.contains("/Font"), "no fonts are embedded");
     }
 
@@ -752,7 +813,7 @@ mod tests {
         let size = page_size(&scene).unwrap();
         // Inter is font 0 and the fallback font 1.
         let fonts = fonts_of(&[(&scene, size)]).without(1);
-        let (content, _) = page_content(&scene, &fonts, size);
+        let (content, _) = page_content(&scene, &fonts, size, 300).unwrap();
         let text = String::from_utf8(content).unwrap();
         let ops = operators(&text);
         assert!(ops.contains(&"TJ"), "Inter stays text: {text}");
@@ -855,7 +916,7 @@ mod tests {
         });
         let size = page_size(&scene).unwrap();
         let fonts = fonts_of(&[(&scene, size)]).without(1);
-        let (bytes, _) = page_content(&scene, &fonts, size);
+        let (bytes, _) = page_content(&scene, &fonts, size, 300).unwrap();
         let text = String::from_utf8(bytes).unwrap();
         assert!(operators(&text).contains(&"TJ"), "{text}");
         let about = transforms(&text)
@@ -921,7 +982,7 @@ mod tests {
             "only the fading fill has a mask: {text}"
         );
         assert!(text.contains("W*"), "{text}");
-        let pdf = String::from_utf8_lossy(&render_pdf(&scene).unwrap()).into_owned();
+        let pdf = String::from_utf8_lossy(&render_pdf(&scene, 300).unwrap()).into_owned();
         assert!(pdf.contains("/S /Luminosity") && pdf.contains("/CS /DeviceGray"));
     }
 
@@ -973,7 +1034,7 @@ mod tests {
     #[test]
     fn runs_of_equal_markers_share_one_form_per_shape() {
         let scene = run_scene(200, 5, || square(-2.0, -2.0, 4.0));
-        let pdf = render_pdf(&scene).unwrap();
+        let pdf = render_pdf(&scene, 300).unwrap();
         // The two colors are set outside the form, so one form serves every run.
         assert_eq!(forms(&pdf), 1);
         let text = content(&scene);
@@ -1041,7 +1102,7 @@ mod tests {
             }),
             positions: vec![p(1.0, 1.0)],
         });
-        let pdf = render_pdf(&scene).unwrap();
+        let pdf = render_pdf(&scene, 300).unwrap();
         // The small square, the large square, the triangle, and the small square with a
         // stroke (different content and box).
         assert_eq!(forms(&pdf), 4);
@@ -1060,9 +1121,9 @@ mod tests {
     fn pages_of_a_document_each_write_their_own_forms() {
         let a = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
         let b = run_scene(10, 3, || square(-2.0, -2.0, 4.0));
-        let pdf = render_pdf_pages(&[&a, &b]).unwrap();
+        let pdf = render_pdf_pages(&[&a, &b], 300).unwrap();
         // Resources belong to a page, so a page's forms are not named by another page.
         assert_eq!(forms(&pdf), 2);
-        assert_eq!(forms(&render_pdf(&a).unwrap()), 1);
+        assert_eq!(forms(&render_pdf(&a, 300).unwrap()), 1);
     }
 }

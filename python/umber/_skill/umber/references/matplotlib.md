@@ -53,6 +53,9 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.tricontour(x, y, z, levels=10)` / `levels=[...]` | `levels=10` asks for about ten round levels; `levels=[...]` gives them, strictly increasing |
 | `ax.clabel(ax.tricontour(...))` | set `annotate=True` on the `tricontour` call itself |
 | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` | `ax.hist2d(x, y)` / `ax.hexbin(x, y)` |
+| `ax.scatter(x, y, rasterized=True)` / `ax.plot(..., rasterized=True)` | `render=ub.Render.RASTER` on `scatter()`, `line()` or `tripcolor()`: one image in SVG and PDF output, the rest stays vector |
+| `ax.set_rasterization_zorder(z)` | not offered: choose `render=ub.Render.RASTER` on each mark to draw as an image; each keeps its place among the marks |
+| `fig.savefig("f.pdf", dpi=300)` with rasterized marks | `fig.save_pdf("f.pdf", raster_dpi=300)`; `raster_dpi` sets only the resolution of those images |
 | `ax.pie(values, labels=names, autopct="%1.0f%%")` | `ub.pie(names, values, annotate=True)` |
 | `ax.pie(..., wedgeprops={"width": 0.5})` | `ub.pie(names, values, hole=0.5)` |
 | `fig.colorbar(im, label="v")` | `ax.colorbar("v")` (or `fig.colorbar("v")` for a shared color scale) |

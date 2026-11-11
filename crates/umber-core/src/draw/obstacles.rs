@@ -190,7 +190,8 @@ impl Obstacles {
     /// Adds the geometry of `item`, as the module documentation describes.
     fn add_item(&mut self, item: &Item) {
         match item {
-            Item::Group { items, .. } => self.add_items(items),
+            // A mark drawn as one image is in the way where its shapes are.
+            Item::Group { items, .. } | Item::Raster { items, .. } => self.add_items(items),
             Item::Markers {
                 shape,
                 fill,

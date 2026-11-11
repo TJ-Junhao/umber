@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn svg_gradient_has_64_stops() {
         let f = figure(ColorbarPosition::Right, None);
-        let svg = f.to_svg(SvgText::Editable).unwrap();
+        let svg = f.to_svg(SvgText::Editable, 300).unwrap();
         let doc = roxmltree::Document::parse(&svg).unwrap();
         let gradients: Vec<_> = doc
             .descendants()
@@ -910,7 +910,7 @@ mod tests {
         let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
         assert!(layout.colorbar.is_none());
         assert!(
-            !f.to_svg(SvgText::Editable)
+            !f.to_svg(SvgText::Editable, 300)
                 .unwrap()
                 .contains("linearGradient")
         );

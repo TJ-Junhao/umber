@@ -9,7 +9,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use umber_core::{
     Align, ColorbarPosition, ContourStyle, Dash, Direction, FillStyle, GridLines, LegendMode,
-    LegendPosition, LegendStyle, Marker, Pivot, Place, Render, Share, Step, SvgText, TriValues,
+    LegendPosition, LegendStyle, MarkRender, Marker, Pivot, Place, Render, Share, Step, SvgText,
+    TriValues,
 };
 use umber_core::{HistStat, HistStyle};
 
@@ -138,19 +139,11 @@ int_enum!("ColorbarPosition", ColorbarPosition {
     "NONE" => ColorbarPosition::None = 2,
 });
 
-/// How cells are drawn, as the Python `Render` enum names the choices other than `AUTO`,
-/// which the bindings pass as `None`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RenderChoice {
-    /// [`Render::Vector`].
-    Vector,
-    /// [`Render::Raster`].
-    Raster,
-}
-
-int_enum!("Render", RenderChoice {
-    "VECTOR" => RenderChoice::Vector = 0,
-    "RASTER" => RenderChoice::Raster = 1,
+// The Python `Render` enum names the choices of a mark drawn as one image in vector output,
+// and those of cells other than `AUTO`, which the bindings pass as `None`.
+int_enum!("Render", MarkRender {
+    "VECTOR" => MarkRender::Vector = 0,
+    "RASTER" => MarkRender::Raster = 1,
 });
 
 int_enum!("Hist", HistStyle {
@@ -189,10 +182,10 @@ int_enum!("TriValues", TriValues {
 
 /// The core [`Render`] of a Python `Render` value, `None` standing for `AUTO`.
 pub(crate) fn render_choice(value: Option<i64>) -> PyResult<Render> {
-    Ok(match value.map(enum_value::<RenderChoice>).transpose()? {
+    Ok(match value.map(enum_value::<MarkRender>).transpose()? {
         None => Render::Auto,
-        Some(RenderChoice::Vector) => Render::Vector,
-        Some(RenderChoice::Raster) => Render::Raster,
+        Some(MarkRender::Vector) => Render::Vector,
+        Some(MarkRender::Raster) => Render::Raster,
     })
 }
 
@@ -217,7 +210,7 @@ const TABLES: [(&str, &[(&str, i64)]); 20] = [
     (Align::PY_NAME, Align::MEMBERS),
     (Step::PY_NAME, Step::MEMBERS),
     (ColorbarPosition::PY_NAME, ColorbarPosition::MEMBERS),
-    (RenderChoice::PY_NAME, RenderChoice::MEMBERS),
+    (MarkRender::PY_NAME, MarkRender::MEMBERS),
     (HistStyle::PY_NAME, HistStyle::MEMBERS),
     (HistStat::PY_NAME, HistStat::MEMBERS),
     (ContourStyle::PY_NAME, ContourStyle::MEMBERS),
@@ -273,7 +266,7 @@ mod tests {
         round_trips::<Align>();
         round_trips::<Step>();
         round_trips::<ColorbarPosition>();
-        round_trips::<RenderChoice>();
+        round_trips::<MarkRender>();
         round_trips::<HistStyle>();
         round_trips::<HistStat>();
         round_trips::<ContourStyle>();

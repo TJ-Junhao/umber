@@ -181,8 +181,12 @@ fn conflicting_shared_limits_leave_group_unchanged() {
     );
     let before = f.clone();
     let lib = FontLibrary::bundled();
-    let svg =
-        crate::render::render_svg(&f.to_scene(&lib).unwrap(), crate::render::SvgText::Editable);
+    let svg = crate::render::render_svg(
+        &f.to_scene(&lib).unwrap(),
+        crate::render::SvgText::Editable,
+        300,
+    )
+    .unwrap();
     let err = f
         .axes_at_mut(GridIndex::At(1), GridIndex::At(0))
         .unwrap()
@@ -200,7 +204,12 @@ fn conflicting_shared_limits_leave_group_unchanged() {
     assert_eq!(f, before);
     assert_eq!(
         svg,
-        crate::render::render_svg(&f.to_scene(&lib).unwrap(), crate::render::SvgText::Editable)
+        crate::render::render_svg(
+            &f.to_scene(&lib).unwrap(),
+            crate::render::SvgText::Editable,
+            300
+        )
+        .unwrap()
     );
     f.axes_at_mut(GridIndex::At(1), GridIndex::At(0))
         .unwrap()

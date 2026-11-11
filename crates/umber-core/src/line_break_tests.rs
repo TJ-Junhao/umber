@@ -599,7 +599,7 @@ fn lines_figure() -> Figure {
 fn editable_svg_writes_one_text_element_per_line() {
     use crate::render::{SvgText, render_svg};
     let scene = lines_figure().to_scene(&lib()).unwrap();
-    let svg = render_svg(&scene, SvgText::Editable);
+    let svg = render_svg(&scene, SvgText::Editable, 300).unwrap();
     let doc = roxmltree::Document::parse(&svg).unwrap();
     let texts: Vec<(String, f64)> = doc
         .descendants()
@@ -627,7 +627,7 @@ fn editable_svg_writes_one_text_element_per_line() {
     }
     assert!(!svg.contains('\t') && !svg.contains('\r') && !svg.contains("&#13;"));
     // As outlines, every line is a path and no text element is left.
-    let outlines = render_svg(&scene, SvgText::Outlines);
+    let outlines = render_svg(&scene, SvgText::Outlines, 300).unwrap();
     assert!(!outlines.contains("<text"));
     let paths = |svg: &str| svg.matches("<path").count();
     let mut one = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
@@ -652,7 +652,7 @@ fn editable_svg_writes_one_text_element_per_line() {
             },
         )
         .unwrap();
-    let one = render_svg(&one.to_scene(&lib()).unwrap(), SvgText::Outlines);
+    let one = render_svg(&one.to_scene(&lib()).unwrap(), SvgText::Outlines, 300).unwrap();
     assert_eq!(paths(&outlines), paths(&one) + 4);
 }
 
@@ -788,6 +788,7 @@ fn legend_labels_are_checked_when_added_even_with_the_legend_hidden() {
                 vec![("North".into(), x(), y()), (label.into(), x(), y())],
                 crate::Dash::Solid,
                 SizeSpec::Auto,
+                crate::MarkRender::Vector,
             )
             .unwrap_err();
         assert_eq!(
@@ -1051,6 +1052,7 @@ fn grouped_label_errors_name_their_group() {
             vec![("North".into(), x(), x()), ("bad\n".into(), x(), x())],
             crate::Dash::Solid,
             SizeSpec::Auto,
+            crate::MarkRender::Vector,
         )
         .unwrap_err();
     assert_eq!(group(&err), Some(1), "{err}");

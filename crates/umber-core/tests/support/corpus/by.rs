@@ -46,7 +46,12 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             let mut ax = axes(&mut f);
             match method {
                 "line" => ax
-                    .grouped_line(xy_groups(), Dash::Solid, SizeSpec::Auto)
+                    .grouped_line(
+                        xy_groups(),
+                        Dash::Solid,
+                        SizeSpec::Auto,
+                        umber_core::MarkRender::Vector,
+                    )
                     .unwrap(),
                 "area" => ax
                     .grouped_area(xy_groups(), Dash::Dashed, SizeSpec::Auto)
@@ -61,6 +66,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                         SizeSpec::Auto,
                         umber_core::PointLabels::default(),
                         false,
+                        umber_core::MarkRender::Vector,
                     )
                     .unwrap(),
                 "step" => ax

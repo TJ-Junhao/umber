@@ -207,7 +207,7 @@ fn size_legend_values_are_nice() {
 #[test]
 fn bubble_sizes_above_the_magnitude_limit_are_atomic() {
     let mut f = figure(Theme::pigment(), 1e300);
-    let before = f.to_svg(SvgText::Outlines).unwrap();
+    let before = f.to_svg(SvgText::Outlines, 300).unwrap();
     for value in [1.1e300, f64::MAX] {
         let error = f
             .single_axes_mut()
@@ -223,7 +223,7 @@ fn bubble_sizes_above_the_magnitude_limit_are_atomic() {
                 crate::error::number(value)
             )
         );
-        assert_eq!(f.to_svg(SvgText::Outlines).unwrap(), before);
+        assert_eq!(f.to_svg(SvgText::Outlines, 300).unwrap(), before);
     }
 }
 
@@ -339,12 +339,12 @@ fn nan_sizes_leave_their_bubbles_out_of_drawing_domains_and_scale() {
         without.to_scene(fonts).unwrap()
     );
     assert_eq!(
-        with.to_svg(SvgText::Outlines).unwrap(),
-        without.to_svg(SvgText::Outlines).unwrap()
+        with.to_svg(SvgText::Outlines, 300).unwrap(),
+        without.to_svg(SvgText::Outlines, 300).unwrap()
     );
     // Every size missing draws nothing and leaves an empty scale.
     let none = build(&[1.0], &[2.0], &[f64::NAN]);
-    assert!(none.to_svg(SvgText::Outlines).is_ok());
+    assert!(none.to_svg(SvgText::Outlines, 300).is_ok());
 }
 
 #[test]
@@ -793,8 +793,8 @@ fn bubbles_keep_order_options_and_shared_copies() {
     assert!(boxes[0].0.x > boxes[1].1.x);
     assert!(((boxes[0].1.x - boxes[0].0.x) / (boxes[1].1.x - boxes[1].0.x) - 2.0).abs() < 1e-5);
     assert_eq!(
-        f.to_svg(SvgText::Outlines).unwrap(),
-        copy.to_svg(SvgText::Outlines).unwrap()
+        f.to_svg(SvgText::Outlines, 300).unwrap(),
+        copy.to_svg(SvgText::Outlines, 300).unwrap()
     );
 }
 

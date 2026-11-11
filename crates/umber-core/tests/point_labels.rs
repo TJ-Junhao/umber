@@ -256,6 +256,7 @@ fn two_category_axes_are_refused_when_the_call_is_made() {
             SizeSpec::Auto,
             labels(Place::Auto),
             false,
+            umber_core::MarkRender::Vector,
         )
         .unwrap_err();
     assert!(matches!(err, Error::Usage { .. }), "{err}");
@@ -389,6 +390,7 @@ fn labels_take_the_series_color_at_full_opacity() {
             SizeSpec::Auto,
             labels(Place::Auto),
             false,
+            umber_core::MarkRender::Vector,
         )
         .unwrap();
     let scene = render(&f);
@@ -703,8 +705,8 @@ fn placement_is_deterministic() {
     let (a, b) = (build(), build());
     assert_eq!(render(&a), render(&b));
     assert_eq!(
-        a.to_svg(SvgText::Editable).unwrap(),
-        b.to_svg(SvgText::Editable).unwrap()
+        a.to_svg(SvgText::Editable, 300).unwrap(),
+        b.to_svg(SvgText::Editable, 300).unwrap()
     );
 }
 
@@ -985,8 +987,8 @@ fn growing_limits_is_deterministic() {
     let (a, b) = (matched_folds(None, true), matched_folds(None, true));
     assert_eq!(render(&a), render(&b));
     assert_eq!(
-        a.to_svg(SvgText::Editable).unwrap(),
-        b.to_svg(SvgText::Editable).unwrap()
+        a.to_svg(SvgText::Editable, 300).unwrap(),
+        b.to_svg(SvgText::Editable, 300).unwrap()
     );
     assert_eq!(a.to_png(72).unwrap(), b.to_png(72).unwrap());
 }
@@ -994,11 +996,11 @@ fn growing_limits_is_deterministic() {
 #[test]
 fn png_svg_and_pdf_render_labels_that_grew_the_limits() {
     let f = matched_folds(None, true);
-    let svg = f.to_svg(SvgText::Editable).unwrap();
+    let svg = f.to_svg(SvgText::Editable, 300).unwrap();
     assert!(svg.contains(">81.7</text>"), "{svg}");
     let png = f.to_png(72).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
-    let pdf = f.to_pdf().unwrap();
+    let pdf = f.to_pdf(300).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     // All three come from the scene of the settled pass, which holds each label once.
     let scene = render(&f);
@@ -1128,6 +1130,7 @@ fn label_options_without_annotate_are_refused() {
                 SizeSpec::Auto,
                 labels,
                 false,
+                umber_core::MarkRender::Vector,
             )
             .unwrap_err();
         assert_eq!(err.parameter(), Some(parameter));
@@ -1248,14 +1251,14 @@ fn png_svg_and_pdf_render_the_labels() {
             options(Place::Auto),
         )
         .unwrap();
-    let svg = f.to_svg(SvgText::Editable).unwrap();
+    let svg = f.to_svg(SvgText::Editable, 300).unwrap();
     assert!(
         svg.contains(">71.25</text>") && svg.contains(">74.5</text>"),
         "{svg}"
     );
     let png = f.to_png(72).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
-    let pdf = f.to_pdf().unwrap();
+    let pdf = f.to_pdf(300).unwrap();
     assert!(pdf.starts_with(b"%PDF"));
     // All three come from one scene, which holds each label once.
     let scene = render(&f);

@@ -75,7 +75,7 @@ def figure(x: int = LINEAR, y: int = LINEAR, *, base: float = 10.0) -> _umber.Fi
 def line_figure() -> _umber.Figure:
     fig = figure()
     fig.title(0, 0, "Signal", NO_SIZE)
-    fig.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "north", AUTO, 0, NO_SIZE)
+    fig.line(0, 0, floats(0, 1, 2), floats(1, 3, 2), "north", AUTO, 0, NO_SIZE, 0)
     return fig
 
 
@@ -289,9 +289,9 @@ def test_unknown_color_kinds_are_internal_errors() -> None:
 def test_figure_uses_its_theme() -> None:
     pigment = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     midnight = _umber.Figure(3.0, 2.0, _umber.Theme.midnight(), *ONE_CELL)
-    assert pigment.to_svg(OUTLINES) != midnight.to_svg(OUTLINES)
+    assert pigment.to_svg(OUTLINES, 300) != midnight.to_svg(OUTLINES, 300)
     custom = _umber.Theme.pigment().with_background(BLUE)
-    assert 'fill="#3366B8"' in _umber.Figure(3.0, 2.0, custom, *ONE_CELL).to_svg(OUTLINES)
+    assert 'fill="#3366B8"' in _umber.Figure(3.0, 2.0, custom, *ONE_CELL).to_svg(OUTLINES, 300)
 
 
 @pytest.mark.parametrize(
@@ -387,10 +387,10 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "ytick_format": lambda f, r, c: f.ytick_format(r, c, (1, 1, "", "")),
     "legend": lambda f, r, c: f.legend(r, c, 0, NO_SIZE),
     "legend_at": lambda f, r, c: f.legend_at(r, c, 0, 2, NO_SIZE),
-    "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+    "line": lambda f, r, c: f.line(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE, 0),
     "area": lambda f, r, c: f.area(r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
     "scatter": lambda f, r, c: f.scatter(
-        r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        r, c, floats(1), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS, 0
     ),
     "bubbles": lambda f, r, c: f.bubbles(r, c, floats(1), floats(1), floats(1), "", AUTO, 0),
     "bar": lambda f, r, c: f.bar(r, c, ["a"], floats(1), "", AUTO, *NO_LABELS),
@@ -460,7 +460,7 @@ CATEGORY_CALLS = {
 def test_native_axes_calls_carry_their_cell(name: str) -> None:
     fig = figure(CATEGORY if name in CATEGORY_CALLS else LINEAR)
     assert AXES_CALLS[name](fig, 0, 0) is None
-    changed = fig.to_svg(OUTLINES)
+    changed = fig.to_svg(OUTLINES, 300)
     assert_reported(
         lambda: AXES_CALLS[name](fig, 0, 1),
         ub.UsageError,
@@ -475,7 +475,7 @@ def test_native_axes_calls_carry_their_cell(name: str) -> None:
         "row",
         RANGE_HINT,
     )
-    assert fig.to_svg(OUTLINES) == changed
+    assert fig.to_svg(OUTLINES, 300) == changed
 
 
 def grid_figure(rows: int, cols: int) -> _umber.Figure:
@@ -498,7 +498,7 @@ def test_native_grid_places_and_finds_axes() -> None:
     assert fig.axes_at(1, 1, 1, 2, LOG, 2.0, LOG, 10.0) == (1, 2)
     fig.title(1, 2, "Corner", NO_SIZE)
     fig.bar(0, 0, ["a", "b"], floats(1, 2), "", AUTO, *NO_LABELS)
-    assert ">Corner</text>" in fig.to_svg(EDITABLE)
+    assert ">Corner</text>" in fig.to_svg(EDITABLE, 300)
     assert_reported(
         lambda: fig.axes_at(1, 1, 1, 2, LOG, 10.0, LOG, 10.0),
         ub.UsageError,
@@ -569,7 +569,7 @@ def test_native_add_axes_value_errors_follow_parameter_order(
     place: tuple[int, int, int, int, int, int], message: str, parameter: str, hint: str
 ) -> None:
     fig = grid_figure(2, 2)
-    before = fig.to_svg(EDITABLE)
+    before = fig.to_svg(EDITABLE, 300)
     assert_reported(
         lambda: fig.add_axes(*place, LINEAR, 10.0, LINEAR, 10.0),
         ub.UsageError,
@@ -577,7 +577,7 @@ def test_native_add_axes_value_errors_follow_parameter_order(
         parameter,
         hint,
     )
-    assert fig.to_svg(EDITABLE) == before
+    assert fig.to_svg(EDITABLE, 300) == before
 
 
 def test_native_grid_helpers() -> None:
@@ -649,21 +649,21 @@ def test_texts_appear_in_editable_svg() -> None:
     fig.subtitle(0, 0, "Per year", NO_SIZE)
     fig.xlabel(0, 0, "Year", NO_SIZE)
     fig.ylabel(0, 0, "Revenue", NO_SIZE)
-    svg = fig.to_svg(EDITABLE)
+    svg = fig.to_svg(EDITABLE, 300)
     for text in ("Growth", "Per year", "Year", "Revenue"):
         assert f">{text}</text>" in svg
-    assert ">Growth</text>" not in fig.to_svg(OUTLINES)
+    assert ">Growth</text>" not in fig.to_svg(OUTLINES, 300)
 
 
 def test_limits_and_legend_change_the_output() -> None:
     fig = line_figure()
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     fig.xlim(0, 0, -1.0, 5.0)
     fig.ylim(0, 0, 0.0, 10.0)
-    limited = fig.to_svg(OUTLINES)
+    limited = fig.to_svg(OUTLINES, 300)
     assert limited != before
     fig.legend(0, 0, 3, NO_SIZE)
-    assert fig.to_svg(OUTLINES) != limited
+    assert fig.to_svg(OUTLINES, 300) != limited
     assert_internal(
         lambda: fig.legend(0, 0, 4, NO_SIZE), ValueError, "4 is not a value of LegendStyle"
     )
@@ -772,19 +772,19 @@ def test_limit_errors(
     hint: object,
 ) -> None:
     fig = make()
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     assert_reported(lambda: call(fig), cls, message, parameter, hint)
-    assert fig.to_svg(OUTLINES) == before
+    assert fig.to_svg(OUTLINES, 300) == before
 
 
 # Marks
 
 
 def test_marks_draw() -> None:
-    empty = figure().to_svg(OUTLINES)
+    empty = figure().to_svg(OUTLINES, 300)
     fig = figure()
-    fig.line(0, 0, floats(0, 1, 2), floats(1, np.nan, 2), "a", AUTO, 1, NO_SIZE)
-    with_line = fig.to_svg(OUTLINES)
+    fig.line(0, 0, floats(0, 1, 2), floats(1, np.nan, 2), "a", AUTO, 1, NO_SIZE, 0)
+    with_line = fig.to_svg(OUTLINES, 300)
     assert with_line != empty
     fig.scatter(
         0,
@@ -797,34 +797,45 @@ def test_marks_draw() -> None:
         NO_SIZE,
         *NO_POINT_LABELS,
         *NO_OWN_MARKS,
+        0,
     )
-    assert fig.to_svg(OUTLINES) != with_line
+    assert fig.to_svg(OUTLINES, 300) != with_line
 
     bars = figure(x=CATEGORY)
     bars.bar(0, 0, ["a", "b"], floats(1, 2), "c", RED, *NO_LABELS)
     bars.grouped_bar(0, 0, ["c"], [("s", floats(1), AUTO), ("t", floats(2), BLUE)], *NO_LABELS)
     bars.stacked_bar(0, 0, ["d"], [("s", floats(1), AUTO), ("t", floats(-2), BLUE)], *NO_LABELS)
-    assert bars.to_svg(OUTLINES) != figure(x=CATEGORY).to_svg(OUTLINES)
+    assert bars.to_svg(OUTLINES, 300) != figure(x=CATEGORY).to_svg(OUTLINES, 300)
 
     categories = figure(x=CATEGORY)
-    categories.line(0, 0, ["a", "b"], floats(1, 2), "", AUTO, 0, NO_SIZE)
+    categories.line(0, 0, ["a", "b"], floats(1, 2), "", AUTO, 0, NO_SIZE, 0)
     categories.scatter(
-        0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        0, 0, ["b", "c"], floats(1, 2), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS, 0
     )
 
     hist = figure()
     hist.hist(0, 0, floats(1.2, 3.4, 2.2, np.nan, 2.9), 3, 0, False, 0, "h", AUTO)
-    assert hist.to_svg(OUTLINES) != empty
+    assert hist.to_svg(OUTLINES, 300) != empty
 
 
 def test_mark_labels_and_colors_reach_the_legend() -> None:
     fig = figure()
     fig.legend(0, 0, 2, NO_SIZE)
-    fig.line(0, 0, floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE)
+    fig.line(0, 0, floats(0, 1), floats(1, 2), "North", RED, 0, NO_SIZE, 0)
     fig.scatter(
-        0, 0, floats(0, 1), floats(2, 1), "South", BLUE, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        0,
+        0,
+        floats(0, 1),
+        floats(2, 1),
+        "South",
+        BLUE,
+        0,
+        NO_SIZE,
+        *NO_POINT_LABELS,
+        *NO_OWN_MARKS,
+        0,
     )
-    svg = fig.to_svg(EDITABLE)
+    svg = fig.to_svg(EDITABLE, 300)
     assert ">North</text>" in svg
     assert ">South</text>" in svg
     assert 'fill="#D64933"' in svg or 'stroke="#D64933"' in svg
@@ -847,7 +858,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line length",
         figure,
-        lambda f: f.line(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): x has 2 values but y has 1; x and y must have the same length.",
         None,
@@ -856,7 +867,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line x infinite",
         figure,
-        lambda f: f.line(0, 0, floats(1, np.inf), floats(1, 2), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, np.inf), floats(1, 2), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         f"Axes.line(): x[1] is inf; {FINITE}",
         "x",
@@ -865,7 +876,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line y infinite",
         figure,
-        lambda f: f.line(0, 0, floats(1, 2), floats(1, -np.inf), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, -np.inf), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         f"Axes.line(): y[1] is -inf; {FINITE}",
         "y",
@@ -874,7 +885,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line magnitude",
         figure,
-        lambda f: f.line(0, 0, floats(1, 2), floats(1, -1e301), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, -1e301), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): y[1] is -1e301; magnitudes must not exceed 1e300.",
         "y",
@@ -883,7 +894,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line log not positive",
         lambda: figure(y=LOG),
-        lambda f: f.line(0, 0, floats(1, 2), floats(1, 0), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 2), floats(1, 0), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): y[1] is 0 on a log axis; values must be positive.",
         "y",
@@ -892,7 +903,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line log too small",
         lambda: figure(x=LOG),
-        lambda f: f.line(0, 0, floats(1, 1e-310), floats(1, 2), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1, 1e-310), floats(1, 2), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): x[1] is 1e-310 on a log axis; values must be at least 1e-300.",
         "x",
@@ -901,7 +912,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line numbers on a category axis",
         lambda: figure(x=CATEGORY),
-        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): x holds numbers but the x axis is a category axis; pass category names.",
         None,
@@ -910,7 +921,7 @@ MARK_ERRORS: list[ErrorCase] = [
     (
         "line names on a linear axis",
         figure,
-        lambda f: f.line(0, 0, ["a"], floats(1), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, ["a"], floats(1), "", AUTO, 0, NO_SIZE, 0),
         ub.DataError,
         "Axes.line(): x holds category names but the x axis is not a category axis; pass numbers.",
         None,
@@ -938,7 +949,7 @@ MARK_ERRORS: list[ErrorCase] = [
         "scatter length",
         figure,
         lambda f: f.scatter(
-            0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+            0, 0, floats(1, 2), floats(1), "", AUTO, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS, 0
         ),
         ub.DataError,
         "Axes.scatter(): x has 2 values but y has 1; x and y must have the same length.",
@@ -959,6 +970,7 @@ MARK_ERRORS: list[ErrorCase] = [
             NO_SIZE,
             *NO_POINT_LABELS,
             *NO_OWN_MARKS,
+            0,
         ),
         ub.DataError,
         f"Axes.scatter(): y[1] is inf; {FINITE}",
@@ -1145,9 +1157,9 @@ def test_mark_errors_change_nothing(
     hint: object,
 ) -> None:
     fig = make()
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     assert_reported(lambda: call(fig), cls, message, parameter, hint)
-    assert fig.to_svg(OUTLINES) == before
+    assert fig.to_svg(OUTLINES, 300) == before
 
 
 def untyped(value: object) -> Any:
@@ -1160,14 +1172,14 @@ INTERNAL_MARK_ERRORS: list[
 ] = [
     (
         "dash",
-        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 3, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), floats(1), "", AUTO, 3, NO_SIZE, 0),
         ValueError,
         "3 is not a value of Dash",
     ),
     (
         "marker",
         lambda f: f.scatter(
-            0, 0, floats(1), floats(1), "", AUTO, 5, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+            0, 0, floats(1), floats(1), "", AUTO, 5, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS, 0
         ),
         ValueError,
         "5 is not a value of Marker",
@@ -1180,7 +1192,7 @@ INTERNAL_MARK_ERRORS: list[
     ),
     (
         "list of floats",
-        lambda f: f.line(0, 0, floats(1), untyped([1.0]), "", AUTO, 0, NO_SIZE),
+        lambda f: f.line(0, 0, floats(1), untyped([1.0]), "", AUTO, 0, NO_SIZE, 0),
         TypeError,
         "expected a list of str, got an item of float",
     ),
@@ -1208,9 +1220,9 @@ def test_unconvertible_mark_arguments_are_internal_errors_that_change_nothing(
     call: Callable[[_umber.Figure], object], cls: type[BaseException], message: str
 ) -> None:
     fig = figure()
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     assert_internal(lambda: call(fig), cls, message)
-    assert fig.to_svg(OUTLINES) == before
+    assert fig.to_svg(OUTLINES, 300) == before
 
 
 # Rendering
@@ -1224,7 +1236,7 @@ def test_png_pixel_size_is_inches_times_dpi(width: float, height: float, dpi: in
     expected = (round(width * dpi), round(height * dpi))
     assert png_size(fig.to_png(dpi)) == expected  # a figure without axes renders
     fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
-    fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, NO_SIZE)
+    fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, NO_SIZE, 0)
     png = fig.to_png(dpi)
     assert isinstance(png, bytes)
     assert png_size(png) == expected
@@ -1233,15 +1245,15 @@ def test_png_pixel_size_is_inches_times_dpi(width: float, height: float, dpi: in
 
 def test_svg_text_modes() -> None:
     fig = line_figure()
-    editable = fig.to_svg(EDITABLE)
-    outlines = fig.to_svg(OUTLINES)
+    editable = fig.to_svg(EDITABLE, 300)
+    outlines = fig.to_svg(OUTLINES, 300)
     assert editable.startswith("<svg") or editable.startswith("<?xml")
     assert ">Signal</text>" in editable
     assert ">Signal</text>" not in outlines
-    assert fig.svg_for_file(EDITABLE) == editable
-    assert fig.svg_for_file(OUTLINES) == outlines
-    assert_internal(lambda: fig.to_svg(2), ValueError, "2 is not a value of SvgText")
-    assert_internal(lambda: fig.svg_for_file(-1), ValueError, "-1 is not a value of SvgText")
+    assert fig.svg_for_file(EDITABLE, 300) == editable
+    assert fig.svg_for_file(OUTLINES, 300) == outlines
+    assert_internal(lambda: fig.to_svg(2, 300), ValueError, "2 is not a value of SvgText")
+    assert_internal(lambda: fig.svg_for_file(-1, 300), ValueError, "-1 is not a value of SvgText")
 
 
 DPI_RULE = "is out of range; use a value from 10 to 2400."
@@ -1284,7 +1296,7 @@ def test_png_size_limits(method: str, context: str, side: float, dpi: int, messa
 
 def test_rendering_is_deterministic() -> None:
     assert line_figure().to_png(50) == line_figure().to_png(50)
-    assert line_figure().to_svg(OUTLINES) == line_figure().to_svg(OUTLINES)
+    assert line_figure().to_svg(OUTLINES, 300) == line_figure().to_svg(OUTLINES, 300)
 
 
 # Copies
@@ -1292,22 +1304,32 @@ def test_rendering_is_deterministic() -> None:
 
 def test_a_clone_is_independent_of_the_original() -> None:
     original = line_figure()
-    svg = original.to_svg(EDITABLE)
+    svg = original.to_svg(EDITABLE, 300)
     copy = original.clone()
     assert isinstance(copy, _umber.Figure)
     assert copy is not original
-    assert copy.to_svg(EDITABLE) == svg
+    assert copy.to_svg(EDITABLE, 300) == svg
 
     copy.title(0, 0, "Changed", NO_SIZE)
     copy.scatter(
-        0, 0, floats(0, 1), floats(2, 2), "south", RED, 0, NO_SIZE, *NO_POINT_LABELS, *NO_OWN_MARKS
+        0,
+        0,
+        floats(0, 1),
+        floats(2, 2),
+        "south",
+        RED,
+        0,
+        NO_SIZE,
+        *NO_POINT_LABELS,
+        *NO_OWN_MARKS,
+        0,
     )
     copy.xlim(0, 0, -1.0, 3.0)
-    assert ">Changed</text>" in copy.to_svg(EDITABLE)
-    assert original.to_svg(EDITABLE) == svg
+    assert ">Changed</text>" in copy.to_svg(EDITABLE, 300)
+    assert original.to_svg(EDITABLE, 300) == svg
 
     original.subtitle(0, 0, "Only here", NO_SIZE)
-    assert ">Only here</text>" not in copy.to_svg(EDITABLE)
+    assert ">Only here</text>" not in copy.to_svg(EDITABLE, 300)
 
 
 def test_a_clone_of_a_figure_without_axes_gets_its_own_axes() -> None:
@@ -1336,10 +1358,10 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     for title in titles:
         reference = changing.clone()
         reference.title(0, 0, title, NO_SIZE)
-        expected_svgs.add(reference.to_svg(OUTLINES))
+        expected_svgs.add(reference.to_svg(OUTLINES, 300))
         expected_pngs.add(reference.to_png(40))
     unchanged = line_figure()
-    unchanged_svg = unchanged.to_svg(OUTLINES)
+    unchanged_svg = unchanged.to_svg(OUTLINES, 300)
     unchanged_png = unchanged.to_png(40)
 
     errors: list[BaseException] = []
@@ -1365,9 +1387,9 @@ def test_renders_in_threads_while_another_thread_sets_titles() -> None:
     def render() -> None:
         try:
             for _ in range(15):
-                svgs.append(when_free(lambda: changing.to_svg(OUTLINES)))
+                svgs.append(when_free(lambda: changing.to_svg(OUTLINES, 300)))
                 pngs.append(when_free(lambda: changing.to_png(40)))
-                still_svgs.append(unchanged.to_svg(OUTLINES))
+                still_svgs.append(unchanged.to_svg(OUTLINES, 300))
                 still_pngs.append(unchanged.to_png(40))
         except BaseException as err:  # reported below
             errors.append(err)

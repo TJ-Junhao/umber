@@ -14,9 +14,11 @@
 mod image;
 pub(crate) mod normalize;
 mod pdf;
+mod raster;
 mod svg;
 
 pub(crate) use pdf::page_size;
+pub(crate) use pdf::pages_document;
 pub use pdf::{render_pdf, render_pdf_pages};
 pub use svg::render_svg;
 
@@ -40,5 +42,5 @@ pub enum SvgText {
 
 mod png;
 
-pub(crate) use png::check_dpi;
 pub use png::render_png;
+pub(crate) use png::{check_dpi, check_raster_dpi};

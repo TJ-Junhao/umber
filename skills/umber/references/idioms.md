@@ -294,3 +294,15 @@ other = ub.Figure(3, 5)
 other.add_axes().line([1, 2, 3], [2.0, 1.0, 3.0])
 assert ub.to_pdf([fig, other]).startswith(b"%PDF-")
 ```
+
+A PDF or SVG for a paper with a dense scatter (tens of thousands of points or more), a long noisy line, or a tripcolor of many triangles opens slowly, because every point is a shape the viewer draws. Pass `render=ub.Render.RASTER` to that `scatter()`, `line()` or `tripcolor()` call: SVG and PDF output then draw the mark as one image, at the export's `raster_dpi` (300 by default, 10 to 2400), while the axes, text, legend, colorbar, the other marks and the mark's own value labels and error bars stay vector. PNG output does not change. Raise `raster_dpi` for print (`fig.save_pdf(path, raster_dpi=600)`); it changes nothing in a figure without such a mark. Leave sparse marks vector: the default `render=ub.Render.VECTOR` stays sharp at any zoom, and there is no automatic switch.
+
+```python
+import numpy as np
+
+rng = np.random.default_rng(0)
+x, y = rng.normal(size=50_000), rng.normal(size=50_000)
+dense = ub.Figure().add_axes().scatter(x, y, render=ub.Render.RASTER).line([-2, 2], [-2, 2])
+pdf = dense.figure.to_pdf(raster_dpi=300)
+assert pdf.count(b"/Subtype /Image") == 2  # the image of the points and its transparency
+```

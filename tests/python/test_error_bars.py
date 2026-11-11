@@ -485,7 +485,7 @@ def test_error_bars_match_the_native_figure(theme: ub.Theme, native_theme: Any) 
     native_fig.x_error_bars(
         0, 0, floats(1, 2), floats(0, 1), floats(2, 3), "", AUTO, (1, 2.0), False
     )
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
 
 
@@ -495,7 +495,7 @@ def test_a_category_y_error_bar_matches_the_native_figure() -> None:
     native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.pigment(), *ONE_CELL)
     native_fig.add_axes(*ONLY_CELL, CATEGORY, 10.0, LINEAR, 10.0)
     native_fig.y_error_bars(0, 0, ["a", "b"], floats(1, 2), floats(2, 4), "", AUTO, NO_SIZE, True)
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
 
 
 def test_x_error_bars_on_a_category_axis_are_refused_by_the_native_layer_too() -> None:

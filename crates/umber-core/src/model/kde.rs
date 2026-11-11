@@ -363,6 +363,7 @@ fn density_line(
             color: options.color,
             dash: options.dash,
             width: options.width,
+            render: crate::MarkRender::Vector,
         },
     ))
 }

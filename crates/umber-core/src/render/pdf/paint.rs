@@ -6,7 +6,9 @@
 //! the clip changes (clips of nested groups are intersected first, so the state nesting never
 //! goes deeper than two). The resources the content names (opacity states, soft masks,
 //! shadings, marker forms, images and fonts) are recorded in first-use order and written by
-//! [`Resources::write`].
+//! [`Resources::write`]. Marks drawn as one image ([`Item::Raster`]) are drawn by the PNG
+//! backend at the page's raster resolution when the page content reaches them, and their image
+//! is compressed at once, so its pixels are not kept.
 
 use std::collections::HashMap;
 
@@ -17,11 +19,13 @@ use super::super::normalize::{
     GradientKind, NormalizedPath, Segment, image_is_drawable, normalize_dash, normalize_gradient,
     normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
-use super::Clip;
-use super::image::{side, write_image};
+use super::super::raster::raster_image;
+use super::image::{EncodedImage, side, write_encoded, write_image};
 use super::text::{Fonts, written};
 use super::write::{Refs, limited, rounded, unit};
+use super::{CONTEXT, Clip};
 use crate::color::Rgba;
+use crate::error::Result;
 use crate::geometry::{Path, Point};
 use crate::scene::{
     FillRule, GradientStop, Item, LineCap, LineJoin, Paint, Rect, StrokeStyle, TextItem,
@@ -30,6 +34,11 @@ use crate::scene::{
 /// The miter limit of every stroke, as in the PNG and SVG backends.
 const MITER_LIMIT: f32 = 4.0;
 
+/// The step of the coordinates the content writes, in points: they are rounded to three
+/// decimals ([`rounded`]). The image of marks is placed this far inside its pixel edges (see
+/// `Page::raster`).
+const COORDINATE_STEP: f32 = 0.001;
+
 /// The page content being written, with the resources it uses.
 pub(super) struct Page<'f, 's> {
     content: Content,
@@ -37,11 +46,14 @@ pub(super) struct Page<'f, 's> {
     clip: Option<Clip>,
     resources: Resources<'s>,
     fonts: &'f Fonts,
+    /// The resolution of the images of marks.
+    raster_dpi: u32,
 }
 
 impl<'f, 's> Page<'f, 's> {
-    /// An empty page of `width × height` points whose text is set in `fonts`.
-    pub(super) fn new(width: f32, height: f32, fonts: &'f Fonts) -> Page<'f, 's> {
+    /// An empty page of `width × height` points whose text is set in `fonts` and whose marks
+    /// drawn as images are drawn at `raster_dpi`.
+    pub(super) fn new(width: f32, height: f32, fonts: &'f Fonts, raster_dpi: u32) -> Page<'f, 's> {
         let mut content = Content::new();
         content.transform([1.0, 0.0, 0.0, -1.0, 0.0, height]);
         content.set_miter_limit(MITER_LIMIT);
@@ -58,6 +70,7 @@ impl<'f, 's> Page<'f, 's> {
                 marker_forms: HashMap::new(),
             },
             fonts,
+            raster_dpi,
         }
     }
 
@@ -75,8 +88,15 @@ impl<'f, 's> Page<'f, 's> {
     }
 
     /// Paints one leaf item under `clip`. Groups are resolved by the caller, which passes
-    /// their leaves with the clip in effect for each.
-    pub(super) fn item(&mut self, item: &'s Item, clip: Option<Clip>) {
+    /// their leaves with the clip in effect for each; the items of an [`Item::Raster`] are one
+    /// leaf, their image.
+    ///
+    /// # Errors
+    ///
+    /// As [`raster_image`], for the image of an [`Item::Raster`] that cannot be drawn.
+    ///
+    /// `depth` is the number of groups around the item.
+    pub(super) fn item(&mut self, item: &'s Item, clip: Option<Clip>, depth: usize) -> Result<()> {
         self.use_clip(clip);
         match item {
             Item::Fill { path, paint, rule } => self.fill(path, paint, *rule),
@@ -95,8 +115,10 @@ impl<'f, 's> Page<'f, 's> {
                 height,
                 pixels,
             } => self.image(rect, (*width, *height), pixels),
+            Item::Raster { rect, items } => return self.raster(rect, items, depth + 1),
             Item::Group { .. } => {}
         }
+        Ok(())
     }
 
     /// The content stream and the resources it names.
@@ -365,6 +387,42 @@ impl<'f, 's> Page<'f, 's> {
             size: (columns, rows),
             pixels,
         });
+        self.place_image(rect, &name);
+    }
+
+    /// Paints the image of the marks `items` drawn over `rect` inside `depth` groups (see
+    /// [`raster_image`]).
+    fn raster(&mut self, rect: &Rect, items: &[Item], depth: usize) -> Result<()> {
+        let page = (self.resources.width, self.resources.height);
+        let dpi = self.raster_dpi;
+        let Some(image) = raster_image(rect, items, page, dpi, CONTEXT, depth)? else {
+            return Ok(());
+        };
+        let (Some(columns), Some(rows)) = (side(image.size.0), side(image.size.1)) else {
+            return Ok(());
+        };
+        let encoded = EncodedImage::marks((columns, rows), &image.rgba);
+        drop(image.rgba);
+        let name = self.resources.xobject(XObject::Marks(encoded));
+        // Poppler and MuPDF widen an image to every device pixel its edges touch: placed on its
+        // pixel edges, an image drawn at its own resolution would be widened by one pixel and
+        // resampled. Placed one step of the written coordinates inside them, it is drawn pixel
+        // for pixel. The step is fixed in points, whatever the raster resolution, and is the
+        // precision every coordinate is written in already.
+        let r = image.rect;
+        let step = f64::from(COORDINATE_STEP);
+        let inside = Rect {
+            x: (f64::from(r.x) + step) as f32,
+            y: (f64::from(r.y) + step) as f32,
+            width: (f64::from(r.width) - 2.0 * step) as f32,
+            height: (f64::from(r.height) - 2.0 * step) as f32,
+        };
+        self.place_image(&inside, &name);
+        Ok(())
+    }
+
+    /// Paints the image XObject `name` over `rect`.
+    fn place_image(&mut self, rect: &Rect, name: &str) {
         self.content.save_state();
         // The image's unit square, its first row at the top of `rect`.
         self.content.transform([
@@ -562,6 +620,8 @@ enum XObject<'s> {
         size: (i32, i32),
         pixels: &'s [Rgba],
     },
+    /// The image of marks drawn as one image, already compressed.
+    Marks(EncodedImage),
 }
 
 /// The resources of a page, in first-use order within each kind.
@@ -664,6 +724,7 @@ impl<'s> Resources<'s> {
                         id
                     }
                     XObject::Image { size, pixels } => write_image(chunk, refs, *size, pixels),
+                    XObject::Marks(image) => write_encoded(chunk, refs, image),
                 };
                 (format!("X{index}"), id)
             })

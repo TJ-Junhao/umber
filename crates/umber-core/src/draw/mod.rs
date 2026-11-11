@@ -10,6 +10,10 @@
 //! plot area's. The baseline comes last, in an unclipped group of its own drawn by [`baseline()`],
 //! so marks never cover it.
 //!
+//! A scatter, line or tripcolor drawn with [`MarkRender::Raster`](crate::MarkRender::Raster) has
+//! its items put into one [`Item::Raster`] covering the marks clip, in their place, which SVG and
+//! PDF output draw as one image (see [`raster_items`]).
+//!
 //! Marks are clipped in *axis space*, before they are mapped to plot coordinates: the raw value
 //! on a linear axis, `ln(value / lower limit)` on a log axis, the band center (in `0..=1`) on a
 //! category axis.
@@ -221,6 +225,9 @@ pub(crate) fn drawn_marks(
                 ..
             } => {
                 line_mark_items(&context, resolved, line_mark, (color, width), &mut items);
+                let render = line_mark.options().render;
+                let end = items.len();
+                raster_items(&mut items, start..end, clip, render);
             }
             ResolvedMark::Area {
                 mark: area_mark,
@@ -246,9 +253,11 @@ pub(crate) fn drawn_marks(
                 if let Some(line_mark) = scatter_mark.line() {
                     line_mark_items(&context, resolved, line_mark, own, &mut items);
                 }
+                let bars_start = items.len();
                 for bars in scatter_mark.error_bars() {
                     error_bars::error_bar_items(&context, resolved, bars, own, &mut items);
                 }
+                let markers_start = items.len();
                 let xs = axis_values(&resolved.x, scatter_mark.x());
                 let ys = axis_values(&resolved.y, scatter_mark.y());
                 let marker = scatter_mark.options().marker;
@@ -261,6 +270,17 @@ pub(crate) fn drawn_marks(
                         fill_size,
                         &mut items,
                     );
+                }
+                // The error bars stay vector shapes: the line and the markers are one image
+                // without bars between them, and two images around the bars otherwise.
+                let render = scatter_mark.options().render;
+                if bars_start == markers_start {
+                    let end = items.len();
+                    raster_items(&mut items, start..end, clip, render);
+                } else {
+                    let end = items.len();
+                    raster_items(&mut items, markers_start..end, clip, render);
+                    raster_items(&mut items, start..bars_start, clip, render);
                 }
             }
             ResolvedMark::Bar {
@@ -445,6 +465,8 @@ pub(crate) fn drawn_marks(
                 if let Some(color) = &resolved.color {
                     triangles::tripcolor_items(&context, resolved, mark, color, &mut items);
                 }
+                let end = items.len();
+                raster_items(&mut items, start..end, clip, mark.options().render);
             }
             ResolvedMark::Stem {
                 mark: stem_mark,
@@ -647,6 +669,31 @@ pub(crate) fn check_images(
         }
     };
     Err(error)
+}
+
+/// Puts `items[range]`, the items of one mark, into one [`Item::Raster`] covering `clip`, the
+/// marks clip, in their place, when `render` is
+/// [`MarkRender::Raster`](crate::MarkRender::Raster): SVG and PDF output then
+/// draw them as one image over the plot area, which the clip of the marks group cuts exactly
+/// where it cuts vector shapes. An empty range stays empty, so a mark that draws nothing adds no
+/// image.
+fn raster_items(
+    items: &mut Vec<Item>,
+    range: std::ops::Range<usize>,
+    clip: Rect,
+    render: crate::MarkRender,
+) {
+    if render == crate::MarkRender::Vector || range.is_empty() {
+        return;
+    }
+    let drawn: Vec<Item> = items.drain(range.clone()).collect();
+    items.insert(
+        range.start,
+        Item::Raster {
+            rect: clip,
+            items: drawn,
+        },
+    );
 }
 
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when

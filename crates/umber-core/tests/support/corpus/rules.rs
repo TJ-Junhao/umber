@@ -573,7 +573,7 @@ fn rules_errors(lib: &FontLibrary) -> String {
     });
     rec.result(
         "to_svg, known category",
-        known.to_svg(SvgText::Editable),
+        known.to_svg(SvgText::Editable, 300),
         |_| String::new(),
     );
     let unknown = build("Q5", None);
@@ -585,7 +585,7 @@ fn rules_errors(lib: &FontLibrary) -> String {
     });
     rec.result(
         "to_svg, unknown category",
-        unknown.to_svg(SvgText::Editable),
+        unknown.to_svg(SvgText::Editable, 300),
         |_| String::new(),
     );
     rec.raw(&super::super::record::figure(&unknown));

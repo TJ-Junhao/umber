@@ -3,8 +3,10 @@
 //! [`render_svg`] writes a [`Scene`] as an SVG document. The output is hand-written XML with
 //! absolute path coordinates, at most three decimals per number, ids drawn from a single
 //! counter in document order and images encoded as PNG with fixed settings, so the same scene
-//! always gives the same bytes. A document with an image also starts with one `<style>` rule
-//! that asks browsers to scale images without smoothing; other documents have none. Geometry, dashes
+//! always gives the same bytes. A document with an image of cells also starts with one `<style>`
+//! rule that asks browsers to scale those images without smoothing; other documents have none.
+//! Marks drawn as one image ([`Item::Raster`]) are drawn by the PNG backend at the raster
+//! resolution the call is given, and written as images too. Geometry, dashes
 //! and gradients go through the shared normalization in [`super::normalize`]; values that
 //! cannot be drawn are skipped and the document stays well-formed.
 //!
@@ -15,20 +17,24 @@
 //! use umber_core::{Rgba, Scene};
 //!
 //! let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
-//! let svg = render_svg(&Scene::new(100.0, 50.0, white), SvgText::Outlines);
+//! let svg = render_svg(&Scene::new(100.0, 50.0, white), SvgText::Outlines, 300)?;
 //! assert!(svg.starts_with("<svg "));
+//! # Ok::<(), umber_core::Error>(())
 //! ```
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
 use super::SvgText;
-use super::image::{base64, png_bytes};
+use super::check_raster_dpi;
+use super::image::{base64, png_bytes, png_bytes_rgba8};
 use super::normalize::{
     GradientKind, NormalizedPath, Segment, clip_is_valid, image_is_drawable, normalize_dash,
     normalize_gradient, normalize_path, stroke_is_visible, text_is_visible, valid_point,
 };
+use super::raster::raster_image;
 use crate::color::Rgba;
+use crate::error::Result;
 use crate::fonts::Font;
 use crate::geometry::{Path, Point};
 use crate::scene::{
@@ -46,9 +52,20 @@ use crate::scene::{
 ///
 /// An [`Item::Image`] is an `<image>` holding its pixels as a PNG data URI, stretched without
 /// keeping its aspect ratio and marked `image-rendering="optimizeSpeed"` with the class
-/// `umber-raster`; a document with at least one image starts with one `<style>` rule that
+/// `umber-raster`; a document with at least one such image starts with one `<style>` rule that
 /// gives that class `image-rendering: pixelated` where it is supported, so browsers scale it
-/// without smoothing too. A document without images has no `<style>`.
+/// without smoothing too. A document without them has no `<style>`.
+///
+/// An [`Item::Raster`] is drawn by the PNG backend at `raster_dpi` and written as an `<image>`
+/// holding a PNG, over the whole pixels it covers, without a class or `image-rendering`, so
+/// viewers scale it as they scale any image. `raster_dpi` changes nothing else: a scene without
+/// such an item gives the same document at every `raster_dpi`.
+///
+/// # Errors
+///
+/// `Error::Style` with context `"Figure.to_svg()"` and the parameter `raster_dpi` when
+/// `raster_dpi` is outside `10..=2400`, or when the image of an [`Item::Raster`] would have
+/// more than 32,767 pixels on a side or 2^26 pixels in all, the limits of a PNG.
 ///
 /// # Examples
 ///
@@ -57,12 +74,14 @@ use crate::scene::{
 /// use umber_core::{Rgba, Scene};
 ///
 /// let white = Rgba { r: 255, g: 255, b: 255, a: 255 };
-/// let svg = render_svg(&Scene::new(72.0, 36.0, white), SvgText::Editable);
+/// let svg = render_svg(&Scene::new(72.0, 36.0, white), SvgText::Editable, 300)?;
 /// assert!(svg.contains(r#"width="72pt" height="36pt" viewBox="0 0 72 36""#));
 /// assert!(svg.contains(r##"fill="#FFFFFF""##));
+/// assert!(render_svg(&Scene::new(72.0, 36.0, white), SvgText::Editable, 5).is_err());
+/// # Ok::<(), umber_core::Error>(())
 /// ```
-#[must_use]
-pub fn render_svg(scene: &Scene, text: SvgText) -> String {
+pub fn render_svg(scene: &Scene, text: SvgText, raster_dpi: u32) -> Result<String> {
+    let raster_dpi = check_raster_dpi(CONTEXT, i64::from(raster_dpi))?;
     let width = size_value(scene.width);
     let height = size_value(scene.height);
     let (w, h) = (num(width), num(height));
@@ -75,9 +94,11 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
         text,
         fonts: &scene.fonts,
         images: false,
+        scene: (scene.width, scene.height),
+        raster_dpi,
     };
     for item in &scene.items {
-        writer.item(item, 0);
+        writer.item(item, 0)?;
     }
 
     let mut out = String::new();
@@ -105,8 +126,11 @@ pub fn render_svg(scene: &Scene, text: SvgText) -> String {
     }
     out.push_str(&writer.body);
     out.push_str("</svg>\n");
-    out
+    Ok(out)
 }
+
+/// The context of the errors of [`render_svg`].
+const CONTEXT: &str = "Figure.to_svg()";
 
 /// A non-finite or negative size becomes 0.
 fn size_value(v: f32) -> f32 {
@@ -249,8 +273,12 @@ struct Writer<'a> {
     text: SvgText,
     /// The scene's fonts, which the faces of text items index.
     fonts: &'a [Font],
-    /// Whether an image was written, so the document needs the stylesheet of images.
+    /// Whether an image of cells was written, so the document needs the stylesheet of images.
     images: bool,
+    /// The scene's width and height, which images of marks are cut to.
+    scene: (f32, f32),
+    /// The resolution of the images of marks.
+    raster_dpi: u32,
 }
 
 impl Writer<'_> {
@@ -261,7 +289,11 @@ impl Writer<'_> {
     }
 
     /// Writes one item. `depth` is the number of groups enclosing it.
-    fn item(&mut self, item: &Item, depth: usize) {
+    ///
+    /// # Errors
+    ///
+    /// As [`raster_image`], for the first image of marks that cannot be drawn.
+    fn item(&mut self, item: &Item, depth: usize) -> Result<()> {
         match item {
             Item::Fill { path, paint, rule } => self.fill(path, paint, *rule),
             Item::Stroke { path, style } => self.stroke(path, style),
@@ -281,8 +313,38 @@ impl Writer<'_> {
                 height,
                 pixels,
             } => self.image(rect, (*width, *height), pixels),
-            Item::Group { clip, items } => self.group(*clip, items, depth),
+            Item::Group { clip, items } => return self.group(*clip, items, depth),
+            // An image of marks counts as a group in the nesting depth, as in PNG output.
+            Item::Raster { rect, items } if depth < MAX_GROUP_DEPTH => {
+                return self.raster(rect, items, depth + 1);
+            }
+            Item::Raster { .. } => {}
         }
+        Ok(())
+    }
+
+    /// Writes the image of the marks `items` drawn over `rect` inside `depth` groups (see
+    /// [`raster_image`]) as an `<image>` holding a PNG, scaled as viewers scale images, which
+    /// may smooth it.
+    fn raster(&mut self, rect: &Rect, items: &[Item], depth: usize) -> Result<()> {
+        let dpi = self.raster_dpi;
+        let Some(image) = raster_image(rect, items, self.scene, dpi, CONTEXT, depth)? else {
+            return Ok(());
+        };
+        let (width, height) = image.size;
+        let Some(png) = png_bytes_rgba8(width, height, &image.rgba) else {
+            return Ok(());
+        };
+        let _ = writeln!(
+            self.body,
+            r#"<image x="{}" y="{}" width="{}" height="{}" preserveAspectRatio="none" href="data:image/png;base64,{}"/>"#,
+            num(image.rect.x),
+            num(image.rect.y),
+            num(image.rect.width),
+            num(image.rect.height),
+            base64(&png)
+        );
+        Ok(())
     }
 
     /// Writes an image as an `<image>` stretched over `rect` without keeping its aspect ratio,
@@ -485,15 +547,15 @@ impl Writer<'_> {
         }
     }
 
-    fn group(&mut self, clip: Option<Rect>, items: &[Item], depth: usize) {
+    fn group(&mut self, clip: Option<Rect>, items: &[Item], depth: usize) -> Result<()> {
         if depth >= MAX_GROUP_DEPTH {
-            return;
+            return Ok(());
         }
         let mut attrs = String::new();
         let mut clip_def = None;
         if let Some(r) = clip {
             if !clip_is_valid(&r) {
-                return;
+                return Ok(());
             }
             let id = self.id();
             let _ = write!(attrs, r#" clip-path="url(#c{id})""#);
@@ -510,17 +572,18 @@ impl Writer<'_> {
         let defs_start = self.defs.len();
         self.body.push_str(&open);
         for item in items {
-            self.item(item, depth + 1);
+            self.item(item, depth + 1)?;
         }
         if self.body.len() == start + open.len() {
             self.body.truncate(start);
-            return;
+            return Ok(());
         }
         self.body.push_str("</g>\n");
         if let Some(def) = clip_def {
             // The clip was numbered before its children, so it is defined before them.
             self.defs.insert_str(defs_start, &def);
         }
+        Ok(())
     }
 }
 
@@ -672,7 +735,7 @@ mod tests {
 
     #[test]
     fn empty_scene_is_valid_svg() {
-        let svg = render_svg(&Scene::new(0.0, 0.0, WHITE), SvgText::Outlines);
+        let svg = render_svg(&Scene::new(0.0, 0.0, WHITE), SvgText::Outlines, 300).unwrap();
         let doc = parse(&svg);
         let root = doc.root_element();
         assert_eq!(root.attribute("width"), Some("0pt"));
@@ -681,7 +744,7 @@ mod tests {
 
     #[test]
     fn fill_stroke_and_markers_snapshot() {
-        let svg = render_svg(&snapshot_scene(), SvgText::Outlines);
+        let svg = render_svg(&snapshot_scene(), SvgText::Outlines, 300).unwrap();
         parse(&svg);
         insta::assert_snapshot!(svg);
     }
@@ -697,7 +760,7 @@ mod tests {
                 t.origin = bad;
             }
             for mode in [SvgText::Outlines, SvgText::Editable] {
-                let svg = render_svg(&scene, mode);
+                let svg = render_svg(&scene, mode, 300).unwrap();
                 parse(&svg);
                 assert!(
                     !svg.contains("<text") && svg.matches("<path").count() == 0,
@@ -714,12 +777,12 @@ mod tests {
             .push_text(&inter_fonts(), "Hello", inter(12.0), p(5.0, 20.0), RED)
             .unwrap();
 
-        let outlines = render_svg(&scene, SvgText::Outlines);
+        let outlines = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         assert!(!outlines.contains("<text"));
         assert!(outlines.contains("<path"));
         parse(&outlines);
 
-        let editable = render_svg(&scene, SvgText::Editable);
+        let editable = render_svg(&scene, SvgText::Editable, 300).unwrap();
         let doc = parse(&editable);
         let texts: Vec<_> = doc
             .descendants()
@@ -751,7 +814,7 @@ mod tests {
                 scene
                     .push_text(&fonts, "Ab", style, p(5.0, 20.0), RED)
                     .unwrap();
-                let editable = render_svg(&scene, SvgText::Editable);
+                let editable = render_svg(&scene, SvgText::Editable, 300).unwrap();
                 let doc = parse(&editable);
                 let text = doc
                     .descendants()
@@ -786,7 +849,7 @@ mod tests {
         scene
             .push_text(&fonts, "Ab", mono, p(5.0, 20.0), RED)
             .unwrap();
-        let editable = render_svg(&scene, SvgText::Editable);
+        let editable = render_svg(&scene, SvgText::Editable, 300).unwrap();
         let doc = parse(&editable);
         let text = doc
             .descendants()
@@ -807,10 +870,10 @@ mod tests {
         if let Some(Item::Text(t)) = scene.items.first_mut() {
             t.style.face = FaceId::new(1);
         }
-        let editable = render_svg(&scene, SvgText::Editable);
+        let editable = render_svg(&scene, SvgText::Editable, 300).unwrap();
         parse(&editable);
         assert!(!editable.contains("<text"), "{editable}");
-        let outlines = render_svg(&scene, SvgText::Outlines);
+        let outlines = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         assert_eq!(outlines.matches("<path").count(), 1, "{outlines}");
     }
 
@@ -825,7 +888,7 @@ mod tests {
         if let Some(Item::Text(t)) = scene.items.first_mut() {
             t.text = "a<b & \"c\" 'd'\u{0007}e".to_owned();
         }
-        let svg = render_svg(&scene, SvgText::Editable);
+        let svg = render_svg(&scene, SvgText::Editable, 300).unwrap();
         let doc = parse(&svg);
         let texts: Vec<_> = doc
             .descendants()
@@ -1024,13 +1087,13 @@ mod tests {
         }));
 
         for mode in [SvgText::Outlines, SvgText::Editable] {
-            let svg = render_svg(&scene, mode);
+            let svg = render_svg(&scene, mode, 300).unwrap();
             parse(&svg);
             assert!(!svg.contains("NaN") && !svg.contains("inf"), "{svg}");
         }
 
         for (w, h) in [(nan, 10.0), (10.0, inf), (-5.0, 10.0)] {
-            let svg = render_svg(&Scene::new(w, h, WHITE), SvgText::Outlines);
+            let svg = render_svg(&Scene::new(w, h, WHITE), SvgText::Outlines, 300).unwrap();
             parse(&svg);
             assert!(!svg.contains("NaN") && !svg.contains("inf"), "{svg}");
         }
@@ -1060,10 +1123,12 @@ mod tests {
     #[test]
     fn svg_output_is_deterministic() {
         let scene = snapshot_scene();
-        let first = render_svg(&scene, SvgText::Outlines);
+        let first = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         for _ in 0..10 {
             assert_eq!(
-                render_svg(&scene, SvgText::Outlines).as_bytes(),
+                render_svg(&scene, SvgText::Outlines, 300)
+                    .unwrap()
+                    .as_bytes(),
                 first.as_bytes()
             );
         }
@@ -1100,7 +1165,7 @@ mod tests {
             .push_text(&inter_fonts(), "Hi", inter(12.0), p(5.0, 20.0), clear)
             .unwrap();
         for mode in [SvgText::Outlines, SvgText::Editable] {
-            let svg = render_svg(&scene, mode);
+            let svg = render_svg(&scene, mode, 300).unwrap();
             let doc = parse(&svg);
             assert_eq!(
                 doc.descendants().filter(|n| n.is_element()).count(),
@@ -1117,7 +1182,7 @@ mod tests {
         scene
             .push_text(&inter_fonts(), source, inter(12.0), p(5.0, 20.0), RED)
             .unwrap();
-        let svg = render_svg(&scene, SvgText::Editable);
+        let svg = render_svg(&scene, SvgText::Editable, 300).unwrap();
         let doc = parse(&svg);
         let text = doc
             .descendants()
@@ -1161,7 +1226,7 @@ mod tests {
             ),
             rule: FillRule::NonZero,
         });
-        let svg = render_svg(&scene, SvgText::Outlines);
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         let doc = parse(&svg);
         let colors: Vec<&str> = doc
             .descendants()
@@ -1193,7 +1258,7 @@ mod tests {
                 rule: FillRule::NonZero,
             }],
         });
-        let svg = render_svg(&scene, SvgText::Outlines);
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         let clip = svg.find("<clipPath id=\"c0\"").expect("clip");
         let grad = svg.find("<linearGradient id=\"g1\"").expect("gradient");
         assert!(clip < grad, "{svg}");
@@ -1214,7 +1279,7 @@ mod tests {
             path: line(),
             style: stroke_style(1.0, vec![0.00049, 0.00049]),
         });
-        let svg = render_svg(&scene, SvgText::Outlines);
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         assert!(svg.contains(r#"stroke-dasharray="0.0625 3""#), "{svg}");
         assert_eq!(dash_entry(0.1), "0.1");
         assert_eq!(dash_entry(0.00004), "0.00004");
@@ -1247,10 +1312,10 @@ mod tests {
     #[test]
     fn group_depth_is_bounded() {
         use crate::scene::MAX_GROUP_DEPTH;
-        let kept = render_svg(&deep_chain(MAX_GROUP_DEPTH), SvgText::Outlines);
+        let kept = render_svg(&deep_chain(MAX_GROUP_DEPTH), SvgText::Outlines, 300).unwrap();
         assert!(kept.contains("<path d="));
         assert_eq!(kept.matches("<g>").count(), MAX_GROUP_DEPTH);
-        let omitted = render_svg(&deep_chain(MAX_GROUP_DEPTH + 1), SvgText::Outlines);
+        let omitted = render_svg(&deep_chain(MAX_GROUP_DEPTH + 1), SvgText::Outlines, 300).unwrap();
         assert!(!omitted.contains("<path d="));
         assert!(!omitted.contains("<g"));
     }
@@ -1259,7 +1324,7 @@ mod tests {
     fn very_deep_scenes_render_and_drop_without_overflow() {
         let handle = std::thread::spawn(|| {
             let scene = deep_chain(100_000);
-            let svg = render_svg(&scene, SvgText::Outlines);
+            let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
             drop(scene);
             svg
         });
@@ -1279,7 +1344,7 @@ mod tests {
                 positions: vec![p(i as f32, 1.0), p(i as f32, 2.0)],
             });
         }
-        let svg = render_svg(&scene, SvgText::Outlines);
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         assert_eq!(svg.matches("<path id=").count(), 1, "{svg}");
         assert_eq!(svg.matches("<use ").count(), 6, "{svg}");
         assert_eq!(svg.matches(r##"href="#m0""##).count(), 6, "{svg}");

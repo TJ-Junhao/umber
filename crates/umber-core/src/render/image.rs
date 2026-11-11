@@ -189,6 +189,17 @@ pub(super) fn resample(
 /// (not premultiplied) 8-bit RGBA; the same pixels always give the same bytes. `None` if the
 /// encoder refuses them, which needs more pixels than any scene holds.
 pub(super) fn png_bytes(width: u32, height: u32, pixels: &[Rgba]) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) != pixels.len() as u64 {
+        return None;
+    }
+    let data: Vec<u8> = pixels.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
+    png_bytes_rgba8(width, height, &data)
+}
+
+/// The PNG encoding of `width` by `height` pixels given as `data`, four bytes of straight RGBA
+/// per pixel, row by row from the top, as [`png_bytes`] encodes them. `None` if `data` does
+/// not hold that many pixels or the encoder refuses them.
+pub(super) fn png_bytes_rgba8(width: u32, height: u32, data: &[u8]) -> Option<Vec<u8>> {
     use ::png::Filter;
 
     fn encode(width: u32, height: u32, data: &[u8], level: u8, filter: Filter) -> Option<Vec<u8>> {
@@ -204,11 +215,10 @@ pub(super) fn png_bytes(width: u32, height: u32, pixels: &[Rgba]) -> Option<Vec<
         Some(out)
     }
 
-    if width == 0 || height == 0 || u64::from(width) * u64::from(height) != pixels.len() as u64 {
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) * 4 != data.len() as u64 {
         return None;
     }
-    let data: Vec<u8> = pixels.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
-    let full = |level, filter| encode(width, height, &data, level, filter);
+    let full = |level, filter| encode(width, height, data, level, filter);
     let unfiltered = full(1, Filter::NoFilter)?;
     let adaptive = full(1, Filter::Adaptive)?;
     // Full-image lengths decide whether stronger compression is worth trying. Prediction
@@ -640,8 +650,8 @@ mod tests {
                 "{item:?}"
             );
             assert_eq!(
-                render_svg(&scene, SvgText::Outlines),
-                render_svg(&empty, SvgText::Outlines),
+                render_svg(&scene, SvgText::Outlines, 300).unwrap(),
+                render_svg(&empty, SvgText::Outlines, 300).unwrap(),
                 "{item:?}"
             );
         }
@@ -649,7 +659,7 @@ mod tests {
 
     #[test]
     fn svg_writes_an_unsmoothed_image_with_a_png_data_uri() {
-        let svg = render_svg(&scene_with(two_pixels()), SvgText::Outlines);
+        let svg = render_svg(&scene_with(two_pixels()), SvgText::Outlines, 300).unwrap();
         let uri = base64(&png_bytes(2, 1, &[RED, BLUE]).unwrap());
         let expected = format!(
             "<image x=\"10\" y=\"5\" width=\"20\" height=\"20\" preserveAspectRatio=\"none\" \
@@ -662,12 +672,12 @@ mod tests {
                      image-rendering: pixelated } }</style>\n";
         let mut two = scene_with(two_pixels());
         two.push(two_pixels());
-        let svg = render_svg(&two, SvgText::Editable);
+        let svg = render_svg(&two, SvgText::Editable, 300).unwrap();
         assert_eq!(svg.matches("<style>").count(), 1, "{svg}");
         assert_eq!(svg.split('\n').nth(1), Some(style.trim_end()));
         assert_eq!(svg.matches("class=\"umber-raster\"").count(), 2);
         // A document without an image has no stylesheet.
-        let plain = render_svg(&Scene::new(40.0, 30.0, WHITE), SvgText::Outlines);
+        let plain = render_svg(&Scene::new(40.0, 30.0, WHITE), SvgText::Outlines, 300).unwrap();
         assert!(!plain.contains("<style"), "{plain}");
     }
 

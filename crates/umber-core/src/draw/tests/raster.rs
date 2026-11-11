@@ -843,7 +843,7 @@ fn svg_image_holds_one_pixel_per_cell_in_the_vector_colors() {
         ),
     ];
     for (what, (vector, raster)) in cases {
-        let svg = render_svg(&scene(&raster), SvgText::Outlines);
+        let svg = render_svg(&scene(&raster), SvgText::Outlines, 300).unwrap();
         let doc = roxmltree::Document::parse(&svg).unwrap();
         let images: Vec<_> = doc
             .descendants()
@@ -866,7 +866,7 @@ fn svg_image_holds_one_pixel_per_cell_in_the_vector_colors() {
                 "@supports (image-rendering: pixelated) { .umber-raster { image-rendering: pixelated } }"
             ]
         );
-        let vector_svg = render_svg(&scene(&vector), SvgText::Outlines);
+        let vector_svg = render_svg(&scene(&vector), SvgText::Outlines, 300).unwrap();
         assert!(!vector_svg.contains("<style"), "{what}");
         let href = image.attribute("href").unwrap();
         let data = href.strip_prefix("data:image/png;base64,").unwrap();
@@ -896,7 +896,10 @@ fn image_output_is_deterministic() {
     assert_eq!(a, b);
     assert_eq!(render_png(&a, 200).unwrap(), render_png(&b, 200).unwrap());
     for text in [SvgText::Outlines, SvgText::Editable] {
-        assert_eq!(render_svg(&a, text), render_svg(&b, text));
+        assert_eq!(
+            render_svg(&a, text, 300).unwrap(),
+            render_svg(&b, text, 300).unwrap()
+        );
     }
 }
 

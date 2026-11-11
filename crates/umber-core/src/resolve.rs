@@ -5237,6 +5237,10 @@ mod tests {
             width,
             ..LineOptions::default()
         };
+        let area = |width: SizeSpec| crate::model::AreaOptions {
+            width,
+            ..crate::model::AreaOptions::default()
+        };
         let scatter = |size: SizeSpec| ScatterOptions {
             size,
             ..ScatterOptions::default()
@@ -5254,7 +5258,7 @@ mod tests {
             for spec in specs {
                 a.line(nums(&[0.0, 1.0]), &[1.0, 2.0], line(spec))
                     .unwrap()
-                    .area(nums(&[0.0, 1.0]), &[1.0, 2.0], line(spec))
+                    .area(nums(&[0.0, 1.0]), &[1.0, 2.0], area(spec))
                     .unwrap()
                     .scatter(nums(&[0.5]), &[1.5], scatter(spec))
                     .unwrap();
@@ -6359,7 +6363,13 @@ mod tests {
                 let mut f = figure(LIN, LIN);
                 let mut a = axes(&mut f);
                 if area {
-                    a.area(x(), &[5.0, 6.0, 7.0], options.clone()).unwrap();
+                    let options = crate::model::AreaOptions {
+                        label: options.label.clone(),
+                        dash: options.dash,
+                        width: options.width,
+                        ..crate::model::AreaOptions::default()
+                    };
+                    a.area(x(), &[5.0, 6.0, 7.0], options).unwrap();
                 } else {
                     a.line(x(), &[5.0, 6.0, 7.0], options.clone()).unwrap();
                 }

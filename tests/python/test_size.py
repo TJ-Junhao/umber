@@ -272,8 +272,8 @@ def test_a_line_with_a_relative_width_matches_the_native_figure() -> None:
     fig.add_axes().line([0, 1, 2, 3], [1, 3, 2, 4], label="a", width=ub.Size.times(2))
     native_fig = _umber.Figure(4.0, 3.0, _umber.Theme.graphite(), *ONE_CELL)
     native_fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
-    native_fig.line(0, 0, floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0))
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    native_fig.line(0, 0, floats(0, 1, 2, 3), floats(1, 3, 2, 4), "a", AUTO, 0, (1, 2.0), 0)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = ub.Figure(4, 3, theme=ub.Theme.GRAPHITE)
     plain.add_axes().line([0, 1, 2, 3], [1, 3, 2, 4], label="a")
@@ -296,8 +296,9 @@ def test_a_scatter_with_a_size_in_points_matches_the_native_figure() -> None:
         (2, 11.0),
         *NO_POINT_LABELS,
         *NO_OWN_MARKS,
+        0,
     )
-    assert fig.to_svg() == native_fig.to_svg(OUTLINES)
+    assert fig.to_svg() == native_fig.to_svg(OUTLINES, 300)
     assert fig.to_png(dpi=60) == native_fig.to_png(60)
     plain = ub.Figure(4, 3)
     plain.add_axes().scatter([0, 1, 2], [2, 1, 3], marker=ub.Marker.SQUARE)
@@ -322,7 +323,7 @@ def test_an_unknown_native_size_kind_is_an_internal_error(kind: int) -> None:
     fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
     with pytest.raises(ValueError, match="internal error: .* is not a size kind"):
-        fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, (kind, 1.0))
+        fig.line(0, 0, floats(0, 1), floats(1, 2), "", AUTO, 0, (kind, 1.0), 0)
 
 
 def test_native_checks_report_the_core_errors() -> None:
@@ -343,7 +344,7 @@ def test_native_checks_report_the_core_errors() -> None:
 def test_native_marks_report_the_core_error_for_a_bad_size() -> None:
     fig = _umber.Figure(3.0, 2.0, _umber.Theme.pigment(), *ONE_CELL)
     fig.add_axes(*ONLY_CELL, LINEAR, 10.0, LINEAR, 10.0)
-    before = fig.to_svg(OUTLINES)
+    before = fig.to_svg(OUTLINES, 300)
     with pytest.raises(ub.StyleError) as caught:
         fig.scatter(
             0,
@@ -356,7 +357,8 @@ def test_native_marks_report_the_core_error_for_a_bad_size() -> None:
             (2, 100.0),
             *NO_POINT_LABELS,
             *NO_OWN_MARKS,
+            0,
         )
     assert str(caught.value) == f"Size.pt(): points is 100; {POINTS_RANGE}"
     # The failed call stored no series.
-    assert fig.to_svg(OUTLINES) == before
+    assert fig.to_svg(OUTLINES, 300) == before
