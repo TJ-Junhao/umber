@@ -144,15 +144,15 @@ def test_render_must_be_a_render(method: str, value: object) -> None:
 
 def test_raster_dpi_sets_the_size_of_the_image() -> None:
     fig = _scatter(ub.Render.RASTER, 300)
-    widths: list[int] = []
-    for dpi in (150, 300):
+    for dpi, step in ((150, 75), (300, 75), (600, 150)):
         image = _images(fig.to_svg(raster_dpi=dpi))[0]
         width = _number(r' width="([\d.]+)"', image)
         pixels = int(_number(r"/Width (\d+)", fig.to_pdf(raster_dpi=dpi).decode("latin-1")))
         assert abs(width / 72 * dpi - pixels) < 0.05
-        widths.append(pixels)
-    # Each edge is widened to whole pixels, so the sides differ from double by two at most.
-    assert abs(widths[1] - 2 * widths[0]) <= 2
+        # The edges lie on a grid of quarter inches, or half inches where a quarter inch is
+        # not a whole number of pixels, as is the 6 by 4 in page.
+        assert pixels % step == 0
+        assert _number(r' x="([\d.]+)"', image) % (step / dpi * 72) < 0.01
 
 
 def test_raster_dpi_changes_nothing_without_a_raster_mark(tmp_path: Path) -> None:
