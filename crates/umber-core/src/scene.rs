@@ -369,7 +369,9 @@ pub enum Item {
     /// call is given: a mark drawn with [`MarkRender::Raster`](crate::MarkRender::Raster).
     ///
     /// The image covers `rect` widened to whole pixels of the grid the PNG backend draws on at
-    /// that resolution, and cut to the scene, and holds the items as the PNG backend draws them
+    /// that resolution, then outward to multiples of a quarter inch from the scene's corner
+    /// (half an inch or an inch when a quarter is not a whole number of pixels), so its edges
+    /// lie on the pixel grids of common reader resolutions, and cut to the scene, and holds the items as the PNG backend draws them
     /// there, on a transparent background: pixel `(i, j)` of the image is pixel
     /// `(left + i, top + j)` of a PNG of the items alone (but for the color of a fully
     /// transparent pixel), where `left` and `top` are the image's first column and row on that

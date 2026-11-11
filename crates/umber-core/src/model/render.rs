@@ -84,8 +84,9 @@ impl Render {
 /// scatter of a million points or a long noisy line. In SVG and PDF output such a mark is drawn
 /// into one image at the raster resolution the export is given (`raster_dpi`, 300 in the Python
 /// package), and the image takes the mark's place among the other marks. The image covers the
-/// clip of the marks (the plot area, widened beside it for lines as that clip is) in whole
-/// pixels, and that clip cuts it exactly where it cuts vector shapes; marks are always clipped
+/// clip of the marks (the plot area, widened beside it for lines as that clip is), widened with
+/// transparent pixels to a grid of quarter inches so that readers resample it in step with
+/// their own pixels, and that clip cuts it exactly where it cuts vector shapes; marks are always clipped
 /// to it, so no part of the mark is lost. The image is transparent where the mark draws
 /// nothing, so marks below it show through, and its transparent pixels hold the color of the
 /// nearest drawn pixel, so viewers that smooth it draw no dark edges. It holds what the PNG

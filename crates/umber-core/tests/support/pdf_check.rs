@@ -167,6 +167,54 @@ impl Raster {
     }
 }
 
+/// `raster`, drawn at `from` dpi, resampled to `to` dpi by area and cut to `size` (columns,
+/// rows): each pixel is the mean of the source pixels it covers, weighted by the part of each it
+/// covers. A control for reader comparisons: it shows how far an image at `from` dpi can come
+/// from a drawing at `to` dpi when nothing but its resolution differs.
+pub fn area_downsampled(
+    raster: &Raster,
+    from: u32,
+    to: u32,
+    (width, height): (usize, usize),
+) -> Raster {
+    let scale = f64::from(from) / f64::from(to);
+    // The source pixels each output pixel covers along one axis, with their weights.
+    let spans = |count: usize, source: usize| -> Vec<Vec<(usize, f64)>> {
+        (0..count)
+            .map(|i| {
+                let (lo, hi) = (i as f64 * scale, (i + 1) as f64 * scale);
+                let mut parts: Vec<(usize, f64)> = (lo.floor() as usize
+                    ..(hi.ceil() as usize).min(source))
+                    .map(|j| (j, hi.min(j as f64 + 1.0) - lo.max(j as f64)))
+                    .filter(|&(_, w)| w > 0.0)
+                    .collect();
+                let total: f64 = parts.iter().map(|&(_, w)| w).sum();
+                for part in &mut parts {
+                    part.1 /= total;
+                }
+                parts
+            })
+            .collect()
+    };
+    let (xs, ys) = (spans(width, raster.width), spans(height, raster.height));
+    let mut rgb = Vec::with_capacity(width * height * 3);
+    for row in &ys {
+        for column in &xs {
+            let mut sum = [0.0_f64; 3];
+            for &(y, wy) in row {
+                for &(x, wx) in column {
+                    let i = (y * raster.width + x) * 3;
+                    for (c, total) in sum.iter_mut().enumerate() {
+                        *total += f64::from(raster.rgb[i + c]) * wy * wx;
+                    }
+                }
+            }
+            rgb.extend(sum.map(|v| v.round().clamp(0.0, 255.0) as u8));
+        }
+    }
+    Raster { width, height, rgb }
+}
+
 /// The first page rasterized by `pdftoppm` at `dpi`, as RGB.
 pub fn poppler_raster(path: &FsPath, dpi: u32) -> Raster {
     poppler_page_raster(path, dpi, 1)

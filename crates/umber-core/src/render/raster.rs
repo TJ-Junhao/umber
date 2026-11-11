@@ -2,8 +2,8 @@
 //! image, and its pixels, drawn by the PNG backend.
 //!
 //! The image lies on the grid of device pixels that a PNG of the scene at the raster resolution
-//! has: it covers the item's rectangle widened outward to whole pixels of that grid, and cut to
-//! the scene. Its pixels are those the PNG backend draws for the items there, on a transparent
+//! has: it covers the item's rectangle widened outward to whole pixels of that grid and then to
+//! a grid of quarter inches from the page's corner ([`aligned`]), and cut to the scene. Its pixels are those the PNG backend draws for the items there, on a transparent
 //! background ([`super::png::draw_region`]), so at the raster resolution the image is what a PNG
 //! shows of the items, and the edges of the shapes are antialiased as in a PNG. The image is not
 //! clipped while it is drawn: it reaches past the rectangle by less than a pixel, and the clip
@@ -135,6 +135,65 @@ fn pixel_region(rect: &Rect, scene: (f32, f32), dpi: u32) -> Option<(DeviceOrigi
     Some((origin, (right - left, bottom - top)))
 }
 
+/// The step, in pixels at `dpi`, of the grid the edges of an image of marks are aligned to: a
+/// quarter inch (18 pt) when that is a whole number of pixels, else half an inch, else an inch.
+fn alignment_step(dpi: u32) -> f64 {
+    let step = if dpi.is_multiple_of(4) {
+        dpi / 4
+    } else if dpi.is_multiple_of(2) {
+        dpi / 2
+    } else {
+        dpi
+    };
+    f64::from(step)
+}
+
+/// `region` (its origin and size in pixels at `dpi`) widened outward to
+/// the grid of [`alignment_step`] from the page's top-left corner, and cut to the scene of
+/// `scene` points; `region` itself when the widened image would be larger than a PNG may be.
+///
+/// PDF readers and browsers draw an image on their own pixel grid, which starts at the page's
+/// corner, and resample it there. An image whose edges lie on their grid lines is resampled in
+/// step with their pixels; one that starts a fraction of a pixel off is resampled out of step,
+/// which Poppler draws measurably farther from the shapes. At 72, 96, 100, 144, 200, 300 and
+/// 600 dpi a quarter inch is a whole number of pixels, so these edges lie on the readers' grid
+/// lines. The widening adds less than one step on each side.
+fn aligned(
+    (origin, (width, height)): (DeviceOrigin, (f64, f64)),
+    scene: (f32, f32),
+    dpi: u32,
+) -> (DeviceOrigin, (f64, f64)) {
+    let step = alignment_step(dpi);
+    let s = f64::from(dpi) / 72.0;
+    let page = |side: f32| {
+        if side.is_finite() && side > 0.0 {
+            (f64::from(side) * s).ceil()
+        } else {
+            0.0
+        }
+    };
+    let (left, top) = (f64::from(origin.x), f64::from(origin.y));
+    let (right, bottom) = (left + width, top + height);
+    let widened = [
+        (left / step).floor() * step,
+        (top / step).floor() * step,
+        ((right / step).ceil() * step).min(page(scene.0)).max(right),
+        ((bottom / step).ceil() * step)
+            .min(page(scene.1))
+            .max(bottom),
+    ];
+    let (w, h) = (widened[2] - widened[0], widened[3] - widened[1]);
+    if w > MAX_SIDE || h > MAX_SIDE || w * h > MAX_PIXELS {
+        return (origin, (width, height));
+    }
+    // Whole numbers no further from zero than the region's own corners.
+    let origin = DeviceOrigin {
+        x: widened[0] as i32,
+        y: widened[1] as i32,
+    };
+    (origin, (w, h))
+}
+
 /// The box `[left, top, right, bottom]`, in points, that `items` can draw into: their paths,
 /// marker copies and text outlines, strokes widened by twice their width (the reach of a miter
 /// at the renderers' miter limit of 4), and images. Points that are not finite are left out;
@@ -264,6 +323,25 @@ fn canvas(
     (origin, (w as u32, h as u32))
 }
 
+/// The RGBA bytes of an image of `size` pixels, transparent but for the `inner` (columns, rows)
+/// pixels `rgba`, placed at `offset`.
+fn placed(
+    rgba: &[u8],
+    inner: (u32, u32),
+    (dx, dy): (i32, i32),
+    (width, height): (f64, f64),
+) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let (iw, ih) = (inner.0 as usize, inner.1 as usize);
+    let (dx, dy) = (dx as usize, dy as usize);
+    let mut out = vec![0; w * h * 4];
+    for row in 0..ih {
+        let to = ((dy + row) * w + dx) * 4;
+        out[to..to + iw * 4].copy_from_slice(&rgba[row * iw * 4..(row + 1) * iw * 4]);
+    }
+    out
+}
+
 /// The `size` pixels at `offset` of the RGBA bytes `rgba` of a pixmap `width` pixels wide.
 fn crop(rgba: &[u8], width: u32, (dx, dy): (i32, i32), (w, h): (u32, u32)) -> Vec<u8> {
     let (width, dx, dy) = (width as usize, dx as usize, dy as usize);
@@ -333,6 +411,18 @@ pub(super) fn raster_image(
     if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
         return Ok(None);
     }
+    // The pixels around the region that the alignment adds are transparent.
+    let drawn = origin;
+    let (origin, (width, height)) = aligned((origin, (width, height)), scene, dpi);
+    if (origin, (width as u32, height as u32)) != (drawn, size) {
+        rgba = placed(
+            &rgba,
+            size,
+            (drawn.x - origin.x, drawn.y - origin.y),
+            (width, height),
+        );
+    }
+    let size = (width as u32, height as u32);
     pad_transparent(&mut rgba, (size.0 as usize, size.1 as usize));
     let s = f64::from(dpi) / 72.0;
     let (left, top) = (f64::from(origin.x), f64::from(origin.y));
@@ -543,20 +633,33 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let s = f64::from(dpi) / 72.0;
-            let left = (f64::from(area.x) * s).floor() as u32;
-            let top = (f64::from(area.y) * s).floor() as u32;
-            let right = ((f64::from(area.x) + f64::from(area.width)) * s).ceil() as u32;
-            let bottom = ((f64::from(area.y) + f64::from(area.height)) * s).ceil() as u32;
+            let step = alignment_step(dpi);
+            let down = |v: f64| ((v * s).floor() / step).floor() * step;
+            let up =
+                |v: f64, page: f64| (((v * s).ceil() / step).ceil() * step).min((page * s).ceil());
+            let left = down(f64::from(area.x)) as u32;
+            let top = down(f64::from(area.y)) as u32;
+            let right = up(f64::from(area.x) + f64::from(area.width), 80.0) as u32;
+            let bottom = up(f64::from(area.y) + f64::from(area.height), 50.0) as u32;
             assert_eq!(
                 image.size,
                 (right - left, bottom - top),
                 "{name} at dpi {dpi}"
             );
+            // The pixels the area covers, widened to whole pixels; the alignment around them
+            // is transparent.
+            let drawn = |x: u32, y: u32| {
+                (f64::from(x) >= (f64::from(area.x) * s).floor())
+                    && (f64::from(x) < ((f64::from(area.x) + f64::from(area.width)) * s).ceil())
+                    && (f64::from(y) >= (f64::from(area.y) * s).floor())
+                    && (f64::from(y) < ((f64::from(area.y) + f64::from(area.height)) * s).ceil())
+            };
             for row in 0..image.size.1 {
                 for column in 0..image.size.0 {
                     let at = ((row * image.size.0 + column) * 4) as usize;
                     let pixel = &image.rgba[at..at + 4];
-                    let expected = png.at(left + column, top + row);
+                    let (x, y) = (left + column, top + row);
+                    let expected = if drawn(x, y) { png.at(x, y) } else { [0; 4] };
                     // A transparent pixel's color is padding (see `pad_transparent`).
                     let visible = |p: &[u8]| {
                         if p[3] == 0 {
@@ -602,6 +705,20 @@ mod tests {
     }
 
     #[test]
+    fn image_edges_lie_on_quarter_inches_where_they_are_whole_pixels() {
+        assert_eq!(alignment_step(300), 75.0);
+        assert_eq!(alignment_step(72), 18.0);
+        assert_eq!(alignment_step(150), 75.0);
+        assert_eq!(alignment_step(317), 317.0);
+        let origin = DeviceOrigin { x: 117, y: 73 };
+        let (at, size) = aligned((origin, (1622.0, 1015.0)), (432.0, 288.0), 300);
+        assert_eq!((at, size), (DeviceOrigin { x: 75, y: 0 }, (1725.0, 1125.0)));
+        // Past the limits of a PNG, the region stays as it is.
+        let big = (DeviceOrigin { x: 1, y: 1 }, (8190.0, 8190.0));
+        assert_eq!(aligned(big, (10_000.0, 10_000.0), 1200), big);
+    }
+
+    #[test]
     fn the_image_is_cut_to_the_scene() {
         let image = raster_image(
             &rect(-10.0, 40.0, 200.0, 30.0),
@@ -613,8 +730,9 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(image.size, (80, 10));
-        assert_eq!(image.rect, rect(0.0, 40.0, 80.0, 10.0));
+        // Cut to the scene, widened to quarter inches inside it: 18 pt at 72 dpi.
+        assert_eq!(image.size, (80, 14));
+        assert_eq!(image.rect, rect(0.0, 36.0, 80.0, 14.0));
     }
 
     #[test]

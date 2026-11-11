@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 const MAX_MEAN_DIFFERENCE: f64 = 4.5;
 const MAX_FAR_SHARE: f64 = 0.025;
 
-// Poppler and MuPDF limits for the same eleven scenes. The largest MuPDF differences at
+// Poppler and MuPDF limits for the same nine scenes. The largest MuPDF differences at
 // 72/200 dpi are 13.08 mean and 12.60% far; most are much closer than Poppler.
 // Both rasterizers agree on the geometry, but not on coverage at tiny edges. The generated
 // three-way table records both PNG comparisons and the PDF rasterizers' disagreement.
@@ -40,13 +40,6 @@ fn exceptional_tolerances(name: &str) -> Option<((f64, f64), (f64, f64))> {
         "fig-squeezed-layout-no-x-ticks" => ((7.0, 0.04), (3.0, 0.013)),
         "fig-legend-narrow-50-entries" => ((6.0, 0.03), (4.0, 0.008)),
         "fig-legend-chips-narrow-50-entries" => ((6.0, 0.03), (5.0, 0.008)),
-        // 1,500 translucent markers drawn as one 300 dpi image, which the reader resamples to
-        // 72 or 200 dpi, one device pixel wider and taller than it is: where markers overlap,
-        // compositing them at 300 dpi and then averaging differs from compositing their
-        // coverage at the lower resolution, as the PNG does.
-        "raster-marks-scatter-pigment" | "raster-marks-scatter-graphite" => {
-            ((8.0, 0.065), (7.0, 0.045))
-        }
         _ => return None,
     })
 }
@@ -187,7 +180,7 @@ fn every_corpus_pdf_opens_and_matches_png() {
                     }
                 }
             }
-            // Keep failures and the eleven exceptions, so their tolerances remain inspectable.
+            // Keep failures and the nine exceptions, so their tolerances remain inspectable.
             if dpi == *refactor_cases::DPIS.last().unwrap()
                 && !failed_cases.contains(name)
                 && mupdf_tolerance(name).is_none()
@@ -218,7 +211,7 @@ fn every_corpus_pdf_opens_and_matches_png() {
     let report = pdf_check::write(&dir, "three-way.tsv", table.as_bytes());
     eprintln!("PDF exception table: {}", report.display());
     if poppler && mupdf {
-        assert_eq!(exceptions.len(), 11 * refactor_cases::DPIS.len());
+        assert_eq!(exceptions.len(), 9 * refactor_cases::DPIS.len());
     }
     assert_eq!(
         seen.iter().map(String::as_str).collect::<BTreeSet<_>>(),

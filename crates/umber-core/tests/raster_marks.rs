@@ -357,26 +357,37 @@ fn a_raster_mark_keeps_its_place_between_the_marks_under_and_over_it() {
 }
 
 #[test]
-fn the_image_covers_the_plot_in_whole_pixels_and_is_clipped_to_it() {
+fn the_image_covers_the_plot_on_a_quarter_inch_grid_and_is_clipped_to_it() {
     for (name, raster, _) in pairs() {
-        let clip = marks_clip(&scene(&raster));
-        for dpi in [150, 300] {
+        let scene = scene(&raster);
+        let clip = marks_clip(&scene);
+        // At 300 dpi a quarter inch is 75 pixels; at 150 dpi it is not whole, and half an inch,
+        // 75 pixels, is used.
+        for (dpi, step) in [(150, 36.0), (300, 18.0)] {
             let svg = raster.to_svg(SvgText::Outlines, dpi).unwrap();
             let images = svg_images(&svg);
             let pixel = 72.0 / dpi as f64;
             for image in images {
-                // The image starts and ends on whole pixels within one pixel of the clip.
+                // Each edge lies on the grid or on the page's edge, within one step of the clip.
                 let (x, y) = (attribute(image, "x"), attribute(image, "y"));
                 let (w, h) = (attribute(image, "width"), attribute(image, "height"));
                 let (left, top) = (f64::from(clip.x), f64::from(clip.y));
                 let (right, bottom) = (left + f64::from(clip.width), top + f64::from(clip.height));
-                let near = |a: f64, b: f64| a - 0.002 <= b && b < a + pixel + 0.002;
+                let on_grid = |v: f64, page: f32| {
+                    ((v / step).round() * step - v).abs() < 0.002
+                        || (v - f64::from(page)).abs() < pixel + 0.002
+                };
+                let near = |outer: f64, inner: f64| outer - 0.002 <= inner && inner < outer + step;
                 assert!(
-                    near(x, left) && near(y, top),
+                    on_grid(x, 0.0) && on_grid(y, 0.0),
                     "{name} at {dpi}: {image:.120}"
                 );
                 assert!(
-                    near(right, x + w) && near(bottom, y + h),
+                    on_grid(x + w, scene.width) && on_grid(y + h, scene.height),
+                    "{name} at {dpi}: {image:.120}"
+                );
+                assert!(
+                    near(x, left) && near(y, top) && near(right, x + w) && near(bottom, y + h),
                     "{name} at {dpi}: {image:.120}"
                 );
                 let png = image_pixels(image);
@@ -480,10 +491,14 @@ fn raster_dpi_sets_the_size_of_the_image() {
         let svg = figure.to_svg(SvgText::Outlines, dpi).unwrap();
         let png = image_pixels(svg_images(&svg)[0]);
         let s = dpi as f64 / 72.0;
-        let columns = ((f64::from(clip.x) + f64::from(clip.width)) * s).ceil()
-            - (f64::from(clip.x) * s).floor();
-        let rows = ((f64::from(clip.y) + f64::from(clip.height)) * s).ceil()
-            - (f64::from(clip.y) * s).floor();
+        // The clip in pixels, widened to the grid of a quarter inch, or half an inch where a
+        // quarter is not whole, and cut to the 432 by 288 pt page.
+        let step = if dpi % 4 == 0 { dpi / 4 } else { dpi / 2 } as f64;
+        let down = |v: f32| ((f64::from(v) * s).floor() / step).floor() * step;
+        let up =
+            |v: f32, page: f64| (((f64::from(v) * s).ceil() / step).ceil() * step).min(page * s);
+        let columns = up(clip.x + clip.width, 432.0) - down(clip.x);
+        let rows = up(clip.y + clip.height, 288.0) - down(clip.y);
         assert_eq!(
             (f64::from(png.width), f64::from(png.height)),
             (columns, rows)
@@ -955,5 +970,39 @@ fn deep_nesting_inside_an_image_of_marks_is_cut_at_the_nesting_limit() {
         let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
         assert_eq!(svg, render_svg(&empty, SvgText::Outlines, 300).unwrap());
         assert_eq!(pdf_images(&render_pdf(&scene, 300).unwrap()), 0);
+    }
+}
+
+/// The largest mean channel difference between the PNG of a figure at 300 dpi, resampled by
+/// area to 72, 100, 144 or 200 dpi, and its PNG drawn at that resolution: what a reader that
+/// resampled the 300 dpi image perfectly would show. The largest measured is 1.81 (a scatter of
+/// 5,000 points over a band, at 72 dpi), with 0.002% of pixels over 64 apart; reader
+/// comparisons beyond this are the readers' resampling, not the image.
+const MAX_CONTROL_MEAN: f64 = 2.0;
+/// The largest share of pixels with a channel more than 64 apart between the two.
+const MAX_CONTROL_FAR: f64 = 0.0005;
+
+#[test]
+fn an_image_resampled_by_area_is_close_to_the_png_at_the_lower_resolution() {
+    let mut cases = pairs();
+    cases.push((
+        "scatter over a band",
+        banded(MarkRender::Raster),
+        banded(MarkRender::Vector),
+    ));
+    for (name, raster, _) in cases {
+        let high = png_raster(&raster.to_png(300).unwrap());
+        for dpi in [72, 100, 144, 200] {
+            let png = png_raster(&raster.to_png(i64::from(dpi)).unwrap());
+            let control = area_downsampled(&high, 300, dpi, png.size());
+            let (mean, far) = raster_difference(&control, &png);
+            eprintln!(
+                "{name}: 300 dpi resampled to {dpi} dpi against its PNG: {mean:.4} / {far:.5}"
+            );
+            assert!(
+                mean <= MAX_CONTROL_MEAN && far <= MAX_CONTROL_FAR,
+                "{name} at {dpi} dpi: {mean} / {far}"
+            );
+        }
     }
 }
