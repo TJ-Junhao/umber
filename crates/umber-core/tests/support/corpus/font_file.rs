@@ -35,6 +35,12 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
         let font = Font::from_files(bytes.clone(), Some(bytes), "Source Serif 4".into()).unwrap();
         font_cases(name, font, lib, sink);
     }
+    // A variable font whose default instance is Light 300, given alone: the regular text is
+    // drawn in its Regular 400 instance and the bold titles and labels in its Bold 700 instance.
+    if let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") {
+        let font = Font::from_files(bytes, None, "Umber Fixture Serif".into()).unwrap();
+        font_cases("font-file-variable-instances", font, lib, sink);
+    }
 }
 
 fn font_cases(prefix: &str, font: Font, lib: &FontLibrary, sink: &mut impl FnMut(Output)) {

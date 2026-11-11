@@ -805,16 +805,15 @@ impl SceneFonts<'_> {
                     || "text".to_owned(),
                     |text| format!("the text {}", quoted(text)),
                 );
-                let reason = if weight == Weight::SemiBold && font.is_variable_only_system() {
-                    " The family's installed files are variable fonts; only the default instance is used."
-                } else {
-                    ""
+                let note = match font.missing_bold_note() {
+                    Some(note) if weight == Weight::SemiBold => format!(" {note}"),
+                    _ => String::new(),
                 };
                 Error::style(
                     self.context,
                     format!(
                         "{subject} needs the {} face of {}, which the font does not have; text \
-                         can only be set in a weight its font has.{reason}",
+                         can only be set in a weight its font has.{note}",
                         weight_name(weight),
                         font.family_name()
                     ),

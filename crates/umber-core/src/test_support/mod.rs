@@ -6,6 +6,10 @@ pub(crate) mod scene;
 // The integration tests include this file by path, so it only uses `std` and the `png` crate.
 pub(crate) mod image;
 
+// The OFL font fixtures of `tests/fonts`, which the integration tests read with the same file.
+#[path = "../../tests/fixtures/font_file.rs"]
+pub(crate) mod font_fixture;
+
 /// The height, in points, that `err` names as needed for the plot area, if it is the layout
 /// error for a figure too short.
 pub(crate) fn named_height(err: &crate::Error) -> Option<f64> {

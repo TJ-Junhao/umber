@@ -64,7 +64,7 @@ fn bold_fallback_changes_identity_without_inventing_a_face() {
     let Font::File(files) = &fallback else {
         unreachable!()
     };
-    assert!(files.bytes(Weight::SemiBold).is_none());
+    assert!(files.bold_file().is_none());
     assert_ne!(plain, fallback);
     let hash = |font: &Font| {
         let mut hasher = DefaultHasher::new();
@@ -264,11 +264,12 @@ fn source_serif_uses_panose_when_family_class_is_zero() {
 }
 
 #[test]
-fn variable_font_renders_its_default_instance() {
+fn variable_font_regular_instance_at_the_default_renders_the_default() {
     let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
         return;
     };
-    // Removing variation tables leaves the base outlines and metrics of the default instance.
+    // The regular instance of this font is its default location. Removing variation tables
+    // leaves the base outlines and metrics of the default instance.
     let mut static_bytes = bytes.to_vec();
     let count = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
     let records: Vec<_> = bytes[12..12 + 16 * count]
@@ -338,4 +339,83 @@ fn font_file_edge_cases_missing_digits_fall_back_and_layouts_own_their_data() {
             .outline(umber_core::Point { x: 0.0, y: 0.0 })
             .is_empty()
     );
+}
+
+/// A scene with `text` in `font` and `weight`.
+fn text_scene(font: &Font, weight: Weight, text: &str) -> umber_core::Scene {
+    let lib = FontLibrary::with_fallbacks(vec![]);
+    let fonts = lib.with_figure_fonts(std::slice::from_ref(font)).unwrap();
+    let black = umber_core::Rgba {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let white = umber_core::Rgba {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    };
+    let mut scene = umber_core::Scene::new(220.0, 40.0, white);
+    let style = TextStyle {
+        face: FaceId::new(0),
+        weight,
+        size: 20.0,
+        tabular_figures: false,
+    };
+    scene
+        .push_text(
+            &fonts,
+            text,
+            style,
+            umber_core::Point { x: 6.0, y: 28.0 },
+            black,
+        )
+        .unwrap();
+    scene
+}
+
+#[test]
+fn variable_file_draws_regular_and_bold_in_different_instances() {
+    use umber_core::render::{SvgText, render_png, render_svg};
+
+    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
+        return;
+    };
+    let font = Font::from_files(bytes, None, "fixture".into()).unwrap();
+    assert!(font.has_face(Weight::SemiBold));
+    let regular = text_scene(&font, Weight::Regular, "Revenue 2024");
+    let bold = text_scene(&font, Weight::SemiBold, "Revenue 2024");
+    assert_ne!(
+        render_png(&regular, 144).unwrap(),
+        render_png(&bold, 144).unwrap()
+    );
+    let outlines = |scene| render_svg(scene, SvgText::Outlines, 300).unwrap();
+    assert_ne!(outlines(&regular), outlines(&bold));
+    let editable = |scene| render_svg(scene, SvgText::Editable, 300).unwrap();
+    // The fixture's instances are Regular 400 and Bold 700; it has no 600.
+    assert!(editable(&regular).contains(r#"font-weight="400""#));
+    assert!(editable(&bold).contains(r#"font-weight="700""#));
+    assert!(editable(&bold).contains("font-family=\"'Umber Fixture Serif Variable', serif\""));
+    assert_ne!(
+        umber_core::render::render_pdf(&regular, 300).unwrap(),
+        umber_core::render::render_pdf(&bold, 300).unwrap()
+    );
+}
+
+#[test]
+fn bold_file_with_bold_fallback_stays_a_usage_error_for_variable_files() {
+    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
+        return;
+    };
+    let single = Font::from_files(bytes.clone(), None, "fixture".into()).unwrap();
+    let fallback = single.clone().with_bold_fallback(true).unwrap();
+    assert!(fallback.bold_fallback() && fallback.has_face(Weight::SemiBold));
+    let error = Font::from_files(bytes.clone(), Some(bytes), "fixture".into())
+        .unwrap()
+        .with_bold_fallback(true)
+        .unwrap_err();
+    assert!(matches!(error, Error::Usage { .. }));
+    assert_eq!(error.parameter(), Some("bold_fallback"));
 }

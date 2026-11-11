@@ -4,6 +4,7 @@
 mod cmap;
 mod fallback;
 mod fixtures;
+mod instances;
 mod layout;
 mod malformed;
 mod outline;
