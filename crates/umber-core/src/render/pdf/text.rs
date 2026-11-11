@@ -35,6 +35,8 @@ use read_fonts::types::{GlyphId, Tag};
 use read_fonts::{FontRef, TableProvider};
 use skrifa::MetadataProvider;
 use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::DrawSettings;
+use skrifa::outline::pen::ControlBoundsPen;
 use skrifa::string::StringId;
 use subsetter::GlyphRemapper;
 
@@ -387,10 +389,19 @@ impl Embedded {
             })
             .collect();
 
-        let bounds = font.head().ok().map(|head| {
-            [head.x_min(), head.y_min(), head.x_max(), head.y_max()]
-                .map(|v| rounded(f32::from(v) * per_unit))
-        });
+        let stated = || {
+            font.head()
+                .ok()
+                .map(|head| [head.x_min(), head.y_min(), head.x_max(), head.y_max()].map(f32::from))
+        };
+        // The `head` table bounds the glyphs at the default location only; an instance is
+        // bounded by its own outlines.
+        let bounds = if location.coords().is_empty() {
+            stated()
+        } else {
+            drawn_bounds(&font, at, &glyphs).or_else(stated)
+        }
+        .map(|bounds| bounds.map(|v| rounded(v * per_unit)));
         // The weight of the face embedded, the one place the descriptor reads a weight: a
         // named instance's `wght`, else the font's weight class.
         let weight = location.weight().unwrap_or_else(|| {
@@ -447,6 +458,43 @@ impl Embedded {
     fn unicode(&self, cid: u16) -> &str {
         self.codes.text(cid)
     }
+}
+
+/// The union of the control boxes of the outlines of `glyphs` at `location`, in font units
+/// rounded outwards to whole units, as `[x_min, y_min, x_max, y_max]`; `None` when no glyph
+/// draws. A glyph whose outline cannot be drawn is left out.
+fn drawn_bounds(
+    font: &FontRef<'_>,
+    location: LocationRef<'_>,
+    glyphs: &GlyphRemapper,
+) -> Option<[f32; 4]> {
+    let outlines = font.outline_glyphs();
+    glyphs
+        .remapped_gids()
+        .filter_map(|gid| {
+            let outline = outlines.get(GlyphId::new(u32::from(gid)))?;
+            let mut pen = ControlBoundsPen::new();
+            outline
+                .draw(DrawSettings::unhinted(Size::unscaled(), location), &mut pen)
+                .ok()?;
+            pen.bounding_box()
+        })
+        .map(|b| {
+            [
+                b.x_min.floor(),
+                b.y_min.floor(),
+                b.x_max.ceil(),
+                b.y_max.ceil(),
+            ]
+        })
+        .reduce(|a, b| {
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]
+        })
 }
 
 /// The PostScript name of the named instance at `location`, else the font's PostScript name,
@@ -1125,6 +1173,59 @@ mod tests {
         let stem = |index: usize| fonts.fonts[index].as_ref().unwrap().descriptor.stem_v;
         assert_eq!(stem(0), rounded(10.0 + 0.244 * 350.0));
         assert_eq!(stem(1), rounded(10.0 + 0.244 * 650.0));
+    }
+
+    #[test]
+    fn the_bounding_box_of_an_instance_holds_its_outlines() {
+        for (bytes, text) in [
+            (
+                &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..],
+                "\u{E00A}\u{E00B}\u{E00C}",
+            ),
+            (
+                &include_bytes!("../../../tests/fixtures/outline-cff2-variable.otf")[..],
+                "\u{E010}\u{E011}\u{E012}",
+            ),
+        ] {
+            // As both files: regular at the instance nearest 400, bold at the one nearest 600.
+            let font =
+                Font::from_files(bytes.to_vec(), Some(bytes.to_vec()), "fixture".into()).unwrap();
+            let items = Weight::ALL.map(|weight| item_weighted(&font, weight, text));
+            let fonts = embed(&items);
+            assert_eq!(fonts.fonts.len(), 2);
+            let parsed = FontRef::new(bytes).unwrap();
+            let head = parsed.head().unwrap();
+            let outlines = parsed.outline_glyphs();
+            let mut widened = false;
+            for item in &items {
+                for run in item.glyphs.runs() {
+                    let (_, embedded) = fonts.get(run).unwrap();
+                    let [x_min, y_min, x_max, y_max] = embedded.descriptor.bbox;
+                    let run_font = run.run_font();
+                    let location = LocationRef::new(run_font.location().coords());
+                    assert!(!location.coords().is_empty());
+                    for glyph in run.glyphs() {
+                        let mut pen = ControlBoundsPen::new();
+                        outlines
+                            .get(GlyphId::new(u32::from(glyph.id)))
+                            .unwrap()
+                            .draw(DrawSettings::unhinted(Size::unscaled(), location), &mut pen)
+                            .unwrap();
+                        let b = pen.bounding_box().unwrap();
+                        assert!(
+                            x_min <= b.x_min && y_min <= b.y_min,
+                            "{text}: {:?} outside {:?}",
+                            b,
+                            embedded.descriptor.bbox
+                        );
+                        assert!(x_max >= b.x_max && y_max >= b.y_max, "{b:?}");
+                    }
+                    widened |= x_min < f32::from(head.x_min()) || x_max > f32::from(head.x_max());
+                }
+            }
+            // The heavier instance reaches past the default location's bounds.
+            assert!(widened, "{text}");
+        }
     }
 
     #[test]

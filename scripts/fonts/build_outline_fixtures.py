@@ -17,6 +17,9 @@ fonts when they are given as fallback fonts:
   towards the light end and widen towards the heavy end, U+E00A to U+E00C.
 - ``outline-width.ttf``: TrueType outlines with a ``wdth`` axis (50 to 200, default 100) and
   named instances, but no ``wght`` axis, U+E00D to U+E00F.
+- ``outline-cff2-variable.otf``: CFF2 outlines with a ``wght`` axis (100 to 900, default 400)
+  and named instances at 350, 500 and 700, built from three masters that narrow towards the
+  light end and widen towards the heavy end, U+E010 to U+E012.
 
 The output is reproducible: fonttools is pinned and the timestamps are fixed, so two runs
 produce byte-identical files.
@@ -27,11 +30,18 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+from fontTools.designspaceLib import (
+    AxisDescriptor,
+    DesignSpaceDocument,
+    InstanceDescriptor,
+    SourceDescriptor,
+)
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.basePen import AbstractPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib import build
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "crates" / "umber-core" / "tests" / "fixtures"
@@ -220,6 +230,46 @@ def width_font() -> bytes:
     )
 
 
+def shifted(polygons: list[Polygon], amount: int) -> list[Polygon]:
+    """Move every point `amount` units away from the glyph's vertical centre line."""
+    return [[(x + (amount if x > 300 else -amount), y) for x, y in p] for p in polygons]
+
+
+def cff2_variable_font() -> bytes:
+    """Three glyphs drawn with CFF2 outlines on a weight axis with named instances."""
+    codepoints = {0xE010: "bar", 0xE011: "wedge", 0xE012: "frame"}
+    glyphs = list(codepoints.values())
+    doc = DesignSpaceDocument()
+    axis = AxisDescriptor()
+    axis.tag, axis.name, axis.minimum, axis.default, axis.maximum = "wght", "Weight", 100, 400, 900
+    doc.addAxis(axis)
+    for weight, amount in [(100, -40), (400, 0), (900, 60)]:
+        fb = builder(glyphs, codepoints, cff=True)
+        charstrings = {}
+        for name, polygons in outlines(glyphs):
+            pen = T2CharStringPen(ADVANCE, None)
+            draw(pen, polygons if name in (".notdef", "space") else shifted(polygons, amount))
+            charstrings[name] = pen.getCharString()
+        fb.setupCFF("UmberTestCFF2Variable-Regular", {}, charstrings, {})
+        name_table(fb, "Umber Test CFF2 Variable")
+        fb.setupHead(unitsPerEm=UNITS_PER_EM, created=TIMESTAMP, modified=TIMESTAMP)
+        source = SourceDescriptor()
+        source.font = fb.font
+        source.location = {"Weight": weight}
+        doc.addSource(source)
+    for style, weight in [("Book", 350), ("Medium", 500), ("Bold", 700)]:
+        instance = InstanceDescriptor()
+        instance.familyName = "Umber Test CFF2 Variable"
+        instance.styleName = style
+        instance.location = {"Weight": weight}
+        doc.addInstance(instance)
+    font, _, _ = build(doc)
+    font.recalcTimestamp = False
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
 def main() -> None:
     """Write every fixture."""
     FIXTURES.mkdir(parents=True, exist_ok=True)
@@ -229,6 +279,7 @@ def main() -> None:
         ("outline-cff2.otf", cff2_font()),
         ("outline-variable-light.ttf", light_font()),
         ("outline-width.ttf", width_font()),
+        ("outline-cff2-variable.otf", cff2_variable_font()),
     ]:
         (FIXTURES / file).write_bytes(data)
         print(f"{file}: {len(data):,} bytes")
