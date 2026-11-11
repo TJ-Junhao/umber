@@ -5139,8 +5139,9 @@ weight to 400. Bold prefers an upright static face of at least weight 600, prefe
 normal width, then the closest weight to 600. Selected bytes stay in memory.
 
 Variable fonts with a ``wght`` axis and named instances are drawn in named instances,
-as with ``Font.from_file()``: a variable regular face in its instance closest to 400.
-Without a static bold face, bold text uses an upright variable file's instance closest
+as with ``Font.from_file()``. Static faces are preferred: a variable file is the regular
+face only when the family has no static face, and then uses its instance closest to
+400. Without a static bold face, bold text uses an upright variable file's instance closest
 to 600 among those of weight 600 or more, so a family installed only as variable fonts
 has a bold face when one of its files has such an instance.
 A family without bold raises ``StyleError`` when drawing an axes title, figure title

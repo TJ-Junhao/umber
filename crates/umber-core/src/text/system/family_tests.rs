@@ -376,26 +376,48 @@ fn system_mixed_family_keeps_its_static_faces_and_fills_only_a_missing_bold() {
 }
 
 #[test]
-fn system_variable_regular_face_is_its_regular_instance() {
-    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
-        return;
-    };
+fn system_static_regular_face_wins_over_a_variable_file_that_sorts_first() {
+    // Both are upright, normal width and weight 400, and the variable file's PostScript name
+    // sorts first: the static face is still the regular face.
     let mut db = fontdb::Database::new();
-    insert_file(&mut db, "Example", &bytes);
     insert(
         &mut db,
         "Example",
-        BundledFont::Geist,
-        600,
+        BundledFont::Inter,
+        400,
         fontdb::Style::Normal,
     );
-    let font = resolve(&db, "Example");
-    assert_eq!(chosen(&font, Weight::Regular), bytes.as_slice());
-    assert_eq!(instance_weight(&font, Weight::Regular), Some(400.0));
-    assert_eq!(
-        chosen(&font, Weight::SemiBold),
-        font_bytes(BundledFont::Geist, Weight::Regular)
+    let mut source = fontdb::Database::new();
+    source.load_font_data(
+        include_bytes!("../../../tests/fixtures/outline-variable-light.ttf").to_vec(),
     );
+    let mut variable = source.faces().next().unwrap().clone();
+    variable.families = vec![("Example".into(), fontdb::Language::English_UnitedStates)];
+    variable.weight = fontdb::Weight(400);
+    variable.post_script_name = "AAVariable".into();
+    db.push_face_info(variable);
+    let names: Vec<String> = db.faces().map(|f| f.post_script_name.clone()).collect();
+    assert!(
+        names.iter().any(|name| name.as_str() > "AAVariable"),
+        "{names:?}"
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Inter, Weight::Regular)
+    );
+    assert_eq!(instance_weight(&font, Weight::Regular), None);
+    assert_eq!(font.drawn_weight(Weight::Regular), 400);
+    // Without the static face, the variable file is the regular face, in its instance 350.
+    let mut only = fontdb::Database::new();
+    for face in db
+        .faces()
+        .filter(|face| face.post_script_name == "AAVariable")
+    {
+        only.push_face_info(face.clone());
+    }
+    let font = resolve(&only, "Example");
+    assert_eq!(instance_weight(&font, Weight::Regular), Some(350.0));
 }
 
 #[test]

@@ -420,8 +420,8 @@ impl Font {
     /// the closest weight to 600.
     ///
     /// Variable fonts with a `wght` axis and named instances are drawn in named instances, at
-    /// their coordinates on every axis. A variable file chosen as the regular face is drawn in
-    /// its instance closest to 400. Without a static bold face, bold comes from an upright
+    /// their coordinates on every axis. A variable file is the regular face only when the
+    /// family has no static face, and is then drawn in its instance closest to 400. Without a static bold face, bold comes from an upright
     /// variable file's instance closest to 600 among those of weight 600 or more, preferring
     /// normal width, then the lightest such instance. Ties between instances follow
     /// [`Font::from_files`]. A family whose files have no such instance has no bold face;
