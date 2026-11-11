@@ -289,18 +289,16 @@ fn legacy_family_faces<'a>(
 fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts::SystemFamily> {
     check_family(family)?;
     let (faces, names) = family_faces(db, family);
-    // Static faces fill the regular face whenever the family has one; its variable files are
-    // candidates only when it has none.
-    let has_static = faces.iter().any(|face| !face.variable);
+    // Among faces equally close to 400, a static face comes before a variable file.
     let regular = faces
         .iter()
-        .filter(|face| !has_static || !face.variable)
         .min_by_key(|face| {
             let info = face.info;
             (
                 info.style != fontdb::Style::Normal,
                 info.stretch != fontdb::Stretch::Normal,
                 info.weight.0.abs_diff(400),
+                face.variable,
                 info.weight.0,
                 &info.post_script_name,
                 info.index,

@@ -421,6 +421,39 @@ fn system_static_regular_face_wins_over_a_variable_file_that_sorts_first() {
 }
 
 #[test]
+fn system_variable_regular_file_beats_a_static_bold_further_from_400() {
+    // A variable file at 400 and a static face at 700: the variable file is closer to 400, so
+    // it draws regular text in its regular instance, and the static face draws bold text.
+    let mut db = fontdb::Database::new();
+    let mut source = fontdb::Database::new();
+    source.load_font_data(
+        include_bytes!("../../../tests/fixtures/outline-variable-light.ttf").to_vec(),
+    );
+    let mut variable = source.faces().next().unwrap().clone();
+    variable.families = vec![("Example".into(), fontdb::Language::English_UnitedStates)];
+    variable.weight = fontdb::Weight(400);
+    db.push_face_info(variable);
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        700,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..]
+    );
+    assert_eq!(instance_weight(&font, Weight::Regular), Some(350.0));
+    assert_eq!(
+        chosen(&font, Weight::SemiBold),
+        font_bytes(BundledFont::Geist, Weight::Regular)
+    );
+    assert_eq!(instance_weight(&font, Weight::SemiBold), None);
+}
+
+#[test]
 fn system_variable_only_family_explains_missing_bold() {
     for bytes in [
         &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..],
