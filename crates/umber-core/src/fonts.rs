@@ -20,7 +20,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::text::OwnedFace;
+use crate::text::{Instance, OwnedFace};
 use crate::{Error, Result};
 
 /// A font family bundled with the crate.
@@ -132,9 +132,10 @@ pub enum Font {
 
 /// The immutable files of a font made with [`Font::from_files`].
 ///
-/// Equality uses the regular and optional bold bytes, the resolved family name and the bold
-/// fallback setting. Paths do not affect equality, except for the fallback name used when the
-/// regular file has no name.
+/// Equality uses the bytes of the regular file and of the bold file when one was given, the
+/// resolved family name and the bold fallback setting. The named instances drawn follow from
+/// the files. Paths do not affect equality, except for the fallback name used when the regular
+/// file has no name.
 ///
 /// # Examples
 ///
@@ -147,8 +148,12 @@ pub enum Font {
 /// ```
 #[derive(Debug, Clone)]
 pub struct FontFiles {
+    /// The regular file, at the instance that draws the regular face.
     regular: OwnedFace,
+    /// The face that draws bold text: the bold file, or a bold instance of the regular file.
     bold: Option<OwnedFace>,
+    /// Whether a bold file was given.
+    has_bold_file: bool,
     fingerprint: (u64, Option<u64>),
     bold_fallback: bool,
 }
@@ -168,8 +173,8 @@ impl PartialEq for FontFiles {
         self.bold_fallback == other.bold_fallback
             && self.regular.family == other.regular.family
             && same_bytes(&self.regular.bytes, &other.regular.bytes)
-            && match (&self.bold, &other.bold) {
-                (Some(left), Some(right)) => same_bytes(&left.bytes, &right.bytes),
+            && match (self.bold_file(), other.bold_file()) {
+                (Some(left), Some(right)) => std::ptr::eq(left, right) || left == right,
                 (None, None) => true,
                 _ => false,
             }
@@ -180,14 +185,14 @@ impl Hash for FontFiles {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.regular.family.hash(state);
         self.regular.bytes.len().hash(state);
-        self.bold.as_ref().map(|face| face.bytes.len()).hash(state);
+        self.bold_file().map(<[u8]>::len).hash(state);
         self.fingerprint.hash(state);
         self.bold_fallback.hash(state);
     }
 }
 
 impl FontFiles {
-    /// The stored bytes for a weight, without copying or reopening the file.
+    /// The bytes of the regular file, without copying or reopening the file.
     ///
     /// # Examples
     ///
@@ -198,16 +203,36 @@ impl FontFiles {
     /// let Font::File(files) = Font::from_files(bytes.to_vec(), None, "Inter".into())? else {
     ///     unreachable!()
     /// };
-    /// assert_eq!(files.bytes(Weight::Regular), Some(bytes));
-    /// assert_eq!(files.bytes(Weight::SemiBold), None);
+    /// assert_eq!(files.regular_file(), bytes);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
     #[must_use]
-    pub fn bytes(&self, weight: Weight) -> Option<&[u8]> {
-        match weight {
-            Weight::Regular => Some(&self.regular.bytes),
-            Weight::SemiBold => self.bold.as_ref().map(|face| face.bytes.as_slice()),
-        }
+    pub fn regular_file(&self) -> &[u8] {
+        &self.regular.bytes
+    }
+
+    /// The bytes of the bold file, when one was given, without copying or reopening the file.
+    ///
+    /// A bold face drawn from a named instance of the regular file has no file of its own.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{BundledFont, Font, Weight};
+    /// use umber_core::fonts::font_bytes;
+    /// let bytes = font_bytes(BundledFont::Inter, Weight::Regular);
+    /// let Font::File(files) = Font::from_files(bytes.to_vec(), None, "Inter".into())? else {
+    ///     unreachable!()
+    /// };
+    /// assert_eq!(files.bold_file(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn bold_file(&self) -> Option<&[u8]> {
+        self.bold
+            .as_ref()
+            .filter(|_| self.has_bold_file)
+            .map(|face| face.bytes.as_slice())
     }
 }
 
@@ -320,9 +345,22 @@ impl Font {
 
     /// Parses a regular font file and an optional bold file into an immutable font.
     ///
-    /// The bold file fills the SemiBold slot; no synthetic bold is made. Variable fonts use
-    /// their default instance. `name` is used when the font has no family name. Font licensing
-    /// is the caller's responsibility. Editable SVG viewers need the font installed.
+    /// The bold file fills the SemiBold slot; no synthetic bold is made. `name` is used when
+    /// the font has no family name. Font licensing is the caller's responsibility. Editable SVG
+    /// viewers need the font installed.
+    ///
+    /// A variable font with a `wght` axis and named instances is drawn in its named instances,
+    /// at their coordinates on every axis:
+    ///
+    /// - the regular file in the instance whose weight is closest to 400;
+    /// - without a bold file, bold text in the regular file's instance closest to 600 among
+    ///   those of weight 600 or more; a file without such an instance has no bold face;
+    /// - a bold file in its instance closest to 600 among those of weight 600 or more, else, as
+    ///   it was given as the bold file, in its instance closest to 600.
+    ///
+    /// Ties go to the lighter instance, then to the instance nearest the font's default on its
+    /// other axes, then to the first in the font's list. A variable font without a `wght` axis
+    /// or without named instances is drawn at its default location, as a static font is.
     ///
     /// # Errors
     ///
@@ -342,7 +380,7 @@ impl Font {
     /// ```
     pub fn from_files(regular: Vec<u8>, bold: Option<Vec<u8>>, name: String) -> Result<Font> {
         let regular = parse_file(regular, "regular", &name)?;
-        let bold = bold
+        let bold_file = bold
             .map(|bytes| {
                 if bytes == *regular.bytes {
                     Ok(regular.clone())
@@ -353,16 +391,21 @@ impl Font {
             .transpose()?;
         // Validate both faces before traversing their bytes for hashing.
         let regular_hash = fingerprint(&regular.bytes);
-        let bold_hash = bold.as_ref().map(|face| {
+        let bold_hash = bold_file.as_ref().map(|face| {
             if Arc::ptr_eq(&regular.bytes, &face.bytes) {
                 regular_hash
             } else {
                 fingerprint(&face.bytes)
             }
         });
+        let bold = match &bold_file {
+            Some(face) => Some(face.bold_file_face()),
+            None => regular.bold_face(),
+        };
         Ok(Font::File(Arc::new(FontFiles {
-            regular,
+            regular: regular.regular_face(),
             bold,
+            has_bold_file: bold_file.is_some(),
             fingerprint: (regular_hash, bold_hash),
             bold_fallback: false,
         })))
@@ -372,12 +415,20 @@ impl Font {
     ///
     /// Every call scans the installed fonts; there is no cache. Family matching is
     /// case-insensitive; legacy names are tried only when typographic names do not match.
-    /// The regular face prefers upright,
-    /// normal-width faces, then the closest weight to 400. Bold requires a separate upright
-    /// static face at least weight 600, preferring normal width, then the closest weight to 600.
-    /// Variable fonts use their default instance, not a bold variation. Families installed only
-    /// as variable fonts have no bold face here. [`Font::with_bold_fallback`] allows them to
-    /// draw bold text in the regular face. Font licensing is the caller's responsibility.
+    /// The regular face prefers upright, normal-width faces, then the closest weight to 400
+    /// (a variable file's weight is that of its default instance), then a static face before a
+    /// variable file, then the lighter weight, the PostScript name and the face index. Bold
+    /// prefers an upright static face of weight 600 or more, preferring normal width, then the
+    /// closest weight to 600.
+    ///
+    /// Variable fonts with a `wght` axis and named instances are drawn in named instances, at
+    /// their coordinates on every axis. A variable file chosen as the regular face is drawn in
+    /// its instance closest to 400. Without a static bold face, bold comes from an upright
+    /// variable file's instance closest to 600 among those of weight 600 or more, preferring
+    /// normal width, then the lightest such instance. Ties between instances follow
+    /// [`Font::from_files`]. A family whose files have no such instance has no bold face;
+    /// [`Font::with_bold_fallback`] allows it to draw bold text in the regular face. Font
+    /// licensing is the caller's responsibility.
     ///
     /// # Errors
     ///
@@ -399,13 +450,13 @@ impl Font {
 
     /// Sets whether a custom font without bold draws bold text in its regular face.
     ///
-    /// No synthetic bold is made. An existing system bold face is always used; bundled fonts
-    /// are unchanged. This setting is part of a custom font's equality and hash, but does not
-    /// change [`Font::has_face`].
+    /// No synthetic bold is made. An existing bold face is always used, including the bold
+    /// named instance of a variable file; bundled fonts are unchanged. This setting is part of
+    /// a custom font's equality and hash, but does not change [`Font::has_face`].
     ///
     /// # Errors
     ///
-    /// `Error::Usage` if `value` is true and a file font has an explicit bold face.
+    /// `Error::Usage` if `value` is true and a file font was given a bold file.
     ///
     /// # Examples
     ///
@@ -422,7 +473,7 @@ impl Font {
         match &mut self {
             Font::Bundled(_) => {}
             Font::File(font) => {
-                check_file_bold_fallback(font.bold.is_some(), value)?;
+                check_file_bold_fallback(font.has_bold_file, value)?;
                 Arc::make_mut(font).bold_fallback = value;
             }
             Font::System(font) => Arc::make_mut(font).bold_fallback = value,
@@ -458,9 +509,34 @@ impl Font {
         }
     }
 
-    /// Whether a missing bold face comes from an installed family containing only variable files.
-    pub(crate) fn is_variable_only_system(&self) -> bool {
-        matches!(self, Font::System(family) if family.variable_only)
+    /// Why the font has no bold face when its files are variable fonts, as a sentence for the
+    /// error of bold text; `None` when it has a bold face or its files are not all variable.
+    pub(crate) fn missing_bold_note(&self) -> Option<&'static str> {
+        if self.has_face(Weight::SemiBold) {
+            return None;
+        }
+        match self {
+            Font::Bundled(_) => None,
+            Font::File(font) => (!font.has_bold_file && font.regular.is_variable()).then_some(
+                "The file is a variable font without a named instance of weight 600 or more.",
+            ),
+            Font::System(family) => family.variable_only.then_some(
+                "The family's installed files are variable fonts without a named instance of \
+                 weight 600 or more.",
+            ),
+        }
+    }
+
+    /// The numeric weight text of `weight` is drawn in, as SVG `font-weight` writes it: the
+    /// `wght` coordinate of the named instance that draws it, rounded to a whole weight from 1
+    /// to 1000, else 400 for regular and 600 for bold text. Bold text drawn in the regular face
+    /// by bold fallback has the regular weight.
+    pub(crate) fn drawn_weight(&self, weight: Weight) -> u16 {
+        let resolved = self.resolved_weight(weight).unwrap_or(weight);
+        match self.owned_face(resolved).map(OwnedFace::instance) {
+            Some(Instance::Named(instance)) => instance.weight().round().clamp(1.0, 1000.0) as u16,
+            Some(Instance::Default) | None => resolved.numeric(),
+        }
     }
 
     /// The owned face of a custom font; bundled faces live in the font library instead.

@@ -2,10 +2,8 @@
 
 use super::*;
 use crate::fonts::{BundledFont, Font, font_bytes};
+use crate::test_support::font_fixture;
 use std::sync::Arc;
-
-#[path = "../../../tests/fixtures/font_file.rs"]
-mod font_fixture;
 
 fn insert(
     db: &mut fontdb::Database,
@@ -275,41 +273,222 @@ fn system_closest_names_favour_shared_words_and_prefixes_case_insensitively() {
     }
 }
 
-#[test]
-fn system_variable_only_family_explains_missing_bold() {
+/// A database holding `bytes` as the only face of its family.
+fn database_of(bytes: &[u8]) -> (fontdb::Database, String) {
     let mut db = fontdb::Database::new();
-    let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
+    db.load_font_data(bytes.to_vec());
+    let family = db.faces().next().unwrap().families[0].0.clone();
+    (db, family)
+}
+
+/// Adds the faces of `bytes` to `db` as faces of `family`.
+fn insert_file(db: &mut fontdb::Database, family: &str, bytes: &[u8]) {
+    let mut source = fontdb::Database::new();
+    source.load_font_data(bytes.to_vec());
+    for face in source.faces() {
+        let mut face = face.clone();
+        face.families = vec![(family.into(), fontdb::Language::English_UnitedStates)];
+        db.push_face_info(face);
+    }
+}
+
+/// The `wght` of the named instance drawing `weight`, or `None` at the default location.
+fn instance_weight(font: &Font, weight: Weight) -> Option<f32> {
+    match font.owned_face(weight).unwrap().instance() {
+        crate::text::Instance::Named(instance) => Some(instance.weight()),
+        crate::text::Instance::Default => None,
+    }
+}
+
+#[test]
+fn system_variable_only_family_draws_bold_in_its_bold_instance() {
+    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
         return;
     };
-    db.load_font_data(bytes);
-    let family = db.faces().next().unwrap().families[0].0.clone();
+    let (db, family) = database_of(&bytes);
     let font = resolve(&db, &family);
-    assert!(!font.has_face(Weight::SemiBold));
+    assert!(font.has_face(Weight::SemiBold));
+    assert_eq!(instance_weight(&font, Weight::Regular), Some(400.0));
+    assert_eq!(instance_weight(&font, Weight::SemiBold), Some(700.0));
+    assert!(Arc::ptr_eq(
+        &font.owned_face(Weight::Regular).unwrap().bytes,
+        &font.owned_face(Weight::SemiBold).unwrap().bytes
+    ));
+    assert_eq!(font.missing_bold_note(), None);
+    // The faces are the file font's faces.
+    let file = Font::from_files(bytes.to_vec(), None, family).unwrap();
     let lib = crate::FontLibrary::with_fallbacks(vec![]);
-    let fonts = lib.with_figure_fonts(&[font]).unwrap();
-    let error = fonts
-        .layout(
-            "Heading",
-            &crate::TextStyle {
-                face: crate::FaceId::new(0),
-                weight: Weight::SemiBold,
-                size: 12.0,
-                tabular_figures: false,
-            },
-        )
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("The family's installed files are variable fonts"),
-        "{error}"
+    let fonts = lib.with_figure_fonts(&[font, file]).unwrap();
+    for weight in Weight::ALL {
+        let style = |face| crate::TextStyle {
+            face: crate::FaceId::new(face),
+            weight,
+            size: 12.0,
+            tabular_figures: false,
+        };
+        let system = fonts.layout("Heading 123", &style(0)).unwrap();
+        let file = fonts.layout("Heading 123", &style(1)).unwrap();
+        assert_eq!(system.width(), file.width());
+        assert_eq!(
+            system.outline(crate::Point::default()),
+            file.outline(crate::Point::default())
+        );
+    }
+}
+
+#[test]
+fn system_mixed_family_keeps_its_static_faces_and_fills_only_a_missing_bold() {
+    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
+        return;
+    };
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Inter,
+        400,
+        fontdb::Style::Normal,
     );
+    insert_file(&mut db, "Example", &bytes);
+    // The static regular face is closer to 400 than the variable file's default, Light 300.
+    let font = resolve(&db, "Example");
     assert_eq!(
-        error.hint(),
-        Some(
-            "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
-        )
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Inter, Weight::Regular)
     );
+    assert_eq!(chosen(&font, Weight::SemiBold), bytes.as_slice());
+    assert_eq!(instance_weight(&font, Weight::SemiBold), Some(700.0));
+    // A static bold face keeps priority over the variable file's bold instance.
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        800,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::SemiBold),
+        font_bytes(BundledFont::Geist, Weight::Regular)
+    );
+    assert_eq!(instance_weight(&font, Weight::SemiBold), None);
+    assert_eq!(instance_weight(&font, Weight::Regular), None);
+}
+
+#[test]
+fn system_static_regular_face_wins_over_a_variable_file_that_sorts_first() {
+    // Both are upright, normal width and weight 400, and the variable file's PostScript name
+    // sorts first: the static face is still the regular face.
+    let mut db = fontdb::Database::new();
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Inter,
+        400,
+        fontdb::Style::Normal,
+    );
+    let mut source = fontdb::Database::new();
+    source.load_font_data(
+        include_bytes!("../../../tests/fixtures/outline-variable-light.ttf").to_vec(),
+    );
+    let mut variable = source.faces().next().unwrap().clone();
+    variable.families = vec![("Example".into(), fontdb::Language::English_UnitedStates)];
+    variable.weight = fontdb::Weight(400);
+    variable.post_script_name = "AAVariable".into();
+    db.push_face_info(variable);
+    let names: Vec<String> = db.faces().map(|f| f.post_script_name.clone()).collect();
+    assert!(
+        names.iter().any(|name| name.as_str() > "AAVariable"),
+        "{names:?}"
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        font_bytes(BundledFont::Inter, Weight::Regular)
+    );
+    assert_eq!(instance_weight(&font, Weight::Regular), None);
+    assert_eq!(font.drawn_weight(Weight::Regular), 400);
+    // Without the static face, the variable file is the regular face, in its instance 350.
+    let mut only = fontdb::Database::new();
+    for face in db
+        .faces()
+        .filter(|face| face.post_script_name == "AAVariable")
+    {
+        only.push_face_info(face.clone());
+    }
+    let font = resolve(&only, "Example");
+    assert_eq!(instance_weight(&font, Weight::Regular), Some(350.0));
+}
+
+#[test]
+fn system_variable_regular_file_beats_a_static_bold_further_from_400() {
+    // A variable file at 400 and a static face at 700: the variable file is closer to 400, so
+    // it draws regular text in its regular instance, and the static face draws bold text.
+    let mut db = fontdb::Database::new();
+    let mut source = fontdb::Database::new();
+    source.load_font_data(
+        include_bytes!("../../../tests/fixtures/outline-variable-light.ttf").to_vec(),
+    );
+    let mut variable = source.faces().next().unwrap().clone();
+    variable.families = vec![("Example".into(), fontdb::Language::English_UnitedStates)];
+    variable.weight = fontdb::Weight(400);
+    db.push_face_info(variable);
+    insert(
+        &mut db,
+        "Example",
+        BundledFont::Geist,
+        700,
+        fontdb::Style::Normal,
+    );
+    let font = resolve(&db, "Example");
+    assert_eq!(
+        chosen(&font, Weight::Regular),
+        &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..]
+    );
+    assert_eq!(instance_weight(&font, Weight::Regular), Some(350.0));
+    assert_eq!(
+        chosen(&font, Weight::SemiBold),
+        font_bytes(BundledFont::Geist, Weight::Regular)
+    );
+    assert_eq!(instance_weight(&font, Weight::SemiBold), None);
+}
+
+#[test]
+fn system_variable_only_family_explains_missing_bold() {
+    for bytes in [
+        &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..],
+        &include_bytes!("../../../tests/fixtures/outline-variable.ttf")[..],
+    ] {
+        let (db, family) = database_of(bytes);
+        let font = resolve(&db, &family);
+        assert!(!font.has_face(Weight::SemiBold));
+        let lib = crate::FontLibrary::with_fallbacks(vec![]);
+        let fonts = lib.with_figure_fonts(&[font]).unwrap();
+        let error = fonts
+            .layout(
+                "Heading",
+                &crate::TextStyle {
+                    face: crate::FaceId::new(0),
+                    weight: Weight::SemiBold,
+                    size: 12.0,
+                    tabular_figures: false,
+                },
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().ends_with(
+                "The family's installed files are variable fonts without a named instance of \
+                 weight 600 or more."
+            ),
+            "{error}"
+        );
+        assert_eq!(
+            error.hint(),
+            Some(
+                "pass bold= to Font.from_file, choose a family with a bold face, or pass bold_fallback=True."
+            )
+        );
+    }
 }
 
 #[test]
@@ -381,16 +560,19 @@ fn system_bold_fallback_uses_regular_only_without_a_bold_face() {
 #[test]
 fn system_variable_only_bold_fallback_renders_every_bold_role() {
     use crate::{AxisData, Figure, FontLibrary, LegendStyle, LineOptions, ScaleKind, Theme};
-    let mut db = fontdb::Database::new();
-    let Some(bytes) = font_fixture::read("SourceSerif4Variable-Roman.ttf") else {
-        return;
-    };
-    db.load_font_data(bytes.to_vec());
-    let family = db.faces().next().unwrap().families[0].0.clone();
+    // Characters of the fixture, so that the variable font itself draws the bold text.
+    const HEADING: &str = "\u{E00A}\u{E00B}\u{E00C}";
+    // Weight instances at 350, 450 and 500 only: no bold face.
+    let bytes = include_bytes!("../../../tests/fixtures/outline-variable-light.ttf");
+    let (db, family) = database_of(bytes);
     let plain = resolve(&db, &family);
     let fallback = plain.clone().with_bold_fallback(true).unwrap();
     assert!(!fallback.has_face(Weight::SemiBold));
-    let reference = Font::from_files(bytes.to_vec(), Some(bytes.to_vec()), family).unwrap();
+    // The file font of the same file draws bold text in its regular instance the same way.
+    let reference = Font::from_files(bytes.to_vec(), None, family)
+        .unwrap()
+        .with_bold_fallback(true)
+        .unwrap();
     let lib = FontLibrary::with_fallbacks(vec![]);
     let figure = |font: Font, role| {
         let theme = Theme::pigment()
@@ -400,11 +582,11 @@ fn system_variable_only_bold_fallback_renders_every_bold_role() {
             .unwrap();
         let mut fig = Figure::new(6.0, 4.0, theme).unwrap();
         if role == 1 {
-            fig.title("Heading");
+            fig.title(HEADING);
         }
         let mut axes = fig.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
         if role == 0 {
-            axes.title("Heading");
+            axes.title(HEADING);
         }
         axes.legend(
             if role == 2 {
@@ -419,7 +601,7 @@ fn system_variable_only_bold_fallback_renders_every_bold_role() {
             AxisData::Numbers(vec![0.0, 1.0]),
             &[0.0, 1.0],
             LineOptions {
-                label: "Series".into(),
+                label: HEADING.into(),
                 ..LineOptions::default()
             },
         )
@@ -430,7 +612,8 @@ fn system_variable_only_bold_fallback_renders_every_bold_role() {
         let err = figure(plain.clone(), role).to_scene(&lib).unwrap_err();
         assert!(
             err.to_string()
-                .contains("The family's installed files are variable fonts")
+                .contains("The family's installed files are variable fonts"),
+            "{err}"
         );
         let actual = figure(fallback.clone(), role).to_scene(&lib).unwrap();
         let expected = figure(reference.clone(), role).to_scene(&lib).unwrap();

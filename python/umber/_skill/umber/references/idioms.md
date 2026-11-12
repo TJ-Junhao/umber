@@ -266,7 +266,7 @@ svg = ax.figure.to_svg()
 
 ## Themes and fonts
 
-`ub.Figure(..., theme=ub.Theme.PIGMENT | GRAPHITE | MIDNIGHT)`. Themes are values: derive one with `with_*` methods, for example `ub.Theme.GRAPHITE.with_font_scale(1.2)`. Fonts: the bundled `ub.Font.SOURCE_SERIF_4`, `IBM_PLEX_SANS`, `GEIST`, `INTER`, `JETBRAINS_MONO`, a file with `ub.Font.from_file("Body.ttf", bold="Body-Bold.ttf")`, or an installed family with `ub.Font.system("Times New Roman")`. Titles and direct legend labels are bold: a font without a bold face raises `StyleError` when such text is drawn, unless it was created with `bold_fallback=True` (bold text then uses the regular face).
+`ub.Figure(..., theme=ub.Theme.PIGMENT | GRAPHITE | MIDNIGHT)`. Themes are values: derive one with `with_*` methods, for example `ub.Theme.GRAPHITE.with_font_scale(1.2)`. Fonts: the bundled `ub.Font.SOURCE_SERIF_4`, `IBM_PLEX_SANS`, `GEIST`, `INTER`, `JETBRAINS_MONO`, a file with `ub.Font.from_file("Body.ttf", bold="Body-Bold.ttf")`, or an installed family with `ub.Font.system("Times New Roman")`. Titles and direct legend labels are bold: a font without a bold face raises `StyleError` when such text is drawn, unless it was created with `bold_fallback=True` (bold text then uses the regular face). A variable font file is drawn in its named instances: `ub.Font.from_file("Body[wght].ttf")` alone gives regular text the instance closest to weight 400 and bold text the instance closest to 600 among those of weight 600 or more, and `Font.system` does the same for a family installed only as variable files.
 
 ```python
 theme = ub.Theme.PIGMENT.with_title_font(ub.Font.SOURCE_SERIF_4).with_body_font(ub.Font.INTER)

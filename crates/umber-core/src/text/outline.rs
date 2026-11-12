@@ -17,11 +17,12 @@ pub(super) fn draws_segments(outline: &OutlineGlyph<'_>) -> bool {
     outline.draw(unhinted(), &mut pen).is_ok() && pen.0 > 0
 }
 
-/// Appends the outline of `glyph` to `path`, mapping font units to points with `scale` and
-/// putting the glyph origin at `(dx, dy)`, y-down. A glyph that is missing, or whose outline
-/// fails part-way, contributes nothing rather than a broken shape.
+/// Appends the outline of `glyph` at `location` to `path`, mapping font units to points with
+/// `scale` and putting the glyph origin at `(dx, dy)`, y-down. A glyph that is missing, or
+/// whose outline fails part-way, contributes nothing rather than a broken shape.
 pub(super) fn append_glyph(
     outlines: &OutlineGlyphCollection<'_>,
+    location: LocationRef<'_>,
     glyph: GlyphId,
     scale: f32,
     dx: f32,
@@ -34,9 +35,10 @@ pub(super) fn append_glyph(
         dx,
         dy,
     };
+    let settings = DrawSettings::unhinted(Size::unscaled(), location);
     let drawn = outlines
         .get(glyph)
-        .is_some_and(|outline| outline.draw(unhinted(), &mut builder).is_ok());
+        .is_some_and(|outline| outline.draw(settings, &mut builder).is_ok());
     if drawn {
         path.extend(&builder.path);
     }

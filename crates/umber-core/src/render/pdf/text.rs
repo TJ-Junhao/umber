@@ -3,7 +3,10 @@
 //!
 //! A page's fonts are collected from its text items first ([`FontSet`]), so that each font is
 //! subset once, with exactly the glyphs drawn, before the content refers to it ([`Fonts`]). A
-//! font is one font program (the same bytes and face), wherever its runs came from. Glyph ids
+//! font is one font program (the same bytes and face at the same location in its design
+//! space), wherever its runs came from. A variable font is instanced for the subset at the
+//! location its runs were shaped at, so the regular and bold instances of one file are two
+//! fonts, and the widths written are the advances the shaper used there. Glyph ids
 //! in the subset follow the order the glyphs are first used, `.notdef` first, and text is
 //! encoded `Identity-H`, two bytes per character code ([`Codes`]).
 //!
@@ -32,13 +35,15 @@ use read_fonts::types::{GlyphId, Tag};
 use read_fonts::{FontRef, TableProvider};
 use skrifa::MetadataProvider;
 use skrifa::instance::{LocationRef, Size};
+use skrifa::outline::DrawSettings;
+use skrifa::outline::pen::ControlBoundsPen;
 use skrifa::string::StringId;
 use subsetter::GlyphRemapper;
 
 use super::super::normalize::text_is_visible;
 use super::write::{Refs, compress, limited, rounded, subset_tag};
 use crate::scene::TextItem;
-use crate::text::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
+use crate::text::{GlyphRun, Location, PlacedGlyph, ProgramId, RunFont};
 
 /// The most characters a `ToUnicode` entry maps one glyph to; longer clusters keep their first
 /// characters. PDF readers accept at most 512 bytes per entry.
@@ -158,11 +163,12 @@ impl<'s> FontSet<'s> {
     }
 }
 
-/// Whether `a` and `b` hold the same font bytes and face.
+/// Whether `a` and `b` hold the same font bytes and face at the same location.
 fn same_program(a: RunFont<'_>, b: RunFont<'_>) -> bool {
-    a.with_data(|a_data, a_index| {
-        b.with_data(|b_data, b_index| Some(a_index == b_index && a_data == b_data))
-    }) == Some(true)
+    a.location().coords() == b.location().coords()
+        && a.with_data(|a_data, a_index| {
+            b.with_data(|b_data, b_index| Some(a_index == b_index && a_data == b_data))
+        }) == Some(true)
 }
 
 impl FontUse<'_> {
@@ -188,7 +194,8 @@ impl FontUse<'_> {
             occurrences,
             ..
         } = self;
-        font.with_data(|data, index| Embedded::new(data, index, glyphs, &occurrences))
+        let location = font.location();
+        font.with_data(|data, index| Embedded::new(data, index, location, glyphs, &occurrences))
     }
 }
 
@@ -319,18 +326,21 @@ impl Codes {
 }
 
 impl Embedded {
-    /// The subset of face `index` of `data` holding `glyphs`, which stood for the texts of
-    /// `occurrences`.
+    /// The subset of face `index` of `data` at `location` holding `glyphs`, which stood for
+    /// the texts of `occurrences`.
     fn new(
         data: &[u8],
         index: u32,
+        location: &Location,
         glyphs: GlyphRemapper,
         occurrences: &[Occurrence],
     ) -> Option<Embedded> {
         let font = FontRef::from_index(data, index).ok()?;
-        let metrics = font.metrics(Size::unscaled(), LocationRef::default());
+        let at = LocationRef::new(location.coords());
+        let metrics = font.metrics(Size::unscaled(), at);
         let per_unit = 1000.0 / f32::from(metrics.units_per_em.max(1));
-        let advances = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+        let advances = font.glyph_metrics(Size::unscaled(), at);
+        // The shaper rounds advances to whole font units, at a variable font's instances too.
         let glyph_widths: Vec<f32> = glyphs
             .remapped_gids()
             .map(|gid| {
@@ -338,13 +348,20 @@ impl Embedded {
                     advances
                         .advance_width(GlyphId::new(u32::from(gid)))
                         .unwrap_or(0.0)
+                        .round()
                         * per_unit,
                 )
             })
             .collect();
 
-        // At the default instance: CFF2 outlines become TrueType outlines there.
-        let subset = subsetter::subset_with_variations(data, index, &[], &glyphs).ok()?;
+        // Instanced at `location`, without variation tables: CFF2 outlines become TrueType
+        // outlines there.
+        let coordinates: Vec<(subsetter::Tag, f32)> = location
+            .user()
+            .iter()
+            .map(|&(tag, value)| (subsetter::Tag::new(&tag.to_be_bytes()), value))
+            .collect();
+        let subset = subsetter::subset_with_variations(data, index, &coordinates, &glyphs).ok()?;
         let cff = {
             let parsed = FontRef::new(&subset).ok()?;
             match parsed.table_data(Tag::new(b"glyf")) {
@@ -372,12 +389,26 @@ impl Embedded {
             })
             .collect();
 
-        let bounds = font.head().ok().map(|head| {
-            [head.x_min(), head.y_min(), head.x_max(), head.y_max()]
-                .map(|v| rounded(f32::from(v) * per_unit))
+        let stated = || {
+            font.head()
+                .ok()
+                .map(|head| [head.x_min(), head.y_min(), head.x_max(), head.y_max()].map(f32::from))
+        };
+        // The `head` table bounds the glyphs at the default location only; an instance is
+        // bounded by its own outlines.
+        let bounds = if location.coords().is_empty() {
+            stated()
+        } else {
+            drawn_bounds(&font, at, &glyphs).or_else(stated)
+        }
+        .map(|bounds| bounds.map(|v| rounded(v * per_unit)));
+        // The weight of the face embedded, the one place the descriptor reads a weight: a
+        // named instance's `wght`, else the font's weight class.
+        let weight = location.weight().unwrap_or_else(|| {
+            font.os2()
+                .ok()
+                .map_or(400.0, |os2| f32::from(os2.us_weight_class()))
         });
-        // The weight of the face embedded, the one place the descriptor reads a weight.
-        let weight = font.os2().ok().map_or(400, |os2| os2.us_weight_class());
         let ascent = rounded(metrics.ascent * per_unit);
         let descriptor = Descriptor {
             fixed_pitch: metrics.is_monospace,
@@ -388,9 +419,13 @@ impl Embedded {
             descent: rounded(metrics.descent * per_unit),
             cap_height: metrics.cap_height.map_or(ascent, |h| rounded(h * per_unit)),
             // The usual estimate of the vertical stem width from the weight class.
-            stem_v: rounded((10.0 + 0.244 * (f32::from(weight) - 50.0)).max(0.0)),
+            stem_v: rounded((10.0 + 0.244 * (weight - 50.0)).max(0.0)),
         };
-        let base_font = format!("{}+{}", subset_tag(&program), postscript_name(&font));
+        let base_font = format!(
+            "{}+{}",
+            subset_tag(&program),
+            postscript_name(&font, location)
+        );
         Some(Embedded {
             outlines,
             program,
@@ -425,9 +460,47 @@ impl Embedded {
     }
 }
 
-/// The font's PostScript name, or its family name without spaces, reduced to the characters a
-/// PDF name holds without escapes; `Font` when neither has any.
-fn postscript_name(font: &FontRef<'_>) -> String {
+/// The union of the control boxes of the outlines of `glyphs` at `location`, in font units
+/// rounded outwards to whole units, as `[x_min, y_min, x_max, y_max]`; `None` when no glyph
+/// draws. A glyph whose outline cannot be drawn is left out.
+fn drawn_bounds(
+    font: &FontRef<'_>,
+    location: LocationRef<'_>,
+    glyphs: &GlyphRemapper,
+) -> Option<[f32; 4]> {
+    let outlines = font.outline_glyphs();
+    glyphs
+        .remapped_gids()
+        .filter_map(|gid| {
+            let outline = outlines.get(GlyphId::new(u32::from(gid)))?;
+            let mut pen = ControlBoundsPen::new();
+            outline
+                .draw(DrawSettings::unhinted(Size::unscaled(), location), &mut pen)
+                .ok()?;
+            pen.bounding_box()
+        })
+        .map(|b| {
+            [
+                b.x_min.floor(),
+                b.y_min.floor(),
+                b.x_max.ceil(),
+                b.y_max.ceil(),
+            ]
+        })
+        .reduce(|a, b| {
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]
+        })
+}
+
+/// The PostScript name of the named instance at `location`, else the font's PostScript name,
+/// else its family name without spaces, reduced to the characters a PDF name holds without
+/// escapes; `Font` when none has any.
+fn postscript_name(font: &FontRef<'_>, location: &Location) -> String {
     let clean = |id: StringId| -> String {
         font.localized_strings(id)
             .english_or_first()
@@ -439,8 +512,15 @@ fn postscript_name(font: &FontRef<'_>) -> String {
             })
             .unwrap_or_default()
     };
-    [StringId::POSTSCRIPT_NAME, StringId::FAMILY_NAME]
+    let instance = font
+        .named_instances()
+        .iter()
+        .filter(|_| !location.coords().is_empty())
+        .find(|instance| instance.location().coords() == location.coords())
+        .and_then(|instance| instance.postscript_name_id());
+    instance
         .into_iter()
+        .chain([StringId::POSTSCRIPT_NAME, StringId::FAMILY_NAME])
         .map(clean)
         .find(|name| !name.is_empty())
         .unwrap_or_else(|| "Font".to_owned())
@@ -1025,11 +1105,134 @@ mod tests {
         assert!(embed(&items).fonts.is_empty());
     }
 
+    /// `text` in `font` and `weight` at 12 pt, as a scene item.
+    fn item_weighted(font: &Font, weight: Weight, text: &str) -> TextItem {
+        let library = FontLibrary::with_fallbacks(Vec::new());
+        let fonts = library
+            .with_figure_fonts(std::slice::from_ref(font))
+            .unwrap();
+        let style = TextStyle {
+            face: FaceId::new(0),
+            weight,
+            size: 12.0,
+            tabular_figures: false,
+        };
+        let mut scene = Scene::new(300.0, 40.0, INK);
+        scene
+            .push_text(&fonts, text, style, Point { x: 4.0, y: 30.0 }, INK)
+            .unwrap();
+        match scene.items.pop() {
+            Some(Item::Text(item)) => item,
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn instances_of_one_variable_file_are_two_fonts_with_the_shaped_widths() {
+        let Some(bytes) = crate::test_support::font_fixture::read("UmberFixtureSerif-Variable.ttf")
+        else {
+            return;
+        };
+        let font = Font::from_files(bytes, None, "fixture".into()).unwrap();
+        // One glyph per item, so that no kerning pair moves an advance.
+        let letters = ["H", "a", "m", "b", "u", "r", "g", "W", "1", "9"];
+        let items: Vec<TextItem> = Weight::ALL
+            .into_iter()
+            .flat_map(|weight| letters.map(|letter| item_weighted(&font, weight, letter)))
+            .collect();
+        let fonts = embed(&items);
+        assert_eq!(fonts.fonts.len(), 2);
+        let names: Vec<&str> = fonts
+            .fonts
+            .iter()
+            .map(|font| font.as_ref().unwrap().base_font.as_str())
+            .collect();
+        assert!(
+            names[0].ends_with("+UmberFixtureSerifVariable-Roman"),
+            "{names:?}"
+        );
+        assert!(
+            names[1].ends_with("+UmberFixtureSerifVariable-Bold"),
+            "{names:?}"
+        );
+        assert_ne!(
+            fonts.fonts[0].as_ref().unwrap().program,
+            fonts.fonts[1].as_ref().unwrap().program
+        );
+        for item in &items {
+            for run in item.glyphs.runs() {
+                let (_, embedded) = fonts.get(run).unwrap();
+                for (glyph, text) in run.glyphs().iter().zip(run.glyph_texts()) {
+                    let shaped = glyph.advance * 1000.0 / 12.0;
+                    let width = embedded.width(embedded.cid(glyph, text, 12.0));
+                    assert!((width - shaped).abs() < 0.01, "{text}: {width} vs {shaped}");
+                }
+            }
+        }
+        // The descriptor reads the instance's weight.
+        let stem = |index: usize| fonts.fonts[index].as_ref().unwrap().descriptor.stem_v;
+        assert_eq!(stem(0), rounded(10.0 + 0.244 * 350.0));
+        assert_eq!(stem(1), rounded(10.0 + 0.244 * 650.0));
+    }
+
+    #[test]
+    fn the_bounding_box_of_an_instance_holds_its_outlines() {
+        for (bytes, text) in [
+            (
+                &include_bytes!("../../../tests/fixtures/outline-variable-light.ttf")[..],
+                "\u{E00A}\u{E00B}\u{E00C}",
+            ),
+            (
+                &include_bytes!("../../../tests/fixtures/outline-cff2-variable.otf")[..],
+                "\u{E010}\u{E011}\u{E012}",
+            ),
+        ] {
+            // As both files: regular at the instance nearest 400, bold at the one nearest 600.
+            let font =
+                Font::from_files(bytes.to_vec(), Some(bytes.to_vec()), "fixture".into()).unwrap();
+            let items = Weight::ALL.map(|weight| item_weighted(&font, weight, text));
+            let fonts = embed(&items);
+            assert_eq!(fonts.fonts.len(), 2);
+            let parsed = FontRef::new(bytes).unwrap();
+            let head = parsed.head().unwrap();
+            let outlines = parsed.outline_glyphs();
+            let mut widened = false;
+            for item in &items {
+                for run in item.glyphs.runs() {
+                    let (_, embedded) = fonts.get(run).unwrap();
+                    let [x_min, y_min, x_max, y_max] = embedded.descriptor.bbox;
+                    let run_font = run.run_font();
+                    let location = LocationRef::new(run_font.location().coords());
+                    assert!(!location.coords().is_empty());
+                    for glyph in run.glyphs() {
+                        let mut pen = ControlBoundsPen::new();
+                        outlines
+                            .get(GlyphId::new(u32::from(glyph.id)))
+                            .unwrap()
+                            .draw(DrawSettings::unhinted(Size::unscaled(), location), &mut pen)
+                            .unwrap();
+                        let b = pen.bounding_box().unwrap();
+                        assert!(
+                            x_min <= b.x_min && y_min <= b.y_min,
+                            "{text}: {:?} outside {:?}",
+                            b,
+                            embedded.descriptor.bbox
+                        );
+                        assert!(x_max >= b.x_max && y_max >= b.y_max, "{b:?}");
+                    }
+                    widened |= x_min < f32::from(head.x_min()) || x_max > f32::from(head.x_max());
+                }
+            }
+            // The heavier instance reaches past the default location's bounds.
+            assert!(widened, "{text}");
+        }
+    }
+
     #[test]
     fn names_keep_only_plain_characters() {
         let data = crate::fonts::font_bytes(crate::BundledFont::Geist, Weight::SemiBold);
         let font = FontRef::new(data).unwrap();
-        let name = postscript_name(&font);
+        let name = postscript_name(&font, &Location::default());
         assert!(name.starts_with("Geist"), "{name}");
         assert!(
             name.chars()

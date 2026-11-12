@@ -5,12 +5,14 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use read_fonts::FontRef;
-use read_fonts::types::GlyphId;
+use read_fonts::types::{F2Dot14, GlyphId};
 use skrifa::MetadataProvider;
+use skrifa::instance::LocationRef;
 use skrifa::outline::OutlineGlyphCollection;
 
 use super::font::{FontHandle, FontKey};
 use super::guard::guarded;
+use super::instance::Location;
 use super::outline::append_glyph;
 use super::runs::group_by_font;
 use super::shaping::ShapedRun;
@@ -171,14 +173,17 @@ pub(crate) struct RunFont<'a> {
     handle: &'a FontHandle,
 }
 
-/// The identity of a font program: the same font file and face, whichever library, layout or
-/// scene the run came from. Every font's bytes are in memory and never change while a run
-/// holds them, so the program is its bytes: their address and length, and the face index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The identity of a font program: the same font file and face at the same location in its
+/// design space, whichever library, layout or scene the run came from. Every font's bytes are
+/// in memory and never change while a run holds them, so the program is its bytes (their
+/// address and length), the face index and the normalized coordinates of the location. The
+/// regular and bold instances of one variable font are different programs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ProgramId {
     address: usize,
     length: usize,
     index: u32,
+    coords: Vec<F2Dot14>,
 }
 
 impl RunFont<'_> {
@@ -188,7 +193,13 @@ impl RunFont<'_> {
             address: data.as_ptr() as usize,
             length: data.len(),
             index,
+            coords: self.location().coords().to_vec(),
         })
+    }
+
+    /// The location in the font's design space the run was shaped at.
+    pub(crate) fn location(&self) -> &Location {
+        self.handle.location()
     }
 
     /// Runs `f` on the font bytes and face index, and returns what it returns; `None` when the
@@ -515,16 +526,18 @@ impl TextLayout {
     }
 }
 
-/// Appends the outlines of every glyph of `run` to `path`.
+/// Appends the outlines of every glyph of `run`, at the location it was shaped at, to `path`.
 fn outline_run(
     outlines: &OutlineGlyphCollection<'_>,
     run: &GlyphRun,
     origin: Point,
     path: &mut Path,
 ) {
+    let location = LocationRef::new(run.handle.location().coords());
     for glyph in &run.glyphs {
         append_glyph(
             outlines,
+            location,
             GlyphId::new(u32::from(glyph.id)),
             run.scale,
             origin.x + glyph.x,

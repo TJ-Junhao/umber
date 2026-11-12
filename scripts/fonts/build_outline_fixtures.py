@@ -12,6 +12,14 @@ fonts when they are given as fallback fonts:
 - ``outline-variable.ttf``: TrueType outlines with a ``wght`` axis (100 to 900, default 400)
   whose ``gvar`` deltas widen every glyph at the heavy end, U+E004 to U+E006.
 - ``outline-cff2.otf``: CFF2 outlines (an OpenType ``CFF2`` table), U+E007 to U+E009.
+- ``outline-variable-light.ttf``: TrueType outlines with a ``wght`` axis (100 to 900, default
+  400) and named instances at weights 350, 450 and 500, none of them bold; the glyphs narrow
+  towards the light end and widen towards the heavy end, U+E00A to U+E00C.
+- ``outline-width.ttf``: TrueType outlines with a ``wdth`` axis (50 to 200, default 100) and
+  named instances, but no ``wght`` axis, U+E00D to U+E00F.
+- ``outline-cff2-variable.otf``: CFF2 outlines with a ``wght`` axis (100 to 900, default 400)
+  and named instances at 350, 500 and 700, built from three masters that narrow towards the
+  light end and widen towards the heavy end, U+E010 to U+E012.
 
 The output is reproducible: fonttools is pinned and the timestamps are fixed, so two runs
 produce byte-identical files.
@@ -22,11 +30,18 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
+from fontTools.designspaceLib import (
+    AxisDescriptor,
+    DesignSpaceDocument,
+    InstanceDescriptor,
+    SourceDescriptor,
+)
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.basePen import AbstractPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib import build
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "crates" / "umber-core" / "tests" / "fixtures"
@@ -144,15 +159,115 @@ def variable_font() -> bytes:
     fb.setupGlyf(drawn)
     name_table(fb, "Umber Test Variable")
     fb.setupFvar(axes=[("wght", 100, 400, 900, "Weight")], instances=[])
-    variations = {}
-    for name in glyphs:
-        points = [point for polygon in SHAPES[name] for point in polygon]
-        # Move every point away from the glyph's vertical centre line at the heavy end, plus
-        # the four phantom points, which stay put.
-        deltas = [(60 if x > 300 else -60, 0) for x, _ in points] + [(0, 0)] * 4
-        variations[name] = [TupleVariation({"wght": (0.0, 1.0, 1.0)}, deltas)]
-    fb.setupGvar(variations)
+    fb.setupGvar(
+        {name: [TupleVariation({"wght": (0.0, 1.0, 1.0)}, spread(name, 60))] for name in glyphs}
+    )
     return finish(fb)
+
+
+def spread(name: str, amount: int) -> list[tuple[int, int]]:
+    """Move every point of `name` `amount` units away from the glyph's vertical centre line.
+
+    The four phantom points stay put.
+    """
+    points = [point for polygon in SHAPES[name] for point in polygon]
+    return [(amount if x > 300 else -amount, 0) for x, _ in points] + [(0, 0)] * 4
+
+
+def named_font(
+    family: str,
+    codepoints: dict[int, str],
+    axis: tuple[str, float, float, float, str],
+    instances: list[tuple[str, float]],
+) -> bytes:
+    """Three glyphs drawn with TrueType outlines on one axis with named instances.
+
+    The glyphs narrow towards the axis minimum and widen towards its maximum.
+    """
+    glyphs = list(codepoints.values())
+    fb = builder(glyphs, codepoints, cff=False)
+    drawn = {}
+    for name, polygons in outlines(glyphs):
+        pen = TTGlyphPen(None)
+        draw(pen, polygons)
+        drawn[name] = pen.glyph()
+    fb.setupGlyf(drawn)
+    name_table(fb, family)
+    tag = axis[0]
+    fb.setupFvar(
+        axes=[axis],
+        instances=[{"stylename": style, "location": {tag: value}} for style, value in instances],
+    )
+    fb.setupGvar(
+        {
+            name: [
+                TupleVariation({tag: (-1.0, -1.0, 0.0)}, spread(name, -40)),
+                TupleVariation({tag: (0.0, 1.0, 1.0)}, spread(name, 60)),
+            ]
+            for name in glyphs
+        }
+    )
+    return finish(fb)
+
+
+def light_font() -> bytes:
+    """A weight axis whose named instances are all lighter than 600."""
+    return named_font(
+        "Umber Test Light",
+        {0xE00A: "bar", 0xE00B: "wedge", 0xE00C: "frame"},
+        ("wght", 100, 400, 900, "Weight"),
+        [("Book", 350), ("Text", 450), ("Medium", 500)],
+    )
+
+
+def width_font() -> bytes:
+    """A width axis with named instances and no weight axis."""
+    return named_font(
+        "Umber Test Width",
+        {0xE00D: "bar", 0xE00E: "wedge", 0xE00F: "frame"},
+        ("wdth", 50, 100, 200, "Width"),
+        [("Condensed", 75), ("Normal", 100), ("Expanded", 150)],
+    )
+
+
+def shifted(polygons: list[Polygon], amount: int) -> list[Polygon]:
+    """Move every point `amount` units away from the glyph's vertical centre line."""
+    return [[(x + (amount if x > 300 else -amount), y) for x, y in p] for p in polygons]
+
+
+def cff2_variable_font() -> bytes:
+    """Three glyphs drawn with CFF2 outlines on a weight axis with named instances."""
+    codepoints = {0xE010: "bar", 0xE011: "wedge", 0xE012: "frame"}
+    glyphs = list(codepoints.values())
+    doc = DesignSpaceDocument()
+    axis = AxisDescriptor()
+    axis.tag, axis.name, axis.minimum, axis.default, axis.maximum = "wght", "Weight", 100, 400, 900
+    doc.addAxis(axis)
+    for weight, amount in [(100, -40), (400, 0), (900, 60)]:
+        fb = builder(glyphs, codepoints, cff=True)
+        charstrings = {}
+        for name, polygons in outlines(glyphs):
+            pen = T2CharStringPen(ADVANCE, None)
+            draw(pen, polygons if name in (".notdef", "space") else shifted(polygons, amount))
+            charstrings[name] = pen.getCharString()
+        fb.setupCFF("UmberTestCFF2Variable-Regular", {}, charstrings, {})
+        name_table(fb, "Umber Test CFF2 Variable")
+        fb.setupHead(unitsPerEm=UNITS_PER_EM, created=TIMESTAMP, modified=TIMESTAMP)
+        source = SourceDescriptor()
+        source.font = fb.font
+        source.location = {"Weight": weight}
+        doc.addSource(source)
+    for style, weight in [("Book", 350), ("Medium", 500), ("Bold", 700)]:
+        instance = InstanceDescriptor()
+        instance.familyName = "Umber Test CFF2 Variable"
+        instance.styleName = style
+        instance.location = {"Weight": weight}
+        doc.addInstance(instance)
+    font, _, _ = build(doc)
+    font.recalcTimestamp = False
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
 
 
 def main() -> None:
@@ -162,6 +277,9 @@ def main() -> None:
         ("outline-cff.otf", cff_font()),
         ("outline-variable.ttf", variable_font()),
         ("outline-cff2.otf", cff2_font()),
+        ("outline-variable-light.ttf", light_font()),
+        ("outline-width.ttf", width_font()),
+        ("outline-cff2-variable.otf", cff2_variable_font()),
     ]:
         (FIXTURES / file).write_bytes(data)
         print(f"{file}: {len(data):,} bytes")

@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use umber_core::{BundledFont, Font, Weight};
+use umber_core::{BundledFont, Font};
 
 use crate::errors::{core_error, internal_value};
 
@@ -56,9 +56,9 @@ impl FontValue {
             return None;
         };
         let paths = self.paths.as_ref()?;
-        let regular = files.bytes(Weight::Regular)?;
+        let regular = files.regular_file();
         let saved = PyBytes::new(py, regular);
-        let bold = files.bytes(Weight::SemiBold).map(|bytes| {
+        let bold = files.bold_file().map(|bytes| {
             if std::ptr::eq(regular, bytes) {
                 saved.clone()
             } else {

@@ -23,8 +23,8 @@ FONTS = ROOT / "crates" / "umber-core" / "fonts"
 MB = 1_000_000
 
 # Largest wheel allowed, compressed, as uploaded to the package index. Measured wheels are
-# 2.5-2.9 MB; the budget leaves room for growth and catches a doubled binary.
-WHEEL_BUDGET = 4 * MB
+# 3.6-4.1 MB; the budget leaves room for growth and catches a doubled binary.
+WHEEL_BUDGET = 5 * MB
 # The bundled fonts may add at most this much to a wheel.
 FONT_BUDGET = 3 * MB
 

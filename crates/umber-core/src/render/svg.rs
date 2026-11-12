@@ -512,10 +512,7 @@ impl Writer<'_> {
                 let Some(font) = self.fonts.get(t.style.face.index()) else {
                     return;
                 };
-                let weight = font
-                    .resolved_weight(t.style.weight)
-                    .unwrap_or(t.style.weight)
-                    .numeric();
+                let weight = font.drawn_weight(t.style.weight);
                 let mut attrs = String::new();
                 let _ = write!(
                     attrs,
