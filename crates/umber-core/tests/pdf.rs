@@ -19,6 +19,8 @@ use umber_core::{
     Weight, pdf_pages,
 };
 
+#[path = "fixtures/font_file.rs"]
+mod font_fixture;
 #[path = "support/pdf_check.rs"]
 mod pdf_check;
 
@@ -922,6 +924,65 @@ fn pdf_resolves_bold_fallback_to_the_regular_face() {
     assert_readers_parse(&path);
     if have("pdftotext") {
         assert!(extracted_text(&path).contains("Bold fallback"));
+    }
+}
+
+#[test]
+fn pdf_embeds_the_regular_and_bold_instances_of_a_variable_font() {
+    let Some(bytes) = font_fixture::read("UmberFixtureSerif-Variable.ttf") else {
+        return;
+    };
+    let font = Font::from_files(bytes, None, "fixture".into()).unwrap();
+    let theme = Theme::pigment()
+        .with_title_font(font.clone())
+        .unwrap()
+        .with_body_font(font)
+        .unwrap();
+    let mut figure = Figure::new(4.0, 3.0, theme).unwrap();
+    figure
+        .add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Bold heading")
+        .xlabel("Regular label");
+    let pdf = figure.to_pdf(300).unwrap();
+    let body = String::from_utf8_lossy(&pdf);
+    let base_fonts: std::collections::BTreeSet<&str> = body
+        .match_indices("/BaseFont /")
+        .map(|(at, m)| body[at + m.len()..].split_whitespace().next().unwrap())
+        .filter_map(|name| name.split_once('+').map(|(_, name)| name))
+        .collect();
+    assert_eq!(
+        base_fonts,
+        [
+            "UmberFixtureSerifVariable-Bold",
+            "UmberFixtureSerifVariable-Roman"
+        ]
+        .into(),
+        "{body}"
+    );
+    // The two instances are subset and instanced apart, without variation tables.
+    let programs = references(&pdf, "/FontFile2");
+    assert_eq!(programs.len(), 2);
+    for program in &programs {
+        let data = stream_data(&pdf, *program);
+        let font = FontRef::new(&data).unwrap();
+        assert!(font.fvar().is_err() && font.gvar().is_err());
+    }
+    let dir = scratch("variable-instances");
+    let path = write(&dir, "instances.pdf", &pdf);
+    assert_readers_parse(&path);
+    if have("qpdf") {
+        assert_qpdf_clean(&path);
+    }
+    if have("pdftotext") {
+        let text = extracted_text(&path);
+        for expected in ["Bold heading", "Regular label"] {
+            assert!(text.contains(expected), "no {expected:?} in {text:?}");
+        }
+    }
+    if have("pdftoppm") {
+        let scene = figure.to_scene(FontLibrary::global()).unwrap();
+        assert_matches_png(&path, &render_png(&scene, 144).unwrap(), 144);
     }
 }
 

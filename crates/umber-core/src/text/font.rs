@@ -1,8 +1,9 @@
 //! Font identity, font bytes and parsed faces.
 //!
 //! A [`FontKey`] names a library font or a primary face in one scene. A [`FontHandle`] shares
-//! the font's bytes, so a layout can be outlined after its library is gone. A [`Face`] is a font parsed for character
-//! lookup, outlines and glyph bounds.
+//! the font's bytes and the location it is drawn at, so a layout can be outlined after its
+//! library is gone. A [`Face`] is a font parsed for character lookup, outlines and glyph
+//! bounds.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +19,7 @@ use skrifa::outline::pen::ControlBoundsPen;
 use skrifa::outline::{OutlineGlyphCollection, OutlineGlyphFormat};
 
 use super::cmap::{secondary_subtables, subtable_glyph};
+use super::instance::{Location, NamedInstance, Role, choose, named_instances};
 use super::outline::{draws_segments, unhinted};
 use super::style::FaceId;
 use crate::fonts::{BundledFont, Weight, font_bytes};
@@ -46,11 +48,13 @@ enum FontData {
     Shared(Arc<Vec<u8>>),
 }
 
-/// A shared handle to the font a run was shaped with: its bytes and its face index.
+/// A shared handle to the font a run was shaped with: its bytes, its face index and the
+/// location in its design space it was shaped at.
 #[derive(Clone)]
 pub(super) struct FontHandle {
     data: FontData,
     index: u32,
+    location: Location,
 }
 
 impl FontHandle {
@@ -59,6 +63,7 @@ impl FontHandle {
         FontHandle {
             data: FontData::Bundled(font_bytes(font, weight)),
             index: 0,
+            location: Location::default(),
         }
     }
 
@@ -67,17 +72,27 @@ impl FontHandle {
         FontHandle::shared(bytes, 0)
     }
 
-    /// An owned face, including a face selected from an installed collection.
+    /// An owned face, including a face selected from an installed collection, at the location
+    /// of its instance.
     pub(super) fn owned(font: &OwnedFace) -> FontHandle {
-        FontHandle::shared(Arc::clone(&font.bytes), font.index)
+        FontHandle {
+            location: font.instance.location(),
+            ..FontHandle::shared(Arc::clone(&font.bytes), font.index)
+        }
     }
 
-    /// Face `index` of the font file `bytes`, loaded and shared.
+    /// Face `index` of the font file `bytes`, loaded and shared, at its default location.
     pub(super) fn shared(bytes: Arc<Vec<u8>>, index: u32) -> FontHandle {
         FontHandle {
             data: FontData::Shared(bytes),
             index,
+            location: Location::default(),
         }
+    }
+
+    /// The location in the font's design space the run was shaped at.
+    pub(super) fn location(&self) -> &Location {
+        &self.location
     }
 
     /// Runs `f` on the font bytes and face index. The bytes of every font are in memory, so
@@ -104,6 +119,7 @@ impl std::fmt::Debug for FontHandle {
         f.debug_struct("FontHandle")
             .field("kind", &kind)
             .field("index", &self.index)
+            .field("location", &self.location)
             .finish()
     }
 }
@@ -111,8 +127,9 @@ impl std::fmt::Debug for FontHandle {
 /// A font prepared for shaping.
 pub(super) type ShapingFont = harfrust::Font;
 
-/// A validated, owned primary face. Its bytes and default-instance shaper are immutable.
-/// Unlike a fallback discovered during layout, it cannot disappear before outlining.
+/// A validated, owned primary face. Its bytes, its instance and the shaper and metrics at the
+/// instance's location are immutable. Unlike a fallback discovered during layout, it cannot
+/// disappear before outlining.
 #[derive(Clone)]
 pub(crate) struct OwnedFace {
     pub(crate) bytes: Arc<Vec<u8>>,
@@ -121,9 +138,32 @@ pub(crate) struct OwnedFace {
     pub(super) metrics: FaceMetrics,
     pub(crate) family: String,
     pub(crate) generic: &'static str,
+    /// Whether the font is a variable font: it has an `fvar` table.
+    variable: bool,
+    instance: Instance,
 }
 
-/// Default-instance vertical metrics, in font units.
+/// Where in its design space an owned face is drawn.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Instance {
+    /// The font's default location: a static font, or a variable font without a `wght` axis
+    /// or without named instances.
+    Default,
+    /// A named instance of a variable font with a `wght` axis.
+    Named(NamedInstance),
+}
+
+impl Instance {
+    /// The location of the instance.
+    fn location(&self) -> Location {
+        match self {
+            Instance::Default => Location::default(),
+            Instance::Named(instance) => instance.location().clone(),
+        }
+    }
+}
+
+/// Vertical metrics at a face's location, in font units.
 #[derive(Clone, Copy)]
 pub(super) struct FaceMetrics {
     pub(super) units_per_em: u16,
@@ -193,22 +233,85 @@ impl OwnedFace {
             } else {
                 "sans-serif"
             };
+            let variable = font.fvar().is_ok();
             let shared: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::clone(&bytes) as _;
             let shaping = ShapingFont::new(read_fonts::model::Blob::from(shared), index)?;
             Some(OwnedFace {
                 bytes,
                 index,
                 shaping,
-                metrics: FaceMetrics {
-                    units_per_em: metrics.units_per_em,
-                    ascender: metrics.ascent,
-                    descender: metrics.descent,
-                },
+                metrics: FaceMetrics::of(&metrics),
                 family,
                 generic,
+                variable,
+                instance: Instance::Default,
             })
         })
         .flatten()
+    }
+
+    /// The face that draws the regular face of this file: its regular named instance (see
+    /// [`choose`]), or its default location when it has no `wght` axis or no named instances.
+    pub(crate) fn regular_face(&self) -> OwnedFace {
+        self.face_for(Role::Regular).unwrap_or_else(|| self.clone())
+    }
+
+    /// The face that draws the bold face of the file that also draws the regular face: its
+    /// bold named instance. `None` when the file has no `wght` axis, no named instances, or no
+    /// named instance of weight 600 or more.
+    pub(crate) fn bold_face(&self) -> Option<OwnedFace> {
+        self.face_for(Role::Bold)
+    }
+
+    /// The face that draws the bold face of a file given as the bold file: its bold named
+    /// instance, else its named instance closest to 600, or its default location when it has
+    /// no `wght` axis or no named instances.
+    pub(crate) fn bold_file_face(&self) -> OwnedFace {
+        self.face_for(Role::BoldFile)
+            .unwrap_or_else(|| self.clone())
+    }
+
+    /// This face at the named instance chosen for `role`; `None` when none is.
+    fn face_for(&self, role: Role) -> Option<OwnedFace> {
+        super::guard::guarded(|| {
+            let font = FontRef::from_index(&self.bytes, self.index).ok()?;
+            let instances = named_instances(&font);
+            let instance = choose(&instances, role)?;
+            let location = instance.location();
+            let metrics = font.metrics(Size::unscaled(), LocationRef::new(location.coords()));
+            Some(OwnedFace {
+                shaping: self
+                    .shaping
+                    .instance_builder()
+                    .normalized_coords(location.coords().iter().copied())
+                    .build(),
+                metrics: FaceMetrics::of(&metrics),
+                instance: Instance::Named(instance.clone()),
+                ..self.clone()
+            })
+        })
+        .flatten()
+    }
+
+    /// Whether the font is a variable font.
+    pub(crate) fn is_variable(&self) -> bool {
+        self.variable
+    }
+
+    /// Where in its design space the face is drawn.
+    pub(crate) fn instance(&self) -> &Instance {
+        &self.instance
+    }
+}
+
+impl FaceMetrics {
+    /// The vertical metrics of `metrics`.
+    fn of(metrics: &skrifa::metrics::Metrics) -> FaceMetrics {
+        FaceMetrics {
+            units_per_em: metrics.units_per_em,
+            ascender: metrics.ascent,
+            descender: metrics.descent,
+        }
     }
 }
 
@@ -217,6 +320,7 @@ impl std::fmt::Debug for OwnedFace {
         f.debug_struct("OwnedFace")
             .field("family", &self.family)
             .field("index", &self.index)
+            .field("instance", &self.instance)
             .finish_non_exhaustive()
     }
 }

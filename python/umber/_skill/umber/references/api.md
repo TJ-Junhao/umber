@@ -4957,13 +4957,15 @@ the same file bytes and resolved family name, or installed family, and the same
 ``bold_fallback`` setting. A file's path matters only when its stem supplies a missing
 family name.
 
-Variable fonts use their default instance. Families installed only as variable fonts
-(for example Ubuntu or Cantarell) have no bold face here. By default, a font without bold
-raises ``StyleError`` when drawing bold text: axes titles, figure titles and direct legend
-labels. Pass ``bold_fallback=True`` to either constructor to draw that text in the regular
-face at the same size instead. An existing bold face is still used; no synthetic bold is
-made. Font licensing is your responsibility. Editable SVG viewers need the font installed;
-outlined SVG and PNG do not.
+A variable font with a ``wght`` axis and named instances is drawn in those instances:
+regular text in the instance closest to weight 400, bold text in the instance closest to
+600 among those of weight 600 or more. Without a bold file or static bold face, a variable
+font without such an instance, or without a ``wght`` axis or named instances, has no bold
+face. By default, a font without bold raises ``StyleError`` when drawing bold text: axes
+titles, figure titles and direct legend labels. Pass ``bold_fallback=True`` to either
+constructor to draw that text in the regular face at the same size instead. An existing
+bold face is still used; no synthetic bold is made. Font licensing is your responsibility.
+Editable SVG viewers need the font installed; outlined SVG and PNG do not.
 
 A pickled file font carries its bytes and original paths; unpickling does not read the
 files. A pickled system font looks the family up again when unpickled. Both keep the
@@ -5077,14 +5079,26 @@ Collections (``.ttc``) are not accepted; use ``Font.system()`` to choose a famil
 an installed collection. Pickling carries the bytes and original paths; unpickling
 does not reopen the files and keeps ``bold_fallback``.
 
-Without a bold file, drawing an axes title, figure title or direct legend label raises
+A variable font with a ``wght`` axis and named instances is drawn in named instances,
+at their coordinates on every axis. The regular file uses its instance closest to
+weight 400. Without ``bold=``, bold text uses the regular file's instance closest to
+600 among those of weight 600 or more. A bold file uses that instance too, or, if it
+has none of weight 600 or more, its instance closest to 600. Ties go to the lighter
+instance, then to the one nearest the font's default on its other axes, then to the
+first in the font. Variable fonts without a ``wght`` axis or named instances use their
+default instance. Editable SVG writes the instance's weight as ``font-weight``.
+
+Without a bold face, drawing an axes title, figure title or direct legend label raises
 ``StyleError`` by default. With ``bold_fallback=True``, these use the regular face at
-the same size; no synthetic bold is made. Do not combine this switch with ``bold=``.
+the same size; no synthetic bold is made. A variable file with a bold instance draws
+bold text in it whatever the switch. Do not combine this switch with ``bold=``.
 
 Args:
     regular: Path to the regular ``.ttf`` or ``.otf`` file.
-    bold: Path to the bold face, used for SemiBold text, or ``AUTO`` for no bold face.
-    bold_fallback: Draw bold text in the regular face when ``bold`` is ``AUTO``.
+    bold: Path to the bold face, used for SemiBold text, or ``AUTO`` for the regular
+        file's bold instance, if it has one.
+    bold_fallback: Draw bold text in the regular face when ``bold`` is ``AUTO`` and
+        the regular file has no bold instance.
 
 Returns:
     An immutable font for ``Theme.with_title_font()`` or ``Theme.with_body_font()``.
@@ -5121,11 +5135,16 @@ Find an installed font family, matching its name case-insensitively.
 
 Every call scans the installed fonts; there is no cache. Both typographic and legacy
 family names are matched. Regular faces prefer upright, normal width, then the closest
-weight to 400. Bold requires a separate upright static face of at least weight 600,
-preferring normal width, then the closest weight to 600. Selected bytes stay in memory.
+weight to 400 (a variable file counts the weight of its default instance), then a
+static face over a variable file of equal distance. Bold prefers an upright static face
+of at least weight 600, preferring normal width, then the closest weight to 600.
+Selected bytes stay in memory.
 
-Variable fonts use their default instance, not a bold variation. Families installed
-only as variable fonts (for example Ubuntu or Cantarell) have no bold face here.
+Variable fonts with a ``wght`` axis and named instances are drawn in named instances,
+as with ``Font.from_file()``: a variable regular face in its instance closest to 400.
+Without a static bold face, bold text uses an upright variable file's instance closest
+to 600 among those of weight 600 or more, so a family installed only as variable fonts
+has a bold face when one of its files has such an instance.
 A family without bold raises ``StyleError`` when drawing an axes title, figure title
 or direct legend label, unless ``bold_fallback=True`` draws that text in the regular
 face at the same size. No synthetic bold is made. If the family has a bold face, it is

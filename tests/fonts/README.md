@@ -1,7 +1,8 @@
 # Font fixtures
 
 These files are for tests only. `tests/fonts/**` is excluded from both wheels and source
-distributions. No font has been modified or subset here.
+distributions. Only `UmberFixtureSerif-Variable.ttf` has been modified and subset; it is built
+from `SourceSerif4Variable-Roman.ttf`, as described below.
 
 Core tests and the output corpus read these fixtures at run time from this repository
 path. When `tests/fonts/` is absent outside a repository checkout (for example, in an
@@ -29,7 +30,19 @@ Archive SHA-256: `549fdb8f9a682bd06944298621404969f6de77c2e422ff3b8244a1dcd6a0c4
 | `SourceSerif4-OFL.md` | `LICENSE.md` | 4492 | `75784a295293a8992f5a8d99210566e0064a012e6dab6731305e3787f15896c7` |
 
 Both fonts are licensed under the SIL Open Font License 1.1, reproduced in
-`SourceSerif4-OFL.md`. Together they are under 1.5 MB. The variable font retains its axes and
-uses the default instance in tests. The small existing
+`SourceSerif4-OFL.md`. Together they are under 1.5 MB. The variable font retains its axes. Its
+named instances at weight 400 and 600 nearest the default optical size are drawn for regular
+and bold text; the regular one is the default instance. The small existing
 `../../crates/umber-core/tests/fixtures/fallback-only.ttf` exercises missing digits and minus;
 its provenance is also recorded in the bundled font manifest.
+
+`UmberFixtureSerif-Variable.ttf` (103,700 bytes, SHA-256
+`a965047aef0c740630803d8750e15974cabd87e12835a1f7d51c9341ad991cb4`) is a variable font whose
+default instance is not the regular weight. `scripts/fonts/build_variable_fixture.py` builds it
+from `SourceSerif4Variable-Roman.ttf` with fontTools 4.66.1: the optical size axis is pinned at
+20, the default weight moves to 300 (Light), the Semibold instance is dropped so that the
+named instances are ExtraLight 200, Light 300, Regular 400, Bold 700 and Black 900, and the font
+is subset to Basic Latin, Latin-1 Supplement and a few punctuation marks. As a modified version
+it does not use the Reserved Font Name: its family is renamed "Umber Fixture Serif". It keeps
+Adobe's copyright notice and the SIL Open Font License 1.1, reproduced in
+`SourceSerif4-OFL.md`.

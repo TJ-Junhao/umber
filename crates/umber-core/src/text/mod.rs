@@ -39,18 +39,20 @@
 //! ```
 
 // Module layering, lowest first; each module uses only the ones listed before it:
-// - `style`, `guard`, `cmap`, `outline`, `marks` and `lines` are leaves;
-// - `font` owns font identity, font bytes and parsed faces (uses `cmap`, `outline`);
+// - `style`, `guard`, `cmap`, `outline`, `marks`, `lines` and `instance` are leaves;
+// - `font` owns font identity, font bytes and parsed faces (uses `cmap`, `outline`,
+//   `instance`);
 // - `shaping` owns the shaper callbacks, features and plan reuse (uses `font`);
 // - `runs` owns splitting text into runs and grouping them by font (uses `font`, `marks`);
 // - `layout` owns placed glyphs and `TextLayout` (uses `font`, `shaping`, `runs`, `outline`,
-//   `guard`);
+//   `guard`, `instance`);
 // - `system` owns system font discovery, lookup and shaping tables (uses `font`, `cmap`,
 //   `guard`, `lines`);
 // - `library` coordinates one layout call over all of them, and resolves the fonts of a scene.
 mod cmap;
 mod font;
 mod guard;
+mod instance;
 mod layout;
 mod library;
 mod lines;
@@ -64,7 +66,8 @@ mod system;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use font::OwnedFace;
+pub(crate) use font::{Instance, OwnedFace};
+pub(crate) use instance::Location;
 pub(crate) use layout::{GlyphRun, PlacedGlyph, ProgramId, RunFont};
 pub use layout::{TextGlyphs, TextLayout};
 pub(crate) use library::CheckedStyle;

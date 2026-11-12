@@ -289,6 +289,7 @@ fn legacy_family_faces<'a>(
 fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts::SystemFamily> {
     check_family(family)?;
     let (faces, names) = family_faces(db, family);
+    // Among faces equally close to 400, a static face comes before a variable file.
     let regular = faces
         .iter()
         .min_by_key(|face| {
@@ -297,6 +298,7 @@ fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts:
                 info.style != fontdb::Style::Normal,
                 info.stretch != fontdb::Stretch::Normal,
                 info.weight.0.abs_diff(400),
+                face.variable,
                 info.weight.0,
                 &info.post_script_name,
                 info.index,
@@ -319,14 +321,44 @@ fn family_in(db: &fontdb::Database, family: &str) -> crate::Result<crate::fonts:
         });
     let variable_only = faces.iter().all(|face| face.variable);
     let name = regular.name.clone();
-    let regular = regular.parse(family)?;
-    let bold = bold.map(|face| face.parse(family)).transpose()?;
+    let regular = regular.parse(family)?.regular_face();
+    let bold = match bold {
+        Some(face) => Some(face.parse(family)?),
+        None => variable_bold(&faces, family),
+    };
     Ok(crate::fonts::SystemFamily::new(
         name,
         regular,
         bold,
         variable_only,
     ))
+}
+
+/// The bold face from a variable file of `faces`, used when no static face is bold: among the
+/// upright variable files with a bold named instance, prefer normal width, then the lightest
+/// bold instance (they are all of weight 600 or more, so this is the closest to 600). A
+/// variable file that cannot be read is not a candidate.
+fn variable_bold(faces: &[FamilyFace<'_>], family: &str) -> Option<crate::text::OwnedFace> {
+    faces
+        .iter()
+        .filter(|face| face.variable && face.info.style == fontdb::Style::Normal)
+        .filter_map(|face| {
+            let bold = face.parse(family).ok()?.bold_face()?;
+            let crate::text::Instance::Named(instance) = bold.instance() else {
+                return None;
+            };
+            let weight = instance.weight();
+            Some((face, weight, bold))
+        })
+        .min_by(|(a, a_weight, _), (b, b_weight, _)| {
+            let wide = |face: &FamilyFace<'_>| face.info.stretch != fontdb::Stretch::Normal;
+            wide(a)
+                .cmp(&wide(b))
+                .then(a_weight.total_cmp(b_weight))
+                .then_with(|| a.info.post_script_name.cmp(&b.info.post_script_name))
+                .then(a.info.index.cmp(&b.info.index))
+        })
+        .map(|(_, _, bold)| bold)
 }
 
 fn unknown_family(mut names: Vec<String>, family: &str) -> crate::Error {

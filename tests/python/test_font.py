@@ -222,6 +222,59 @@ def test_font_file_edge_cases_formats(filename: str) -> None:
     assert "Source Serif" in figure.to_svg(text=ub.SvgText.EDITABLE)
 
 
+VARIABLE = FONTS / "UmberFixtureSerif-Variable.ttf"
+FIXTURES = ROOT / "crates/umber-core/tests/fixtures"
+
+
+def test_variable_file_draws_bold_text_in_its_bold_instance() -> None:
+    # The fixture's default is Light 300; its instances include Regular 400 and Bold 700.
+    font = ub.Font.from_file(VARIABLE)
+    assert font == ub.Font.from_file(VARIABLE, bold=ub.AUTO)
+    assert font != ub.Font.from_file(VARIABLE, bold=VARIABLE)
+    figure = _figure(font, title="Bold heading")
+    editable = figure.to_svg(text=ub.SvgText.EDITABLE)
+    assert "font-family=\"'Umber Fixture Serif Variable', serif\"" in editable
+    assert 'font-weight="400"' in editable
+    assert 'font-weight="700"' in editable
+    assert 'font-weight="600"' not in editable
+    assert figure.to_png().startswith(b"\x89PNG")
+    pdf = figure.to_pdf()
+    assert b"UmberFixtureSerifVariable-Bold" in pdf
+    assert b"UmberFixtureSerifVariable-Roman" in pdf
+
+
+def test_variable_bold_instance_makes_bold_fallback_inert() -> None:
+    plain = ub.Font.from_file(VARIABLE)
+    fallback = ub.Font.from_file(VARIABLE, bold_fallback=True)
+    assert plain != fallback
+    for figure in (_figure(plain), _figure(fallback)):
+        assert 'font-weight="700"' in figure.to_svg(text=ub.SvgText.EDITABLE)
+    assert _figure(plain).to_png() == _figure(fallback).to_png()
+    with pytest.raises(ub.UsageError) as caught:
+        ub.Font.from_file(VARIABLE, bold=VARIABLE, bold_fallback=True)
+    assert details(caught.value) == ("bold_fallback", "drop bold_fallback, or drop bold.")
+
+
+def test_variable_file_without_a_bold_instance_has_no_bold_face() -> None:
+    # Instances at weights 350, 450 and 500 only.
+    light = FIXTURES / "outline-variable-light.ttf"
+    with pytest.raises(ub.StyleError) as caught:
+        _figure(ub.Font.from_file(light), title="Needs bold").to_svg()
+    assert str(caught.value).endswith(
+        "The file is a variable font without a named instance of weight 600 or more."
+    )
+    assert details(caught.value) == (None, MISSING_BOLD_HINT)
+    fallback = _figure(ub.Font.from_file(light, bold_fallback=True)).to_svg(
+        text=ub.SvgText.EDITABLE
+    )
+    # The regular instance is 350: the lighter of 350 and 450, equally close to 400.
+    assert 'font-weight="350"' in fallback
+    assert 'font-weight="500"' not in fallback
+    # Given as the bold file, the instance closest to 600 draws bold text.
+    as_bold = _figure(ub.Font.from_file(REGULAR, bold=light)).to_svg(text=ub.SvgText.EDITABLE)
+    assert 'font-weight="500"' in as_bold
+
+
 def test_font_file_edge_cases_paths_and_missing_glyphs(tmp_path: Path) -> None:
     unicode_path = tmp_path / "字体-é.ttf"
     unicode_path.write_bytes(REGULAR.read_bytes())
