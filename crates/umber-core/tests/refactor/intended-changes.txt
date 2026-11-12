@@ -1,7 +1,1 @@
-# Cases whose committed outputs change on purpose in this change.
-# The variable font of these cases is given as its own bold file. Its bold text is now drawn in
-# the font's Semibold 600 instance at the default optical size instead of the default instance,
-# Regular 400; its regular text is drawn in the Regular instance, which is the default.
-font-file-variable-graphite
-font-file-variable-midnight
-font-file-variable-pigment
+# Cases whose committed outputs change on purpose in this change; none.
