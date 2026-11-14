@@ -1068,7 +1068,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             label: The name shown in the legend; an empty string leaves the area out of it.
             color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
                 A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
-                that opacity; an opaque color fills at the theme's area opacity.
+                that opacity; an opaque color fills at the theme's area opacity. In the gradient
+                fill style a translucent color sets the colored end of the gradient, which still
+                fades to the baseline as before.
             dash: How the line is stroked.
             width: The line width. ``Size.AUTO`` is the line width of the theme.
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
@@ -1705,7 +1707,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         Statistics and NaN handling are as in ``box()``. The group occupies half the band;
         boxes are 2 pt apart, or touch if that gap would leave them narrower than the gap.
         Each distribution has its own color and legend entry, in input order: left to right,
-        or top to bottom on a category y axis.
+        or top to bottom on a category y axis. A distribution color that is translucent, such
+        as ``Color.hex("#1f77b4").alpha(0.5)``, fills its boxes at exactly that opacity; an
+        opaque one fills at the theme's area opacity.
 
         Args:
             categories: The category names, each appearing once.
@@ -1861,7 +1865,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Each layer fills between the previous cumulative curve and its own, flat at the
         opacity of an area in every fill style, with its upper curve outlined at the theme's
-        line width. The first layer starts at the baseline. A linear y axis includes zero;
+        line width. A series color that is translucent, such as ``Color.hex("#1f77b4").alpha(0.5)``
+        in ``Series``, fills at exactly that opacity; an opaque one fills at the area opacity.
+        The first layer starts at the baseline. A linear y axis includes zero;
         on log y the baseline is the lower limit. A NaN in x or any series breaks every layer
         at that index. Long inputs are reduced per device column, keeping every cumulative
         curve's envelope and exact crossings at explicit limits. The baseline is drawn at
@@ -1941,7 +1947,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
                 it.
             color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
                 A translucent color, such as ``Color.hex("#1f77b4").alpha(0.5)``, fills at exactly
-                that opacity; an opaque color fills as the theme's fill style does.
+                that opacity; an opaque color fills as the theme's fill style does. In the gradient
+                fill style a translucent color sets the colored end of the gradient, which still
+                fades to the baseline as before.
             by: One group name per data row, in first-appearance order; ``AUTO`` draws
                 one series. Names supply legend labels and palette colors; do not pass
                 a non-empty ``label`` or an explicit ``color``. Missing or empty names
@@ -2900,6 +2908,9 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         violins are 2 pt apart, or touch if that gap would leave them narrower than the gap.
         Each distribution has its own color and legend entry, in input order: left to right,
         or top to bottom on a category y axis.
+        A distribution color that is translucent, such as ``Color.hex("#1f77b4").alpha(0.5)``,
+        fills its violins at exactly that opacity; an opaque one fills at the theme's area
+        opacity.
 
         Args:
             categories: The category names, each appearing once.
@@ -3434,7 +3445,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             groups: One group of numeric samples per category.
             jitter: Maximum displacement as a band fraction from 0 to 0.5; AUTO uses 0.4.
             size: Marker diameter; Size.AUTO uses the theme's marker size.
-            color: Marker color; Color.AUTO takes the next palette color.
+            color: Marker color; Color.AUTO takes the next palette color. A translucent color
+                fills at exactly that opacity; an opaque one at the theme's marker alpha.
             label: The legend label; empty for none. Points use a marker swatch.
 
         Returns:
@@ -3493,7 +3505,8 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             categories: Unique category names.
             groups: One group of numeric samples per category.
             size: Marker diameter; Size.AUTO uses the theme's marker size.
-            color: Marker color; Color.AUTO takes the next palette color.
+            color: Marker color; Color.AUTO takes the next palette color. A translucent color
+                fills at exactly that opacity; an opaque one at the theme's marker alpha.
             label: The legend label; empty for none. Points use a marker swatch.
 
         Returns:
