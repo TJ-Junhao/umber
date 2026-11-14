@@ -68,6 +68,8 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.grid(True, axis="y")` | `theme=ub.Theme.PIGMENT.with_grid_lines(ub.GridLines.HORIZONTAL)` (`VERTICAL`, `BOTH`, `NONE`) |
 | `ax.step(x, y, where="post")` / `ax.stem(x, y)` | `ax.step(x, y)` / `ax.stem(x, y)` |
 | `ax.set_xlim(a, b)`, `set_xscale("log")` | `ax.xlim(a, b)`; the scale is chosen in `add_axes(x=ub.Scale.log())` |
+| `ax.set_ylim(bottom=0)` | `ax.ylim(0, ub.AUTO)`; the top stays automatic (`ax.ylim(ub.AUTO, top)` for the reverse) |
+| `ax.xaxis.set_major_locator(MaxNLocator(integer=True))` | nothing: automatic ticks on integer data, such as years, take whole steps |
 | `ax.xaxis.set_major_formatter(PercentFormatter(1, decimals=n))` | `ax.xtick_format(ub.TickFormat.percent(n))`; choose the decimals (umber's default is 0) |
 | `ax.title.set_fontsize(16)` | `ax.title("…", size=ub.Size.pt(16))` |
 | `plt.rcParams["font.family"] = "serif"` | `theme=ub.Theme.PIGMENT.with_body_font(ub.Font.SOURCE_SERIF_4)` |

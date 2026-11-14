@@ -72,7 +72,7 @@ use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::color_scale::ResolvedColorScale;
 use crate::error::quoted;
 use crate::layout::{Area, ColumnInput, Label, Layout, value_text};
-use crate::model::{Axes, AxisData, values_on_x};
+use crate::model::{Axes, AxisData, ExplicitLimits, GivenLimits, LimitEnd, values_on_x};
 use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::Item;
 use crate::text::SceneFonts;
@@ -178,19 +178,39 @@ impl Sides {
 enum Limits {
     /// Automatic limits, which grow to hold every point.
     Automatic,
-    /// Explicit numeric limits, the lower first.
+    /// Explicit numeric limits, the lower first; an automatic end of a one-sided limit is
+    /// infinite.
     Numbers(f64, f64),
-    /// Explicit time limits, the earlier first.
-    Times(Instant, Instant),
+    /// Explicit time limits, the earlier first; `None` for an automatic end of a one-sided
+    /// limit.
+    Times(Option<Instant>, Option<Instant>),
 }
 
 impl Limits {
-    /// The limits of an axis with the explicit numeric limits `numbers` or time limits `times`.
-    fn new(numbers: Option<(f64, f64)>, times: Option<(Instant, Instant)>) -> Limits {
-        match (numbers, times) {
-            (Some((a, b)), _) => Limits::Numbers(a.min(b), a.max(b)),
-            (None, Some((a, b))) => Limits::Times(a.min(b), a.max(b)),
-            (None, None) => Limits::Automatic,
+    /// The limits of an axis with the explicit limits `given`, if set. A point beyond an
+    /// automatic end is always drawn, since that end holds every point beyond the fixed one.
+    fn new(given: Option<ExplicitLimits>) -> Limits {
+        match given {
+            None => Limits::Automatic,
+            Some(ExplicitLimits::Continuous(GivenLimits::Both(scale))) => {
+                let (low, high) = scale.domain();
+                Limits::Numbers(low, high)
+            }
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(LimitEnd::Low, low))) => {
+                Limits::Numbers(low, f64::INFINITY)
+            }
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(LimitEnd::High, high))) => {
+                Limits::Numbers(f64::NEG_INFINITY, high)
+            }
+            Some(ExplicitLimits::Time(GivenLimits::Both((low, high)))) => {
+                Limits::Times(Some(low), Some(high))
+            }
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(LimitEnd::Low, low))) => {
+                Limits::Times(Some(low), None)
+            }
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(LimitEnd::High, high))) => {
+                Limits::Times(None, Some(high))
+            }
         }
     }
 
@@ -199,7 +219,9 @@ impl Limits {
     fn holds(self, at: Option<ReachFrom>) -> bool {
         match (self, at) {
             (Limits::Numbers(low, high), Some(ReachFrom::Number(v))) => (low..=high).contains(&v),
-            (Limits::Times(low, high), Some(ReachFrom::Time(t))) => (low..=high).contains(&t),
+            (Limits::Times(low, high), Some(ReachFrom::Time(t))) => {
+                low.is_none_or(|low| low <= t) && high.is_none_or(|high| t <= high)
+            }
             _ => true,
         }
     }
@@ -288,8 +310,8 @@ impl ScatterLabels {
             axes.y_tick_format()
         };
         let within = [
-            Limits::new(axes.x_limits(), axes.x_time_limits()),
-            Limits::new(axes.y_limits(), axes.y_time_limits()),
+            Limits::new(axes.x_given_limits()),
+            Limits::new(axes.y_given_limits()),
         ];
         let mut measured = Vec::new();
         let mut columns = Vec::new();

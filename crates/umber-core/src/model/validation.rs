@@ -10,7 +10,7 @@ use super::axis_data::{AxisData, SharedValues};
 use super::bar::{Arrangement, BarInput, Series};
 use super::box_plot::Distribution;
 use super::hist::{Bins, GroupedHistOptions, HistOptions, HistStat, HistStyle};
-use super::share::SharedAxis;
+use super::share::{LimitEnd, SharedAxis};
 use crate::binning::{BinCount, BinSpec, HistBinning, HistBins, MAX_BINS};
 use crate::error::number;
 use crate::scale::{MAX_MAGNITUDE, MIN_LOG_VALUE, too_narrow};
@@ -1739,20 +1739,97 @@ pub(super) fn check_limits(
     kind: ScaleKind,
     (low, high): (f64, f64),
 ) -> Result<ContinuousScale> {
+    let transform = continuous_transform(context, axis, kind)?;
+    ContinuousScale::new(transform, low, high, context)
+}
+
+/// The transform of a linear or log axis `axis`, of scale kind `kind`, whose limits the setter
+/// `context` sets as numbers: `Error::Usage` on a time or category axis.
+fn continuous_transform(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<Transform> {
     if kind == ScaleKind::Time {
         return Err(Error::usage(
             context,
             "this is a time axis; its limits must be times.",
         ));
     }
-    let Some(transform) = kind.transform() else {
-        return Err(Error::usage(
+    kind.transform().ok_or_else(|| {
+        Error::usage(
             context,
             "this is a category axis; limits apply to linear and log axes only.",
         )
-        .with_hint(axis.numeric_scale_hint()));
-    };
-    ContinuousScale::new(transform, low, high, context)
+        .with_hint(axis.numeric_scale_hint())
+    })
+}
+
+/// Checks one explicit limit, `value` at `end`, for the setter `context` of `axis`, of scale
+/// kind `kind`, and returns it: `Error::Usage` on a category or time axis, then `Error::Style`,
+/// naming the parameter of that end, unless the value is finite and within the supported
+/// magnitudes, and positive and at least [`MIN_LOG_VALUE`] on a log axis.
+pub(super) fn check_limit_end(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+    end: LimitEnd,
+    value: f64,
+) -> Result<f64> {
+    let transform = continuous_transform(context, axis, kind)?;
+    let name = end.name();
+    let shown = number(value);
+    if !value.is_finite() {
+        return Err(Error::style(
+            context,
+            format!("{name} is {shown}; a limit must be finite."),
+        )
+        .with_parameter(name));
+    }
+    match transform {
+        Transform::Linear if value.abs() > MAX_MAGNITUDE => Err(Error::style(
+            context,
+            format!("{name} is {shown}; its magnitude must not exceed {MAX_MAGNITUDE:e}."),
+        )
+        .with_parameter(name)),
+        Transform::Log(_) if value <= 0.0 => Err(Error::style(
+            context,
+            format!("{name} is {shown}; a log scale needs positive limits."),
+        )
+        .with_parameter(name)
+        .with_hint("use a linear axis if a limit is not positive.")),
+        Transform::Log(_) if !(MIN_LOG_VALUE..=MAX_MAGNITUDE).contains(&value) => {
+            Err(Error::style(
+                context,
+                format!(
+                    "{name} is {shown}; a log scale supports values from {MIN_LOG_VALUE:e} to {MAX_MAGNITUDE:e}."
+                ),
+            )
+            .with_parameter(name))
+        }
+        Transform::Linear | Transform::Log(_) => Ok(value),
+    }
+}
+
+/// Checks that the setter `context` of `axis`, of scale kind `kind`, sets the limits of a time
+/// axis: `Error::Usage` unless it is one.
+pub(super) fn check_time_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+) -> Result<()> {
+    match kind {
+        ScaleKind::Time => Ok(()),
+        ScaleKind::Category => Err(Error::usage(
+            context,
+            "this is a category axis; limits apply to linear, log and time axes only.",
+        )
+        .with_hint(axis.time_scale_hint())),
+        ScaleKind::Linear | ScaleKind::Log { .. } => Err(Error::usage(
+            context,
+            "this is a linear or log axis; its limits must be numbers.",
+        )),
+    }
 }
 
 /// Checks the explicit limits of a time axis, `low` and `high`, for the setter `context` of
@@ -1764,22 +1841,7 @@ pub(super) fn check_time_limits(
     kind: ScaleKind,
     (low, high): (Instant, Instant),
 ) -> Result<(Instant, Instant)> {
-    match kind {
-        ScaleKind::Time => {}
-        ScaleKind::Category => {
-            return Err(Error::usage(
-                context,
-                "this is a category axis; limits apply to linear, log and time axes only.",
-            )
-            .with_hint(axis.time_scale_hint()));
-        }
-        ScaleKind::Linear | ScaleKind::Log { .. } => {
-            return Err(Error::usage(
-                context,
-                "this is a linear or log axis; its limits must be numbers.",
-            ));
-        }
-    }
+    check_time_axis(context, axis, kind)?;
     if low >= high {
         return Err(Error::style(
             context,

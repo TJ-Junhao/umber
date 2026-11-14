@@ -253,6 +253,10 @@ svg = ax.figure.to_svg()
 
 `xticks([...])`, `xticks_labeled([...], [...])`, `xlim(low, high)`, and `xtick_format(ub.TickFormat.percent(1))` (also `fixed(decimals)`, `scientific()`, `iso()` for times, and `.affix(prefix=, suffix=)`). The y methods mirror them.
 
+`ylim(0, ub.AUTO)` fixes one limit and leaves the other automatic: the automatic end follows the data from the fixed end, with 5% of that span as padding on its side only. Use it to start a value axis at zero; do not compute the upper limit yourself. `ylim(ub.AUTO, ub.AUTO)` raises `UsageError`, and rendering raises `StyleError` when every value lies beyond the fixed limit.
+
+Automatic ticks on integer data, such as years, counts or indices, take whole steps (1, 2, 5, 10, 20, 25, 50, …) and print no decimals, so years never read `2017.5`; do not set `xticks()` only to avoid half steps. Every value the automatic limits come from must be an exact integer; data with any fraction, or explicit limits at both ends, keep the usual steps of 1, 2, 2.5 or 5 times a power of ten.
+
 ## Text sizes
 
 Titles, subtitles, axis labels, legends, colorbar titles, `text`, `annotate`, bar value labels and pie labels take `size=`: `ub.Size.AUTO` (the theme's size), `ub.Size.times(1.5)` (relative to the theme, following its font scale) or `ub.Size.pt(14)` (fixed points). Tick labels are sized per axis with `ax.xtick_labels(size=...)` and `ax.ytick_labels(size=...)`. Heatmap and contour value labels use the theme's tick label size. Contour level labels place and color themselves: each sits at the middle of its line or at the nearest place along it that lies wholly inside the plot area and the field, clear of NaN holes and filtered triangles, and on the bands of `ub.Contour.BOTH` it takes the theme's text or background color, whichever reads better on the bands painted under it; a line with no such place has no label, so do not draw level values with `ax.text()`.

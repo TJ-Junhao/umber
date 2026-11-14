@@ -16,7 +16,7 @@ use crate::layout::{
 };
 use crate::legend::Legend;
 use crate::model::Layer;
-use crate::model::{Axes, Figure, ShareGroups, label_visibility};
+use crate::model::{Axes, ExplicitLimits, Figure, GivenLimits, ShareGroups, label_visibility};
 use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
@@ -222,6 +222,32 @@ fn check_equal_aspect(figure: &Figure, context: &'static str) -> Result<()> {
             figure
                 .check_equal_aspect_share(axes, context)
                 .map_err(|error| in_cell(figure, layer, error))?;
+        }
+    }
+    Ok(())
+}
+
+/// Checks every axis group of `panels` whose limits fix one end ([`resolve::check_fixed_end`]),
+/// x axes first, each group in the row-major order of its first member: the first error, in
+/// `context`, starts with that member's cell on a grid of more than one cell.
+fn check_fixed_ends(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    groups: &ShareGroups,
+    context: &'static str,
+) -> Result<()> {
+    for side in Side::BOTH {
+        let keys = side.groups(groups);
+        for (i, panel) in panels.iter().enumerate() {
+            if keys[i] != i {
+                continue;
+            }
+            let marks = (0..panels.len())
+                .filter(|&j| keys[j] == i)
+                .flat_map(|j| panels[j].marks.iter());
+            let limits = Limits::of(panel.axes);
+            resolve::check_fixed_end(marks, side.axis(), limits.axis(side.axis()), context)
+                .map_err(|err| in_cell(figure, panel.axes, err))?;
         }
     }
     Ok(())
@@ -1387,16 +1413,17 @@ fn plan(
                 if axis.ticks.explicit().is_some() {
                     continue;
                 }
-                let scale = match side {
-                    Side::X => resolved[i].x.continuous(),
-                    Side::Y => resolved[i].y.continuous(),
+                let resolved_axis = match side {
+                    Side::X => &resolved[i].x,
+                    Side::Y => &resolved[i].y,
                 };
-                let Some(scale) = scale.copied() else {
+                let steps = resolved_axis.steps;
+                let Some(scale) = resolved_axis.continuous().copied() else {
                     continue;
                 };
                 let mut candidates: Vec<Vec<_>> = if scale.transform() == crate::Transform::Linear {
                     scale
-                        .tick_pairs(axis.ticks.format())
+                        .tick_pairs(axis.ticks.format(), steps)
                         .into_iter()
                         .map(|pair| {
                             pair.into_iter()
@@ -2556,7 +2583,19 @@ fn lay_out_cells(
             if matches!(passing, Rooms::Provisional(_)) && !equal {
                 continue;
             }
-            let limits = [axes.x_limits(), axes.y_limits()];
+            // A limit fixed at one end keeps the window resolve gave its axis, as explicit
+            // limits keep theirs.
+            let window = |given, scale: crate::ContinuousScale| match given {
+                Some(ExplicitLimits::Continuous(GivenLimits::Both(limits))) => {
+                    Some(limits.domain())
+                }
+                Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(..))) => Some(scale.domain()),
+                Some(ExplicitLimits::Time(_)) | None => None,
+            };
+            let limits = [
+                window(axes.x_given_limits(), scales[i][0]),
+                window(axes.y_given_limits(), scales[i][1]),
+            ];
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
             // Hexbins without paired finite points count no cells, and leave the others alone.
@@ -2938,6 +2977,7 @@ fn scene_with_labels(
     let rooms = Rooms::of(reference.as_ref());
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
+        check_fixed_ends(figure, &panels, &groups, context)?;
         if let Some(held) = held {
             for (panel, sides) in panels.iter_mut().zip(held) {
                 panel.points.hold(sides.clone());

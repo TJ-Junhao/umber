@@ -165,6 +165,40 @@ fn shared_x_labels_on_lowest_occupied_panel() {
 }
 
 #[test]
+fn one_shared_limit_reaches_every_member_and_names_its_automatic_end() {
+    let mut f = figure(2, 1, Share::Col, Share::None);
+    add(&mut f, 0, 0, 3.0);
+    add(&mut f, 1, 0, 10.0);
+    f.axes_at_mut(GridIndex::At(0), GridIndex::At(0))
+        .unwrap()
+        .xlim_end(LimitEnd::Low, -2.0)
+        .unwrap();
+    let member = f.axes_at(GridIndex::At(1), GridIndex::At(0)).unwrap();
+    assert_eq!(member.x_limit_end(), Some((LimitEnd::Low, -2.0)));
+    assert_eq!(member.x_limits(), None);
+    let before = f.clone();
+    let err = f
+        .axes_at_mut(GridIndex::At(1), GridIndex::At(0))
+        .unwrap()
+        .xlim(0.0, 5.0)
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Axes.xlim(): x limits are shared with row 0, col 0, which set (-2, AUTO)."
+    );
+    assert_eq!(f, before);
+    // The member that set it may replace it, with both limits or the other end.
+    let mut axes = f.axes_at_mut(GridIndex::At(0), GridIndex::At(0)).unwrap();
+    axes.xlim_end(LimitEnd::High, 12.0).unwrap();
+    assert_eq!(axes.x_limit_end(), Some((LimitEnd::High, 12.0)));
+    axes.xlim(0.0, 12.0).unwrap();
+    assert_eq!(
+        (axes.x_limits(), axes.x_limit_end()),
+        (Some((0.0, 12.0)), None)
+    );
+}
+
+#[test]
 fn conflicting_shared_limits_leave_group_unchanged() {
     let mut f = figure(2, 1, Share::Col, Share::None);
     add(&mut f, 0, 0, 3.0);

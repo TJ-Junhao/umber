@@ -8,26 +8,99 @@ use super::{Axes, AxisTicks, Cell, CellRange, Figure, Grid, Share, TickHighlight
 use crate::error::number;
 use crate::{ContinuousScale, Error, Instant, Result, ScaleKind, SizeSpec};
 
-/// The explicit limits of an axis, validated: the scale they define on a linear or log axis,
-/// the lower and the upper time on a time axis.
+/// Which end of an axis a one-sided limit fixes; the other end stays automatic.
+///
+/// # Examples
+///
+/// ```
+/// use umber_core::{Figure, LimitEnd, ScaleKind, Theme};
+///
+/// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+/// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+/// axes.ylim_end(LimitEnd::Low, 0.0)?;
+/// assert_eq!(axes.y_limit_end(), Some((LimitEnd::Low, 0.0)));
+/// # Ok::<(), umber_core::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LimitEnd {
+    /// The lower limit.
+    Low,
+    /// The upper limit.
+    High,
+}
+
+impl LimitEnd {
+    /// The name of the end as messages write it and the parameter that sets it: `low` or
+    /// `high`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::LimitEnd;
+    ///
+    /// assert_eq!(LimitEnd::High.name(), "high");
+    /// ```
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            LimitEnd::Low => "low",
+            LimitEnd::High => "high",
+        }
+    }
+}
+
+/// The limits given to an axis: both ends, as `B`, or one end at a value `V` with the other
+/// automatic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum GivenLimits<B, V> {
+    /// Both ends.
+    Both(B),
+    /// One end at a value; the other end is automatic.
+    OneEnd(LimitEnd, V),
+}
+
+/// The limits given to a linear or log axis: both ends as the scale they define, or one end.
+pub(crate) type ContinuousGiven = GivenLimits<ContinuousScale, f64>;
+
+/// The limits given to a time axis: both ends, the lower first, or one end.
+pub(crate) type TimeGiven = GivenLimits<(Instant, Instant), Instant>;
+
+/// The explicit limits of an axis, validated: those of a linear or log axis, or those of a time
+/// axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ExplicitLimits {
-    /// The limits of a linear or log axis, as the scale they define.
-    Continuous(ContinuousScale),
-    /// The limits of a time axis, the lower below the upper.
-    Time(Instant, Instant),
+    /// The limits of a linear or log axis.
+    Continuous(ContinuousGiven),
+    /// The limits of a time axis.
+    Time(TimeGiven),
 }
 
 impl ExplicitLimits {
-    /// The limits as messages write them, such as `(0, 10)` or `(2026-01-01, 2026-02-01)`.
+    /// The limits as messages write them, such as `(0, 10)`, `(0, AUTO)` or
+    /// `(2026-01-01, 2026-02-01)`.
     fn label(self) -> String {
         match self {
-            ExplicitLimits::Continuous(scale) => {
-                let (low, high) = scale.domain();
-                format!("({}, {})", number(low), number(high))
+            ExplicitLimits::Continuous(given) => {
+                given_label(given, |scale| scale.domain(), |v| number(v).to_string())
             }
-            ExplicitLimits::Time(low, high) => format!("({}, {})", low.label(), high.label()),
+            ExplicitLimits::Time(given) => given_label(given, |ends| ends, Instant::label),
         }
+    }
+}
+
+/// `given` as messages write it: both ends, or the one end with `AUTO` for the other.
+fn given_label<B, V: Copy>(
+    given: GivenLimits<B, V>,
+    ends: impl Fn(B) -> (V, V),
+    write: impl Fn(V) -> String,
+) -> String {
+    match given {
+        GivenLimits::Both(both) => {
+            let (low, high) = ends(both);
+            format!("({}, {})", write(low), write(high))
+        }
+        GivenLimits::OneEnd(LimitEnd::Low, low) => format!("({}, AUTO)", write(low)),
+        GivenLimits::OneEnd(LimitEnd::High, high) => format!("(AUTO, {})", write(high)),
     }
 }
 

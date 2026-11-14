@@ -146,6 +146,7 @@ fn marks_and_gridlines_share_the_log_normalization() {
 fn both_axes_map_through_their_scales() {
     use super::super::mapping::{AxisMaps, AxisPoint, axis_numbers, axis_value, axis_values};
     use crate::resolve::{AxisScale, ResolvedAxis};
+    use crate::ticks::TickSteps;
     use crate::{CategoryScale, ContinuousScale, Transform};
     let plot = Area {
         x: 10.0,
@@ -157,12 +158,14 @@ fn both_axes_map_through_their_scales() {
     let category = ResolvedAxis {
         scale: AxisScale::Category(CategoryScale::from_first_appearance(["a", "b"])),
         ticks: Vec::new(),
+        steps: TickSteps::Any,
     };
     let linear = ResolvedAxis {
         scale: AxisScale::Continuous(
             ContinuousScale::new(Transform::Linear, 0.0, 4.0, "test").unwrap(),
         ),
         ticks: Vec::new(),
+        steps: TickSteps::Any,
     };
     // A category x axis maps band centers left to right, a category y axis top down, so that
     // its first category is at the top, and a linear axis maps its values the same way on

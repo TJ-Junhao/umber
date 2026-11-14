@@ -67,6 +67,42 @@ pub(crate) fn clamp_target(target: usize) -> usize {
     target.clamp(2, MAX_TARGET)
 }
 
+/// Which steps automatic ticks on a linear axis may take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TickSteps {
+    /// Any round step: a 1, 2, 2.5 or 5 times a power of ten.
+    Any,
+    /// Whole-number steps only (1, 2, 5, 10, 20, 25, 50, ...), for an axis whose values are all
+    /// integers, such as years, counts or indices. Within a domain that holds fewer than two
+    /// integers no whole step gives two ticks, and any round step is allowed again.
+    Whole,
+}
+
+impl TickSteps {
+    /// The steps that the values an axis's automatic limits come from allow: whole steps when
+    /// there is at least one finite value and every finite value is an exact integer, as
+    /// stored (a value one rounding error away from an integer is not one); any step otherwise.
+    pub(crate) fn of(values: impl IntoIterator<Item = f64>) -> TickSteps {
+        let mut finite = values.into_iter().filter(|v| v.is_finite()).peekable();
+        if finite.peek().is_some() && finite.all(|v| v == v.trunc()) {
+            TickSteps::Whole
+        } else {
+            TickSteps::Any
+        }
+    }
+
+    /// The smallest unit a step must be a whole number of on the linear domain `(lo, hi)`, for
+    /// a tick format whose own unit is `format_quantum` (zero for none): 1 for whole steps on
+    /// a domain that holds two integers, a whole number of format units too, else the format's.
+    pub(crate) fn quantum(self, format_quantum: f64, (lo, hi): (f64, f64)) -> f64 {
+        let two_integers = hi.floor() - lo.ceil() >= 1.0;
+        match self {
+            TickSteps::Whole if two_integers => format_quantum.max(1.0),
+            TickSteps::Whole | TickSteps::Any => format_quantum,
+        }
+    }
+}
+
 const Q: [f64; 6] = [1.0, 5.0, 2.0, 2.5, 4.0, 3.0];
 const W: [f64; 4] = [0.25, 0.2, 0.5, 0.05];
 /// `Q.len() - 1`, as a float.
@@ -916,6 +952,50 @@ pub(crate) fn format_annotations(values: &[f64], step: Option<f64>) -> Vec<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_integers_allow_only_whole_steps() {
+        assert_eq!(TickSteps::of([2015.0, 2026.0]), TickSteps::Whole);
+        assert_eq!(TickSteps::of([-3.0, 0.0, 1e300]), TickSteps::Whole);
+        assert_eq!(
+            TickSteps::of([f64::NAN, 4.0, f64::INFINITY]),
+            TickSteps::Whole
+        );
+        // One rounding error away from an integer is not one.
+        assert_eq!(TickSteps::of([2_015.000_000_000_1, 2026.0]), TickSteps::Any);
+        assert_eq!(TickSteps::of([1.0, 2.5]), TickSteps::Any);
+        // Without a finite value there is nothing to be an integer.
+        assert_eq!(TickSteps::of([]), TickSteps::Any);
+        assert_eq!(TickSteps::of([f64::NAN]), TickSteps::Any);
+    }
+
+    #[test]
+    fn whole_steps_need_two_integers_in_the_domain() {
+        assert_eq!(TickSteps::Whole.quantum(0.0, (-0.1, 2.1)), 1.0);
+        assert_eq!(TickSteps::Whole.quantum(0.0, (0.0, 1.0)), 1.0);
+        assert_eq!(TickSteps::Whole.quantum(0.01, (2014.4, 2026.6)), 1.0);
+        // A single integer inside: no whole step gives two ticks.
+        assert_eq!(TickSteps::Whole.quantum(0.0, (0.2, 1.6)), 0.0);
+        assert_eq!(TickSteps::Whole.quantum(0.01, (0.2, 0.9)), 0.01);
+        assert_eq!(TickSteps::Any.quantum(0.0, (0.0, 100.0)), 0.0);
+        assert_eq!(TickSteps::Any.quantum(0.1, (0.0, 100.0)), 0.1);
+    }
+
+    #[test]
+    fn whole_steps_skip_two_and_a_half_on_years() {
+        let fit = Fit {
+            quantum: TickSteps::Whole.quantum(0.0, (2014.45, 2026.55)),
+            ..Fit::ANY
+        };
+        for target in 2..=12 {
+            let values = extended(2014.45, 2026.55, target, TickCoverage::Free, &fit);
+            assert!(values.len() >= 2, "{target}: {values:?}");
+            assert!(
+                values.iter().all(|v| v.fract() == 0.0),
+                "{target}: {values:?}"
+            );
+        }
+    }
 
     #[test]
     fn values_written_each_on_their_own_keep_six_significant_digits() {

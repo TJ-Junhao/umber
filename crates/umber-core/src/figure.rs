@@ -28,6 +28,7 @@
 //! # Ok::<(), umber_core::Error>(())
 //! ```
 
+pub use crate::model::LimitEnd;
 pub use crate::model::{
     AnnotateOptions, Annotation, AnnotationPlacement, InPlot, Place, PointLabels, TextOptions,
     TextPosition, ValueColumn, ValueLabels,

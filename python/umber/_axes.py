@@ -153,6 +153,64 @@ _STARTS_HINT: Final = "pass a tuple (xs, ys) of the points to start lines at, or
 _GRID_HINT: Final = "pass u and v shaped (len(y), len(x)), one row per y coordinate."
 _OFFSET_HINT: Final = "pass a tuple (dx, dy) of points, such as (0.0, 12.0)."
 _TEXT_AT_HINT: Final = "pass ub.InPlot(x, y), such as ub.InPlot(0.9, 0.9), or leave it out."
+_LIMIT_HINT: Final = "pass a number such as 1.5, or ub.AUTO for an automatic limit."
+
+
+class _LimitSetters(NamedTuple):
+    """The native setters of the limits of one axis, bound to its axes."""
+
+    both: Callable[[float, float], None]
+    """Sets both limits of a linear or log axis."""
+    end: Callable[[bool, float], None]
+    """Fixes the upper limit of a linear or log axis when the flag is true, else the lower."""
+    both_time: Callable[[int, int], None]
+    """Sets both limits of a time axis, in microseconds."""
+    end_time: Callable[[bool, int], None]
+    """Fixes the upper limit of a time axis when the flag is true, else the lower."""
+
+
+def _set_limits(
+    context: str, low: object, high: object, *, time: bool, setters: _LimitSetters
+) -> None:
+    """Check the limits ``low`` and ``high`` of the call ``context`` and set them.
+
+    ``AUTO`` for one of them fixes only the other; both ``AUTO`` is a ``UsageError``.
+
+    Args:
+        context: The API call, such as ``"Axes.ylim()"``.
+        low: The lower limit or ``AUTO``.
+        high: The upper limit or ``AUTO``.
+        time: Whether the axis is a time axis, whose limits are times.
+        setters: The native setters of the axis.
+
+    Raises:
+        UsageError: Both limits are ``AUTO``.
+        TypeError: A limit is neither ``AUTO`` nor a number, or a time on a time axis.
+    """
+    if low is AUTO and high is AUTO:
+        message = "low and high are both AUTO; at least one limit must be set."
+        hint = "pass a value for low or high; without a call both limits are automatic."
+        raise new_error(UsageError, context, message, parameter="low", hint=hint)
+    if time:
+        if low is AUTO:
+            setters.end_time(True, _time.instant(context, "high", high))
+        elif high is AUTO:
+            setters.end_time(False, _time.instant(context, "low", low))
+        else:
+            start = _time.instant(context, "low", low)
+            setters.both_time(start, _time.instant(context, "high", high))
+        return
+
+    def number(name: str, value: object) -> float:
+        return real(context, name, value, expected="a float or AUTO", hint=_LIMIT_HINT)
+
+    if low is AUTO:
+        setters.end(True, number("high", high))
+    elif high is AUTO:
+        setters.end(False, number("low", low))
+    else:
+        lower = number("low", low)
+        setters.both(lower, number("high", high))
 
 
 @final
@@ -492,7 +550,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             )
             return self
 
-    def xlim(self: SX, low: X, high: X) -> SX:
+    def xlim(self: SX, low: X | Auto, high: X | Auto) -> SX:
         """Set the x limits, replacing the automatic ones; for linear, log and time x axes.
 
         Automatic linear limits follow the data, with 5% of its span added on each side;
@@ -501,36 +559,47 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         extent, cells keep their edges, and bubbles fit their whole markers. Single values
         expand to a usable range. Explicit limits are used as given.
 
+        ``ub.AUTO`` for one limit fixes the other and keeps this one automatic:
+        ``xlim(0, ub.AUTO)`` starts the axis at 0. The automatic end follows the rules above
+        with the fixed end in place of the data on its side: the span runs from the fixed end
+        to the farthest value, and the padding, 5% of that span, is added on the automatic
+        side only. With no value beyond the fixed end, the automatic end is as far from it as
+        a single value would expand. Bubbles, arrows, barbs and value labels do not widen the
+        automatic end; they are clipped like marks beyond explicit limits.
+
         Args:
-            low: The lower limit; finite, and positive on a log axis; a time on a time axis.
-            high: The upper limit; finite and above ``low``.
+            low: The lower limit; finite, and positive on a log axis; a time on a time axis;
+                or ``ub.AUTO`` for an automatic lower limit.
+            high: The upper limit; finite and above ``low``; or ``ub.AUTO`` for an automatic
+                upper limit.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``low`` or ``high`` is not a number.
+            TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
             StyleError: If the limits are not finite, ``low`` is not below ``high``, or a
-                limit is not positive on a log axis.
-            UsageError: If the x axis is a category axis.
+                limit is not positive on a log axis. Rendering raises it when every value
+                lies beyond the one fixed limit.
+            UsageError: If the x axis is a category axis, or both limits are ``ub.AUTO``.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes().line([0, 5, 10], [1, 4, 2]).xlim(0, 8)
+            >>> ax = ax.xlim(ub.AUTO, 8)
         """
         with api_call():
-            context = "Axes.xlim()"
-            if self._x == _TIME:
-                start = _time.instant(context, "low", low)
-                end = _time.instant(context, "high", high)
-                self._native.xlim_time(self._target, self._col, start, end)
-                return self
-            lower = real(context, "low", low)
-            upper = real(context, "high", high)
-            self._native.xlim(self._target, self._col, lower, upper)
+            native, target, col = self._native, self._target, self._col
+            setters = _LimitSetters(
+                both=partial(native.xlim, target, col),
+                end=partial(native.xlim_end, target, col),
+                both_time=partial(native.xlim_time, target, col),
+                end_time=partial(native.xlim_time_end, target, col),
+            )
+            _set_limits("Axes.xlim()", low, high, time=self._x == _TIME, setters=setters)
             return self
 
-    def ylim(self: SY, low: Y, high: Y) -> SY:
+    def ylim(self: SY, low: Y | Auto, high: Y | Auto) -> SY:
         """Set the y limits, replacing the automatic ones.
 
         Automatic linear limits follow the data, with 5% of its span added on each side;
@@ -539,32 +608,45 @@ class Axes(Generic[X, Y]):  # noqa: UP046
         bubbles fit their whole markers. Single values expand to a usable range.
         Explicit limits are used as given.
 
+        ``ub.AUTO`` for one limit fixes the other and keeps this one automatic:
+        ``ylim(0, ub.AUTO)`` starts the axis at 0 and lets the top follow the data. The
+        automatic end follows the rules above with the fixed end in place of the data on its
+        side: the span runs from the fixed end to the farthest value, and the padding, 5% of
+        that span, is added on the automatic side only. With no value beyond the fixed end,
+        the automatic end is as far from it as a single value would expand. Bubbles, arrows,
+        barbs and value labels do not widen the automatic end; they are clipped like marks
+        beyond explicit limits.
+
         Args:
-            low: The lower limit; finite, and positive on a log axis; a time on a time axis.
-            high: The upper limit; finite and above ``low``.
+            low: The lower limit; finite, and positive on a log axis; a time on a time axis;
+                or ``ub.AUTO`` for an automatic lower limit.
+            high: The upper limit; finite and above ``low``; or ``ub.AUTO`` for an automatic
+                upper limit.
 
         Returns:
             These axes.
 
         Raises:
-            TypeError: If ``low`` or ``high`` is not a number.
+            TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
             StyleError: If the limits are not finite, ``low`` is not below ``high``, or a
-                limit is not positive on a log axis.
+                limit is not positive on a log axis. Rendering raises it when every value
+                lies beyond the one fixed limit.
+            UsageError: If the y axis is a category axis, or both limits are ``ub.AUTO``.
 
         Example:
             >>> import umber as ub
             >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 4, 2]).ylim(0, 5)
+            >>> ax = ax.ylim(0, ub.AUTO)
         """
         with api_call():
-            context = "Axes.ylim()"
-            if self._y == _TIME:
-                start = _time.instant(context, "low", low)
-                end = _time.instant(context, "high", high)
-                self._native.ylim_time(self._target, self._col, start, end)
-                return self
-            lower = real(context, "low", low)
-            upper = real(context, "high", high)
-            self._native.ylim(self._target, self._col, lower, upper)
+            native, target, col = self._native, self._target, self._col
+            setters = _LimitSetters(
+                both=partial(native.ylim, target, col),
+                end=partial(native.ylim_end, target, col),
+                both_time=partial(native.ylim_time, target, col),
+                end_time=partial(native.ylim_time_end, target, col),
+            )
+            _set_limits("Axes.ylim()", low, high, time=self._y == _TIME, setters=setters)
             return self
 
     def xticks(self: SX, positions: Values[X]) -> SX:
@@ -572,9 +654,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Automatic linear ticks are round values inside the limits, at whole multiples of
         a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
-        Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
-        areas and stems; lines and cells keep their exact position extents. The tick count
-        depends on available space and label size. Explicit positions need not follow that grid.
+        When every value the automatic limits come from is an integer, such as years or
+        counts, the step is a whole number and labels have no decimals, unless the limits
+        hold fewer than two integers. Limits follow the data with 5% padding, keeping an end
+        at zero for bars, histograms, areas and stems; lines and cells keep their exact
+        position extents. The tick count depends on available space and label size. Explicit
+        positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the x axis without
         ticks and gridlines. Calling any x tick method again replaces the ticks and drops
@@ -616,9 +701,12 @@ class Axes(Generic[X, Y]):  # noqa: UP046
 
         Automatic linear ticks are round values inside the limits, at whole multiples of
         a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
-        Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
-        areas and stems; lines and cells keep their exact position extents. The tick count
-        depends on available space and label size. Explicit positions need not follow that grid.
+        When every value the automatic limits come from is an integer, such as years or
+        counts, the step is a whole number and labels have no decimals, unless the limits
+        hold fewer than two integers. Limits follow the data with 5% padding, keeping an end
+        at zero for bars, histograms, areas and stems; lines and cells keep their exact
+        position extents. The tick count depends on available space and label size. Explicit
+        positions need not follow that grid.
 
         The positions are used in the order given. An empty list leaves the y axis without
         ticks and gridlines. Calling any y tick method again replaces the ticks and drops

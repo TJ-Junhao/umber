@@ -897,10 +897,12 @@ fn left_and_right(
     f
 }
 
+/// A straight line from (0, 0) to (1, 1). Its midpoint is a fraction, so its ticks take steps
+/// such as 0.2 rather than the whole steps of integer data.
 fn plain_line(axes: &mut crate::AxesMut<'_>) {
     axes.line(
-        AxisData::Numbers(vec![0.0, 1.0]),
-        &[0.0, 1.0],
+        AxisData::Numbers(vec![0.0, 0.5, 1.0]),
+        &[0.0, 0.5, 1.0],
         LineOptions::default(),
     )
     .unwrap();
@@ -910,11 +912,12 @@ fn plain_line(axes: &mut crate::AxesMut<'_>) {
 fn tick_labels_that_grow_stay_in_their_bounds() {
     // The limits the bubbles get need decimals that the limits without the setting do not, on a
     // plot whose width the limits fill: its labels would reach into the padding.
+    // The middle bubble, at fractions, keeps the steps of data that are not all integers.
     let left = |axes: &mut crate::AxesMut<'_>| {
         axes.bubbles(
-            &[0.0, 20.0],
-            &[0.0, 9.0],
-            &[1.0, 1.0],
+            &[0.0, 10.5, 20.0],
+            &[0.0, 4.5, 9.0],
+            &[1.0, 1.0, 1.0],
             BubbleOptions::default(),
         )
         .unwrap();
@@ -1056,9 +1059,11 @@ fn a_label_with_no_clear_position_beside_equal_aspect_fails() {
         }
         f.add_axes_at(at(1), LINEAR, LINEAR)
             .unwrap()
+            // The points left out, at fractions, keep the steps of data that are not all
+            // integers.
             .scatter(
-                AxisData::Numbers(vec![0.0, 50.0, 50.0]),
-                &[0.0, 8.0, 8.0],
+                AxisData::Numbers(vec![0.0, 50.0, 50.0, 25.5, f64::NAN]),
+                &[0.0, 8.0, 8.0, f64::NAN, 4.5],
                 ScatterOptions {
                     size: crate::SizeSpec::pt(6.0).unwrap(),
                     labels: PointLabels {

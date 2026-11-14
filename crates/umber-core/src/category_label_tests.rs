@@ -224,10 +224,13 @@ fn bars_with_wide_last_label(n: usize, width: f64, letters: usize) -> Figure {
     let mut figure = Figure::new(width, 4.0, Theme::pigment()).unwrap();
     let mut categories = names(n);
     categories[n - 1] = "W".repeat(letters);
+    // A fraction keeps the y ticks in steps of 0.2, whose labels set the plot's width.
+    let mut heights = vec![1.0; n];
+    heights[0] = 0.5;
     figure
         .add_axes(ScaleKind::Category, ScaleKind::Linear)
         .unwrap()
-        .bar(categories, &vec![1.0; n], BarOptions::default())
+        .bar(categories, &heights, BarOptions::default())
         .unwrap();
     figure
 }

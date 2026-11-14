@@ -30,7 +30,7 @@ use super::point_labels::PointLabels;
 use super::rule::{
     AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
 };
-use super::share::{ExplicitLimits, Setting, SharedAxis};
+use super::share::{ExplicitLimits, GivenLimits, LimitEnd, Setting, SharedAxis};
 use super::stacked_area::StackedAreaMark;
 use super::stem::{StemMark, StemOptions};
 use super::step::{StepMark, StepOptions};
@@ -45,7 +45,9 @@ use super::validation::{
     check_step_order, check_tick_axis, check_time_error_bars, check_time_limits, check_time_span,
     check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
-use super::validation::{check_band_axes, check_not_two_categories};
+use super::validation::{
+    check_band_axes, check_limit_end, check_not_two_categories, check_time_axis,
+};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
     Align, ColorSpec, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
@@ -295,6 +297,7 @@ impl<'a> AxesMut<'a> {
     /// end at zero for bars, histograms, areas and stems. Ticks are round values inside those
     /// limits. Lines keep their exact x extent, cells keep their edges, bubbles fit whole
     /// markers, and single values expand to a usable range. Explicit limits are used as given.
+    /// [`AxesMut::xlim_end`] fixes one limit and leaves the other automatic.
     ///
     /// # Examples
     ///
@@ -310,12 +313,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xlim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.x_settings).clone();
-        settings.limits = Some(ExplicitLimits::Continuous(check_limits(
+        settings.limits = Some(ExplicitLimits::Continuous(GivenLimits::Both(check_limits(
             "Axes.xlim()",
             SharedAxis::X,
             self.x,
             (low, high),
-        )?));
+        )?)));
         self.figure.set_group(
             self.index,
             SharedAxis::X,
@@ -341,12 +344,12 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ylim(&mut self, low: f64, high: f64) -> Result<&mut Self> {
         let mut settings = (*self.y_settings).clone();
-        settings.limits = Some(ExplicitLimits::Continuous(check_limits(
+        settings.limits = Some(ExplicitLimits::Continuous(GivenLimits::Both(check_limits(
             "Axes.ylim()",
             SharedAxis::Y,
             self.y,
             (low, high),
-        )?));
+        )?)));
         self.figure.set_group(
             self.index,
             SharedAxis::Y,
@@ -357,13 +360,85 @@ impl<'a> AxesMut<'a> {
         Ok(self)
     }
 
+    /// Fixes one x limit, `end`, at `value` and leaves the other automatic, replacing any x
+    /// limits set before. Same errors as [`AxesMut::xlim`] for a value that is not finite, too
+    /// large, or not positive on a log axis, with `low` or `high` as the parameter.
+    ///
+    /// The automatic end follows the automatic rules computed with the fixed end in place of
+    /// the data on its side: the data from the fixed end to the far end of the data, padded by
+    /// 5 % of that span on the automatic side (an automatic end at zero stays there for bars,
+    /// histograms, areas and stems; lines keep their exact extent; log axes round to a power).
+    /// With no data beyond the fixed end, the automatic end is where a single value at the
+    /// fixed end would reach. Rendering raises `Error::Style` when every value lies past the
+    /// fixed end. Bubbles, arrows, barbs and value labels do not widen these limits; marks past
+    /// them are clipped.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xlim_end(LimitEnd::Low, 0.0)?;
+    /// assert_eq!(axes.x_limit_end(), Some((LimitEnd::Low, 0.0)));
+    /// assert!(axes.xlim_end(LimitEnd::High, f64::INFINITY).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlim_end(&mut self, end: LimitEnd, value: f64) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xlim()";
+        let value = check_limit_end(CONTEXT, SharedAxis::X, self.x, end, value)?;
+        let mut settings = (*self.x_settings).clone();
+        settings.limits = Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(end, value)));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Fixes one y limit, `end`, at `value` and leaves the other automatic. Same rules as
+    /// [`AxesMut::xlim_end`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LimitEnd, LogBase, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let log = ScaleKind::Log { base: LogBase::TEN };
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, log)?;
+    /// assert!(axes.ylim_end(LimitEnd::Low, 1.0).is_ok());
+    /// assert!(axes.ylim_end(LimitEnd::Low, 0.0).is_err());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylim_end(&mut self, end: LimitEnd, value: f64) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ylim()";
+        let value = check_limit_end(CONTEXT, SharedAxis::Y, self.y, end, value)?;
+        let mut settings = (*self.y_settings).clone();
+        settings.limits = Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(end, value)));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
     /// Replaces the automatic x ticks with ticks at `positions`, labelled by the x tick format
     /// ([`AxesMut::xtick_format`]). The positions are used in the order given and never sorted;
     /// an empty list leaves the x axis without ticks and gridlines. Calling any x tick setter
     /// again replaces the ticks, and drops labels set with [`AxesMut::xticks_labeled`].
     ///
     /// Automatic linear ticks are round values inside the domain, at whole multiples of a
-    /// 1, 2, 2.5 or 5 times a power of ten step. Automatic limits follow the data with 5 %
+    /// 1, 2, 2.5 or 5 times a power of ten step; a whole-number step when every value the
+    /// automatic limits come from is an integer and the domain holds two integers. Automatic
+    /// limits follow the data with 5 %
     /// padding, keeping zero for bars, histograms, areas and stems (see [`AxesMut::xlim`]).
     /// Without explicit x limits, the x domain covers both the data and the given ticks,
     /// then applies that padding. With explicit limits, ticks outside them are not drawn.
@@ -2875,7 +2950,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.xlim()";
         let (low, high) = check_time_limits(CONTEXT, SharedAxis::X, self.x, (low, high))?;
         let mut settings = (*self.x_settings).clone();
-        settings.limits = Some(ExplicitLimits::Time(low, high));
+        settings.limits = Some(ExplicitLimits::Time(GivenLimits::Both((low, high))));
         self.figure.set_group(
             self.index,
             SharedAxis::X,
@@ -2907,7 +2982,76 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.ylim()";
         let (low, high) = check_time_limits(CONTEXT, SharedAxis::Y, self.y, (low, high))?;
         let mut settings = (*self.y_settings).clone();
-        settings.limits = Some(ExplicitLimits::Time(low, high));
+        settings.limits = Some(ExplicitLimits::Time(GivenLimits::Both((low, high))));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::Y,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Fixes one limit of a time x axis, `end`, at the time `time` and leaves the other
+    /// automatic, replacing any x limits set before, as [`AxesMut::xlim_end`] fixes one of a
+    /// linear axis. The automatic end follows the automatic time rules computed with the fixed
+    /// end in place; with no time beyond the fixed end it lies half an hour from it.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` unless the x axis is a time axis, then
+    /// the rules of shared limits (see [`AxesMut`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let start = Instant::from_micros(0)?;
+    /// axes.xlim_time_end(LimitEnd::Low, start)?;
+    /// assert_eq!(axes.x_time_limit_end(), Some((LimitEnd::Low, start)));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn xlim_time_end(&mut self, end: LimitEnd, time: Instant) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.xlim()";
+        check_time_axis(CONTEXT, SharedAxis::X, self.x)?;
+        let mut settings = (*self.x_settings).clone();
+        settings.limits = Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time)));
+        self.figure.set_group(
+            self.index,
+            SharedAxis::X,
+            Setting::Limits,
+            settings,
+            CONTEXT,
+        )?;
+        Ok(self)
+    }
+
+    /// Fixes one limit of a time y axis. Same rules as [`AxesMut::xlim_time_end`].
+    ///
+    /// # Errors
+    ///
+    /// As [`AxesMut::xlim_time_end`], on the y axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// let end = Instant::from_micros(86_400_000_000)?;
+    /// assert!(axes.ylim_time_end(LimitEnd::High, end).is_ok());
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn ylim_time_end(&mut self, end: LimitEnd, time: Instant) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.ylim()";
+        check_time_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let mut settings = (*self.y_settings).clone();
+        settings.limits = Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time)));
         self.figure.set_group(
             self.index,
             SharedAxis::Y,

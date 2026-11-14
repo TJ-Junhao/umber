@@ -294,8 +294,8 @@ pub(crate) fn items(
             continue;
         };
         let explicit = match mark_labels.orientation {
-            Orientation::Vertical => axes.y_limits().is_some(),
-            Orientation::Horizontal => axes.x_limits().is_some(),
+            Orientation::Vertical => axes.y_given_limits().is_some(),
+            Orientation::Horizontal => axes.x_given_limits().is_some(),
         };
         let drawing = Drawing {
             context: base.oriented(mark_labels.orientation),

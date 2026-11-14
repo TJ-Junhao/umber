@@ -16,7 +16,7 @@ def axes(theme: ub.Theme = ub.Theme.PIGMENT) -> ub.Axes[float, float]:
     return (
         ub.Figure(6, 4, theme=theme)
         .add_axes()
-        .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([0, 0.5, 1]))
+        .scatter([1, 2.5, 3], [1, 2.5, 3], color=ub.ColorBy([0, 0.5, 1]))
     )
 
 
@@ -144,7 +144,7 @@ def test_colorbar_room_errors_exact(
     ax = (
         ub.Figure(width, height)
         .add_axes()
-        .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
+        .scatter([1, 2.5, 3], [1, 2.5, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
     )
     if position == ub.ColorbarPosition.BOTTOM:
         ax.xlabel("Distance")
@@ -160,7 +160,7 @@ def test_colorbar_plot_area_error_includes_xlabel() -> None:
         ax = (
             ub.Figure(width, 4)
             .add_axes()
-            .scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
+            .scatter([1, 2.5, 3], [1, 2.5, 3], color=ub.ColorBy([-2, 0, 8], center=0.3))
         )
         return ax.xlabel("Distance").colorbar("Intensity").figure.to_svg()
 
@@ -194,10 +194,10 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
             if not grid:
                 ax.ylabel("Height")
             if colored and i == 0:
-                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
                 ax.colorbar(position=position)
             else:
-                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+                ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4])
             if "legend" in case:
                 ax.line([1, 2], [1, 2], label="A long legend label").legend(
                     ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
@@ -252,7 +252,7 @@ def test_colorbar_preserves_unrelated_room_errors(case: str, position: ub.Colorb
         ("single_legend", 2.0, 267, "the plot area"),
         ("single_narrow_legend", 1.2, 194, "the plot area"),
         ("grid_height", 1.6, 219, "2 rows of plots"),
-        ("grid_width", 1.5, 193, "3 columns of plots"),
+        ("grid_width", 1.5, 171, "3 columns of plots"),
         ("grid_legend", 2.0, 326, "2 columns of plots"),
     ],
 )
@@ -263,12 +263,12 @@ def test_colorbar_room_error_minimum_renders(
         if case == "single_height":
             fig = ub.Figure(6, size).title("A title").subtitle("A subtitle")
             ax = fig.add_axes().title("Panel").xlabel("Distance")
-            ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+            ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
             ax.colorbar("Intensity", position=ub.ColorbarPosition.BOTTOM)
         elif case in ("single_legend", "single_narrow_legend"):
             fig = ub.Figure(size, 3)
             ax = fig.add_axes().ylabel("Height")
-            ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+            ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
             ax.colorbar("A fairly long colorbar label" if case == "single_legend" else "")
             ax.line([1, 2], [1, 2], label="A long legend label").legend(
                 ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
@@ -278,7 +278,7 @@ def test_colorbar_room_error_minimum_renders(
             for i in range(4):
                 ax = fig.add_axes(row=i // 2, col=i % 2).title("Panel")
                 if i == 0:
-                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                    ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
                     ax.colorbar(position=ub.ColorbarPosition.BOTTOM)
                 else:
                     ax.scatter([1, 2], [1, 2])
@@ -287,9 +287,9 @@ def test_colorbar_room_error_minimum_renders(
             for i in range(2):
                 ax = fig.add_axes(row=0, col=i)
                 if i == 0:
-                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                    ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
                 else:
-                    ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+                    ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4])
                 ax.line([1, 2], [1, 2], label="A long legend label").legend(
                     ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
                 )
@@ -326,9 +326,9 @@ def test_right_legend_reported_difference_renders(
         for col in range(cols):
             ax = fig.add_axes(row=0, col=col)
             if colored and col == 0:
-                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+                ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
             else:
-                ax.scatter([1, 2, 3, 4], [1, 2, 3, 4])
+                ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4])
             ax.line([1, 2], [1, 2], label="A long legend label").legend(
                 ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT
             )
@@ -363,9 +363,9 @@ def test_colorbar_height_error_reports_its_own_band(
     for i in range(rows * cols):
         ax = fig.add_axes(row=i // cols, col=i % cols)
         if i in (0, rows * cols - 1):
-            ax.scatter([1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8]))
+            ax.scatter([1, 2.5, 3], [1, 2.5, 3], color=ub.ColorBy([-2, 0, 8]))
         else:
-            ax.scatter([1, 2, 3], [1, 2, 3])
+            ax.scatter([1, 2.5, 3], [1, 2.5, 3])
     ax = fig.axes_at(row=rows - 1, col=cols - 1)
     ax.colorbar("Intensity", position=position)
     with pytest.raises(ub.StyleError) as caught:
@@ -398,7 +398,7 @@ def test_colorbars_sharing_a_grid_band_report_its_size(
     fig = ub.Figure(width, height, rows=rows, cols=cols)
     for i in range(rows * cols):
         fig.add_axes(row=i // cols, col=i % cols).scatter(
-            [1, 2, 3], [1, 2, 3], color=ub.ColorBy([-2, 0, 8])
+            [1, 2.5, 3], [1, 2.5, 3], color=ub.ColorBy([-2, 0, 8])
         ).colorbar("Intensity", position=position)
     with pytest.raises(ub.StyleError) as caught:
         fig.to_svg()
@@ -424,7 +424,7 @@ def test_colorbar_minimum_width_includes_axis_label(axis: str) -> None:
         ax = fig.add_axes().xticks([]).yticks([])
         setter = ax.xlabel if axis == "x" else ax.ylabel
         setter("Distance along the river")
-        ax.scatter([1, 2, 3, 4], [1, 2, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
+        ax.scatter([1, 2.5, 3, 4], [1, 2.5, 3, 4], color=ub.ColorBy([-2, 0, 3, 8]))
         ax.colorbar("A fairly long colorbar label")
         ax.line([1, 2], [1, 2], label="A long legend label").legend(
             ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT

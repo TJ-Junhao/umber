@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::annotation::Annotation;
 use super::grid::CellRange;
 use super::mark::Mark;
-use super::share::{AxisSettings, ExplicitLimits};
+use super::share::{AxisSettings, ExplicitLimits, GivenLimits, LimitEnd};
 use super::ticks::{AxisTicks, ExplicitTicks, TickHighlight};
 use crate::error::number;
 use crate::text::Lines;
@@ -368,8 +368,9 @@ impl Axes {
         &self.ylabel
     }
 
-    /// The explicit x limits of a linear or log x axis, if set; `None` on a time axis, whose
-    /// limits [`Axes::x_time_limits`] gives.
+    /// Both explicit x limits of a linear or log x axis, if set; `None` on a time axis, whose
+    /// limits [`Axes::x_time_limits`] gives, and when only one end is set
+    /// ([`Axes::x_limit_end`]).
     ///
     /// # Examples
     ///
@@ -386,7 +387,7 @@ impl Axes {
         self.x_limit_scale().map(|scale| scale.domain())
     }
 
-    /// The explicit y limits, if set.
+    /// Both explicit y limits, if set. Same rules as [`Axes::x_limits`].
     ///
     /// # Examples
     ///
@@ -404,8 +405,9 @@ impl Axes {
         self.y_limit_scale().map(|scale| scale.domain())
     }
 
-    /// The explicit x limits of a time x axis, the lower first, if set; `None` on a linear or
-    /// log axis, whose limits [`Axes::x_limits`] gives.
+    /// Both explicit x limits of a time x axis, the lower first, if set; `None` on a linear or
+    /// log axis, whose limits [`Axes::x_limits`] gives, and when only one end is set
+    /// ([`Axes::x_time_limit_end`]).
     ///
     /// # Examples
     ///
@@ -425,7 +427,7 @@ impl Axes {
         time_limits(self.x_settings.limits)
     }
 
-    /// The explicit y limits of a time y axis, the lower first, if set. Same rules as
+    /// Both explicit y limits of a time y axis, the lower first, if set. Same rules as
     /// [`Axes::x_time_limits`].
     ///
     /// # Examples
@@ -443,12 +445,113 @@ impl Axes {
         time_limits(self.y_settings.limits)
     }
 
-    /// The x scale that the explicit limits of a linear or log x axis define, if set.
+    /// The one end of a linear or log x axis fixed by [`AxesMut::xlim_end`](super::AxesMut::xlim_end),
+    /// with its value, if set; `None` when both or neither x limits are set, and on a time axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.xlim_end(LimitEnd::High, 10.0)?;
+    /// assert_eq!(axes.x_limit_end(), Some((LimitEnd::High, 10.0)));
+    /// assert_eq!(axes.x_limits(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_limit_end(&self) -> Option<(LimitEnd, f64)> {
+        match self.x_settings.limits {
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(end, value))) => Some((end, value)),
+            _ => None,
+        }
+    }
+
+    /// The one end of a linear or log y axis fixed by [`AxesMut::ylim_end`](super::AxesMut::ylim_end),
+    /// with its value, if set. Same rules as [`Axes::x_limit_end`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Linear)?;
+    /// axes.ylim_end(LimitEnd::Low, 0.0)?;
+    /// assert_eq!(axes.y_limit_end(), Some((LimitEnd::Low, 0.0)));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_limit_end(&self) -> Option<(LimitEnd, f64)> {
+        match self.y_settings.limits {
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(end, value))) => Some((end, value)),
+            _ => None,
+        }
+    }
+
+    /// The one end of a time x axis fixed by
+    /// [`AxesMut::xlim_time_end`](super::AxesMut::xlim_time_end), with its time, if set; `None`
+    /// when both or neither x limits are set, and on a linear or log axis.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, Instant, LimitEnd, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Time, ScaleKind::Linear)?;
+    /// let start = Instant::from_micros(0)?;
+    /// axes.xlim_time_end(LimitEnd::Low, start)?;
+    /// assert_eq!(axes.x_time_limit_end(), Some((LimitEnd::Low, start)));
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn x_time_limit_end(&self) -> Option<(LimitEnd, Instant)> {
+        match self.x_settings.limits {
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time))) => Some((end, time)),
+            _ => None,
+        }
+    }
+
+    /// The one end of a time y axis fixed by
+    /// [`AxesMut::ylim_time_end`](super::AxesMut::ylim_time_end), with its time, if set. Same
+    /// rules as [`Axes::x_time_limit_end`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::{Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Time)?;
+    /// assert_eq!(axes.y_time_limit_end(), None);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    #[must_use]
+    pub fn y_time_limit_end(&self) -> Option<(LimitEnd, Instant)> {
+        match self.y_settings.limits {
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time))) => Some((end, time)),
+            _ => None,
+        }
+    }
+
+    /// The explicit x limits, both ends or one, of any axis kind, if set.
+    pub(crate) fn x_given_limits(&self) -> Option<ExplicitLimits> {
+        self.x_settings.limits
+    }
+
+    /// The explicit y limits, both ends or one, of any axis kind, if set.
+    pub(crate) fn y_given_limits(&self) -> Option<ExplicitLimits> {
+        self.y_settings.limits
+    }
+
+    /// The x scale that both explicit limits of a linear or log x axis define, if set.
     pub(crate) fn x_limit_scale(&self) -> Option<ContinuousScale> {
         continuous_limits(self.x_settings.limits)
     }
 
-    /// The y scale that the explicit limits of a linear or log y axis define, if set.
+    /// The y scale that both explicit limits of a linear or log y axis define, if set.
     pub(crate) fn y_limit_scale(&self) -> Option<ContinuousScale> {
         continuous_limits(self.y_settings.limits)
     }
@@ -776,18 +879,20 @@ pub(super) fn size_name(size: SizeSpec) -> String {
     }
 }
 
-/// The scale of `limits` when they are the limits of a linear or log axis.
+/// The scale of `limits` when they are both limits of a linear or log axis.
 fn continuous_limits(limits: Option<ExplicitLimits>) -> Option<ContinuousScale> {
     match limits {
-        Some(ExplicitLimits::Continuous(scale)) => Some(scale),
-        Some(ExplicitLimits::Time(..)) | None => None,
+        Some(ExplicitLimits::Continuous(GivenLimits::Both(scale))) => Some(scale),
+        Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(..)) | ExplicitLimits::Time(_))
+        | None => None,
     }
 }
 
-/// The two times of `limits` when they are the limits of a time axis.
+/// The two times of `limits` when they are both limits of a time axis.
 fn time_limits(limits: Option<ExplicitLimits>) -> Option<(Instant, Instant)> {
     match limits {
-        Some(ExplicitLimits::Time(low, high)) => Some((low, high)),
-        Some(ExplicitLimits::Continuous(_)) | None => None,
+        Some(ExplicitLimits::Time(GivenLimits::Both(ends))) => Some(ends),
+        Some(ExplicitLimits::Time(GivenLimits::OneEnd(..)) | ExplicitLimits::Continuous(_))
+        | None => None,
     }
 }
