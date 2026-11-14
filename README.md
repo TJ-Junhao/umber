@@ -2,13 +2,13 @@
 
 [![Coverage](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
 
-umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, ECDF, KDE, box, violin, strip, swarm, event, bubble, error bar, band, stem, reference-line, heatmap, mesh, contour, 2-D histogram, hexbin, vector field and pie charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes, with a second y axis where needed. It has text and arrow annotations, colormaps and colorbars, careful typography with bundled or your own fonts, three built-in themes, and PNG, SVG or PDF output.
+umber is a plotting library for Python with a rendering core written in Rust. It draws line, step, scatter, area, stacked area, bar, histogram, ECDF, KDE, box, violin, strip, swarm, event, bubble, error bar, band, stem, reference-line, heatmap, mesh, contour, 2-D histogram, hexbin, vector field, streamline, triangle mesh and pie charts on numeric, log, category and time axes, alone or on a grid of panels with shared axes, with a second y axis where needed. It has text and arrow annotations, colormaps and colorbars, careful typography with bundled or your own fonts, three built-in themes, and PNG, SVG or PDF output.
 
 [简体中文](https://github.com/TJ-Junhao/umber/blob/main/README-ZH.md)
 
 ![Twelve kinds of chart drawn by umber on one grid: lines and bands, grouped bars, points colored by value, a donut, a histogram with a density curve, violins with swarms, contours, a heatmap, a time series with an annotation, two y axes, a hexbin and grouped ECDFs](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/gallery.png)
 
-- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 77 ms and to PDF in about 36 ms on a standard GitHub Actions runner, 2.7× and 4.5× faster than matplotlib (see [Performance](#performance)).
+- **Fast on large data.** Rendering runs in Rust: a 1,000,000-point line renders to PNG in about 77 ms and to PDF in about 37 ms on a standard GitHub Actions runner, 2.8× and 4.6× faster than matplotlib (see [Performance](#performance)).
 - **Explicit.** Every option is a typed value (`Color`, `Size`, `Dash`, `TickFormat`, …). There are no format strings, no positional style arguments and no silent conversions.
 - **Fails fast, pointing at the problem.** Invalid input raises at the call that caused it, with a message, a hint and the offending argument highlighted in the traceback.
 - **Statically typed.** Category and numeric axes are distinct types: calling `bar` on a numeric axes is reported by pyright and mypy before the code runs.
@@ -150,7 +150,7 @@ Use `fig.axes_at(row=..., col=..., x=..., y=...)` to retrieve axes, including th
 
 ## Colors and colorbars
 
-Heatmaps, meshes, contours, 2-D histograms and hexbins color each cell, band or line by its value, and `color=ub.ColorBy(values)` does the same for the points of a scatter or bubble chart. The color-mapped marks of one axes share a single color scale, and a colorbar beside the plot explains it. From 10,000 cells, heatmaps, meshes and 2-D histograms draw their cells as one image with one pixel per cell instead of one shape per cell, which keeps large grids small and fast; `render=ub.Render.VECTOR` or `render=ub.Render.RASTER` chooses the form explicitly.
+Heatmaps, meshes, contours, 2-D histograms and hexbins color each cell, band or line by its value, and `color=ub.ColorBy(values)` does the same for the points of a scatter or bubble chart. The color-mapped marks of one axes share a single color scale, and a colorbar beside the plot explains it. From 10,000 cells, heatmaps, meshes and 2-D histograms draw their cells as one image with one pixel per cell instead of one shape per cell, which keeps large grids small and fast; `render=ub.Render.VECTOR` or `render=ub.Render.RASTER` chooses the form explicitly. `scatter`, `line` and `tripcolor` are vector unless they take `render=ub.Render.RASTER`, for a mark so dense that a vector file would be large and slow to open: SVG and PDF output then draw the mark as one image at the export's `raster_dpi` (300 by default), PNG output is unchanged, and raster marks drawn one after another in an axes share one image.
 
 ```python
 import numpy as np
@@ -207,6 +207,29 @@ ax.figure.save_png("channels.png")
   <img alt="A filled elevation map with labelled level lines in the Graphite theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/contour-graphite.png" width="49%">
   <img alt="An annotated donut chart of visits by channel in the Pigment theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/pie-pigment.png" width="49%">
 </p>
+
+## Vector fields and triangle meshes
+
+`ax.quiver(x, y, u, v)` draws an arrow at each point and `ax.barbs(x, y, u, v)` a wind barb; `key=(10, "10 m/s")` adds a quiver arrow of that length to the legend. `ax.streamplot(x, y, u, v)` draws streamlines of a field sampled on a grid, with `u` and `v` shaped `(len(y), len(x))` as `z` is for contours, and `density=` sets how closely they are spaced. `color=ub.ColorBy(speed)` colors arrows or streamlines on the axes' color scale.
+
+`ax.tripcolor(x, y, values)`, `ax.tricontour(x, y, values)` and `ax.triplot(x, y)` take scattered points instead of a grid: they join the points into triangles, then color the triangles, draw contours across them or draw their edges. `triangles=` passes your own triangles, such as `ub.delaunay(x, y)[keep]` with the triangles over land left out.
+
+```python
+import numpy as np
+import umber as ub
+
+rng = np.random.default_rng(9)
+x, y = rng.uniform(0, 10, 300), rng.uniform(0, 6, 300)
+depth = 40 + 9 * np.sin(x * 0.6) + 6 * np.cos(y * 1.1)
+
+ax = ub.Figure(theme=ub.Theme.MIDNIGHT).add_axes()
+ax.tricontour(x, y, depth, style=ub.Contour.BOTH, annotate=True).triplot(x, y)
+ax.colorbar("Depth (m)").figure.save_png("seabed.png")
+```
+
+![Streamlines past two vortices colored by speed, beside arrows of the same field, in the Pigment theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/fields-pigment.png)
+
+![Seabed depth at scattered stations around an island, as colored triangles and as labelled contours over the triangle mesh, in the Midnight theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/triangles-midnight.png)
 
 ## Time axes
 
@@ -282,6 +305,8 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
   <img alt="A time series with an annotated release peak, an outage dip and a dashed target line in the Pigment theme" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/annotations-pigment.png" width="49%">
 </p>
 
+![A forest plot of six blood pressure trials and their pooled estimate, with confidence intervals, a column of values beside the plot and a caption, in the Graphite theme](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/results-graphite.png)
+
 ## Titles and legends
 
 `fig.title(text)` and `fig.subtitle(text)` set text above the whole grid; `ax.title(text)` and `ax.subtitle(text)` belong to one panel. Each returns the same object for chaining, and an empty string removes the text. `fig.caption(text)` adds a note under the whole figure, such as a footnote; the layout reserves its room. The figure title is 1.5 times the panel title size. `"\n"` breaks a title, subtitle or caption into lines, each aligned like the title; other labels are one line, and text with a line break or another control character where it is not supported raises an error at the call. A title, subtitle or axis label wider than its room raises `StyleError` when the figure is rendered, with the width it needs; make the figure wider or lower the font scale.
@@ -340,11 +365,11 @@ fig = ub.Figure(theme=serif)
 # font = ub.Font.system("Helvetica Neue")
 ```
 
-Titles and direct legend labels are set in bold. A font without a bold face raises `StyleError` when such text is drawn, unless it was created with `bold_fallback=True`, which sets that text in the regular face; umber never synthesizes bold. A font is read once and kept in memory, so the figure does not change if the file does. Characters a font lacks fall back to the bundled fonts, then to system fonts.
+Titles and direct legend labels are set in bold. A font without a bold face raises `StyleError` when such text is drawn, unless it was created with `bold_fallback=True`, which sets that text in the regular face; umber never synthesizes bold. A variable font with a weight axis and named instances is drawn in those instances: regular text in the instance closest to weight 400, and bold text, unless a bold file is given, in the one closest to 600 among those of weight 600 or more, so one variable file can supply both faces. A font is read once and kept in memory, so the figure does not change if the file does. Characters a font lacks fall back to the bundled fonts, then to system fonts.
 
 ## Output
 
-`fig.save_png(path, dpi=...)`, `fig.save_svg(path)` and `fig.save_pdf(path)` write a file; `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead. PNG output is antialiased at the chosen resolution. SVG text is drawn as outlines by default, so it looks the same everywhere; `text=ub.SvgText.EDITABLE` keeps it as text, which the viewer then draws with its own copy of the font. PDF output is vector, one page at the figure's size, with the fonts it uses embedded as subsets, so its text can be selected and searched; large cell grids stay images, as in SVG. `ub.save_pdf(path, [fig1, fig2])` writes several figures as one PDF, a page for each at its own size, and `ub.to_pdf([fig1, fig2])` returns the bytes.
+`fig.save_png(path, dpi=...)`, `fig.save_svg(path)` and `fig.save_pdf(path)` write a file; `to_png()`, `to_svg()` and `to_pdf()` return the bytes or text instead. PNG output is antialiased at the chosen resolution. SVG text is drawn as outlines by default, so it looks the same everywhere; `text=ub.SvgText.EDITABLE` keeps it as text, which the viewer then draws with its own copy of the font. PDF output is vector, one page at the figure's size, with the fonts it uses embedded as subsets, so its text can be selected and searched; large cell grids stay images, as in SVG. Marks drawn with `render=ub.Render.RASTER` are images in SVG and PDF, at the resolution that `raster_dpi=` of `save_svg`, `save_pdf`, `to_svg` and `to_pdf` sets (300 by default). `ub.save_pdf(path, [fig1, fig2])` writes several figures as one PDF, a page for each at its own size, and `ub.to_pdf([fig1, fig2])` returns the bytes.
 
 ### Jupyter and `show()`
 
@@ -389,30 +414,30 @@ ax.bar(["a", "b"], [1, 2])  # pyright and mypy: bar() needs Axes[str, float]
 
 ## Performance
 
-End-to-end Python timings next to matplotlib 3.11.2 (Agg, SVG and PDF backends, default style), from the call that builds the figure to the encoded bytes. Figures are 6 × 4 in, PNG at 200 dpi, with the same input data for both. Each value is the median of 8 runs after a warm-up, with each library in its own process. Measured with the umber 0.4.0 source on GitHub Actions `ubuntu-latest` (AMD EPYC 9V74, 4 vCPUs, Python 3.12, NumPy 2.5) by the [Python bench workflow](https://github.com/TJ-Junhao/umber/actions/workflows/python-bench.yml) ([this run](https://github.com/TJ-Junhao/umber/actions/runs/39202691191)); the script is `scripts/bench/python_vs_matplotlib.py`. GitHub assigns different CPU models to the same runner label, so absolute times vary between runs; the speed-ups, measured side by side on one machine, are the figures to compare.
+End-to-end Python timings next to matplotlib 3.11.2 (Agg, SVG and PDF backends, default style), from the call that builds the figure to the encoded bytes. Figures are 6 × 4 in, PNG at 200 dpi, with the same input data for both. Each value is the median of 8 runs after a warm-up, with each library in its own process. Measured with the umber 0.5.0 source on GitHub Actions `ubuntu-latest` (AMD EPYC 9V74, 4 vCPUs, Python 3.12, NumPy 2.5) by the [Python bench workflow](https://github.com/TJ-Junhao/umber/actions/workflows/python-bench.yml) ([this run](https://github.com/TJ-Junhao/umber/actions/runs/43605468817)); the script is `scripts/bench/python_vs_matplotlib.py`. GitHub assigns different CPU models to the same runner label, so absolute times vary between runs; the speed-ups, measured side by side on one machine, are the figures to compare.
 
 | Case | umber | matplotlib | Speed-up |
 | --- | ---: | ---: | ---: |
-| 1,000,000-point line → PNG | 77 ms | 207 ms | 2.7× |
-| 1,000,000-point line on a time axis → PNG | 94 ms | 221 ms | 2.4× |
-| 1,000,000-point line → SVG | 29 ms | 65 ms | 2.2× |
-| 1,000,000-point line → PDF | 36 ms | 164 ms | 4.5× |
-| 100,000-point scatter → PNG | 83 ms | 290 ms | 3.5× |
-| Histogram of 1,000,000 values → PNG | 32 ms | 63 ms | 2.0× |
-| 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 97 ms | 168 ms | 1.7× |
-| Hexbin of 1,000,000 points, grid size 50 → PNG | 122 ms | 142 ms | 1.2× |
-| Heatmap of 1,000 × 1,000 cells → PNG | 189 ms | 253 ms | 1.3× |
-| Heatmap of 1,000 × 1,000 cells → SVG | 171 ms | 443 ms | 2.6× |
-| Heatmap of 1,000 × 1,000 cells → PDF | 141 ms | 178 ms | 1.3× |
-| 4 × 5 grid, one 10,000-point line per panel → PNG | 175 ms | 550 ms | 3.1× |
-| 1,000-point line with a second series, title, labels and legend → PNG | 21 ms | 81 ms | 3.9× |
-| The same 1,000-point line chart → PDF | 3.6 ms | 128 ms | 36× |
-| 5-bar chart → PNG | 12 ms | 44 ms | 3.8× |
-| `import` in a fresh interpreter | 70 ms | 309 ms | 4.4× |
+| 1,000,000-point line → PNG | 77 ms | 213 ms | 2.8× |
+| 1,000,000-point line on a time axis → PNG | 95 ms | 227 ms | 2.4× |
+| 1,000,000-point line → SVG | 29 ms | 66 ms | 2.3× |
+| 1,000,000-point line → PDF | 37 ms | 171 ms | 4.6× |
+| 100,000-point scatter → PNG | 86 ms | 289 ms | 3.4× |
+| Histogram of 1,000,000 values → PNG | 34 ms | 61 ms | 1.8× |
+| 2-D histogram of 1,000,000 points, 100 × 100 bins → PNG | 97 ms | 165 ms | 1.7× |
+| Hexbin of 1,000,000 points, grid size 50 → PNG | 126 ms | 143 ms | 1.1× |
+| Heatmap of 1,000 × 1,000 cells → PNG | 152 ms | 250 ms | 1.6× |
+| Heatmap of 1,000 × 1,000 cells → SVG | 138 ms | 436 ms | 3.2× |
+| Heatmap of 1,000 × 1,000 cells → PDF | 105 ms | 175 ms | 1.7× |
+| 4 × 5 grid, one 10,000-point line per panel → PNG | 174 ms | 559 ms | 3.2× |
+| 1,000-point line with a second series, title, labels and legend → PNG | 22 ms | 79 ms | 3.7× |
+| The same 1,000-point line chart → PDF | 3.6 ms | 121 ms | 34× |
+| 5-bar chart → PNG | 12 ms | 42 ms | 3.6× |
+| `import` in a fresh interpreter | 78 ms | 312 ms | 4.0× |
 
-Pinned to one CPU, only the scatter plot is notably slower: 124 ms (2.3×). The 4 × 5 grid uses a 12 × 8 in figure. The script's docstring lists where the two libraries do different work, for example the hexbin grids, which are built differently. The PDF heatmap is larger than matplotlib's, 1.45 MB against 0.91 MB: umber computes the exact color of every cell, while matplotlib picks each cell's color from a 256-entry colormap table, which compresses better.
+Pinned to one CPU, only the scatter plot is notably slower: 137 ms (2.1×). The 4 × 5 grid uses a 12 × 8 in figure. The script's docstring lists where the two libraries do different work, for example the hexbin grids, which are built differently. The PDF heatmap is larger than matplotlib's, 1.45 MB against 0.91 MB: umber computes the exact color of every cell, while matplotlib picks each cell's color from a 256-entry colormap table, which compresses better.
 
-Lines with sorted numeric or time x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads.
+Lines with sorted numeric or time x values are downsampled when they have more than four points per pixel column of the plot (counted at a nominal 300 dpi), keeping the first, last, minimum and maximum point in each column, which is visually lossless. Large scatter plots are composited on up to 8 threads; the output is the same for any number of threads. In SVG and PDF, every point of a scatter and every segment of a line is a shape the viewer draws, so very dense data makes large files that open slowly; `render=ub.Render.RASTER` on `scatter`, `line` or `tripcolor` draws the mark as one image instead, at the export's `raster_dpi`, while PNG output does not change. A 1,000,000-point scatter drawn this way is about 2 MB as PDF and draws in about 0.05 s in MuPDF. Raster marks drawn one after another in one axes share one image: 200 lines of 10,000 points drawn with `RASTER` are 3.2 MB as PDF, against 8.4 MB in vector.
 
 ## Agent Skill
 

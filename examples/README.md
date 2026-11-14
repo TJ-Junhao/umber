@@ -37,3 +37,14 @@ Each script is self-contained and writes its chart as a PNG next to itself. Run 
 - `pie.py`: pies and donuts with share annotations, outside labels and a separate panel legend.
 - `quick.py`: the one-call functions `ub.line()` and `ub.hist()`.
 - `twin_y.py`: rainfall bars and a temperature line sharing x, with independent left and right y axes.
+- `caption.py`: two panels under a figure title, with a two-line source note as the figure caption.
+- `multi_page_pdf.py`: three figures saved as the pages of one PDF with `ub.save_pdf()`, and a PNG of the first page.
+- `in_plot.py`: text and annotations placed with `InPlot` fractions of the plot, so they stay in their corners.
+- `point_labels.py`: value labels on scatter points, error bars in x and y, and a line joining the points.
+- `value_column.py`: a dot plot with error bars and its values written in a titled column beside the plot.
+- `highlight.py`: a confusion matrix with highlighted tick labels and outlined cells in a custom emphasis color, and highlighted bar labels.
+- `equal_aspect.py`: circles that stay round and a survey map with equal scales on both axes.
+- `vector_fields.py`: a grid of arrows colored by speed with a length key, and wind barbs on a time-height section.
+- `streamplot.py`: streamlines of a flow colored by speed, and of a saddle flow.
+- `triangulation.py`: scattered points as a triangle mesh, as colored triangles and as filled contours with labelled lines.
+- `raster_marks.py`: a million-point scatter, and 100 random walks that share one image, drawn as images in their PDFs so the files stay small, with a PNG of each figure.

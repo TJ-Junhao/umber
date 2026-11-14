@@ -267,6 +267,129 @@ def requests() -> None:
     fig.save_png(OUT / "annotations-pigment.png", dpi=DPI)
 
 
+def flow() -> None:
+    """Streamlines past two vortices colored by speed, beside arrows of the same field."""
+    n = 500
+    x = np.linspace(-3.0, 3.0, n)
+    y = np.linspace(-3.0, 3.0, n)
+    xx, yy = np.meshgrid(x, y)
+
+    def vortex(cx: float, cy: float, strength: float) -> tuple[np.ndarray, np.ndarray]:
+        dx, dy = xx - cx, yy - cy
+        r2 = dx**2 + dy**2 + 0.15
+        return -strength * dy / r2, strength * dx / r2
+
+    u1, v1 = vortex(-1.2, 0.3, 1.0)
+    u2, v2 = vortex(1.4, -0.6, -0.8)
+    u = u1 + u2 + 0.4
+    v = v1 + v2 + 0.1 * np.sin(xx * 2)
+    speed = np.hypot(u, v)
+
+    fig = ub.Figure(12, 6.2, cols=2, share_color=ub.Share.ALL, theme=ub.Theme.PIGMENT)
+    fig.colorbar("speed")
+    (
+        fig.add_axes(col=0)
+        .streamplot(x, y, u, v, density=2.0, color=ub.ColorBy(speed, cmap=ub.Cmap.MAGMA))
+        .equal_aspect()
+        .title("Flow past two vortices")
+        .subtitle("Streamlines of a 500 × 500 field")
+        .xlabel("x")
+        .ylabel("y")
+    )
+    every = slice(12, None, 25)
+    (
+        fig.add_axes(col=1)
+        .quiver(
+            x[every],
+            y[every],
+            u[every, every],
+            v[every, every],
+            color=ub.ColorBy(speed[every, every], cmap=ub.Cmap.MAGMA),
+        )
+        .equal_aspect()
+        .title("Velocity")
+        .subtitle("Every 25th grid point")
+        .xlabel("x")
+    )
+    fig.save_png(OUT / "fields-pigment.png", dpi=DPI)
+
+
+def seabed() -> None:
+    """Depths at scattered stations around an island, as colored triangles and as contours."""
+    rng = np.random.default_rng(9)
+    x = rng.uniform(0, 10, 300)
+    y = rng.uniform(0, 6, 300)
+    # An island of radius 1.1 km, ringed by coastal stations and left out of the mesh.
+    cx, cy, radius = 4.0, 3.2, 1.1
+    offshore = np.hypot(x - cx, y - cy) > radius + 0.25
+    angle = np.linspace(0, 2 * np.pi, 28, endpoint=False)
+    x = np.concatenate([x[offshore], cx + radius * np.cos(angle)])
+    y = np.concatenate([y[offshore], cy + radius * np.sin(angle)])
+    distance = np.hypot(x - cx, y - cy)
+    depth = 40 + 9 * np.sin(x * 0.6) + 6 * np.cos(y * 1.1) + 0.8 * x - 14 * np.exp(-distance)
+    triangles = ub.delaunay(x, y)
+    centres = np.hypot(x[triangles].mean(axis=1) - cx, y[triangles].mean(axis=1) - cy)
+    sea = triangles[centres > radius]
+
+    fig = ub.Figure(12, 4.6, cols=2, share_color=ub.Share.ALL, theme=ub.Theme.MIDNIGHT)
+    fig.title("Seabed depth").subtitle(f"{x.size} stations around an island")
+    fig.colorbar("Depth (m)")
+    (
+        fig.add_axes(col=0)
+        .tripcolor(x, y, depth, triangles=sea)
+        .triplot(x, y, triangles=sea, color=ub.Color.WHITE.alpha(0.25))
+        .title("Colored triangles")
+        .xlabel("East (km)")
+        .ylabel("North (km)")
+    )
+    (
+        fig.add_axes(col=1)
+        .tricontour(x, y, depth, triangles=sea, style=ub.Contour.BOTH, annotate=True)
+        .triplot(x, y, triangles=sea, color=ub.Color.WHITE.alpha(0.12))
+        .title("Contours")
+        .xlabel("East (km)")
+    )
+    fig.save_png(OUT / "triangles-midnight.png", dpi=DPI)
+
+
+def trials() -> None:
+    """A forest plot of six trials and their pooled estimate, with a value column and a caption."""
+    names = ["ARC-1", "BRIDGE", "CALM", "DELTA-2", "EASE", "FOCUS"]
+    effect = np.array([-6.2, -9.8, -4.1, -11.5, -7.4, -8.9])
+    half = np.array([3.1, 4.4, 2.6, 5.2, 2.2, 3.6])
+    # Inverse-variance pooling of the six estimates.
+    weight = 1 / half**2
+    pooled = float(np.sum(weight * effect) / np.sum(weight))
+    pooled_half = float(1 / np.sqrt(np.sum(weight)))
+    rows = [*names, "Pooled"]
+    mean = np.append(effect, pooled)
+    low = np.append(effect - half, pooled - pooled_half)
+    high = np.append(effect + half, pooled + pooled_half)
+
+    fig = ub.Figure(8, 4.6, theme=ub.Theme.GRAPHITE)
+    fig.caption(
+        "Change in systolic blood pressure against placebo, with 95% confidence intervals.\n"
+        "The pooled estimate weights each trial by its inverse variance."
+    )
+    (
+        fig.add_axes(y=ub.Scale.category())
+        .vline(0.0, color=ub.Color.GRAY, dash=ub.Dash.DASHED)
+        .scatter(
+            mean,
+            rows,
+            x_error=(low, high),
+            annotate=True,
+            format=ub.TickFormat.fixed(1),
+            place=ub.Place.COLUMN,
+        )
+        .value_column("mm Hg")
+        .xlim(-18.0, 2.0)
+        .title("Blood pressure by trial")
+        .xlabel("Change (mm Hg)")
+    )
+    fig.save_png(OUT / "results-graphite.png", dpi=DPI)
+
+
 def main() -> None:
     """Render every README image."""
     OUT.mkdir(parents=True, exist_ok=True)
@@ -282,6 +405,9 @@ def main() -> None:
     elevation()
     weather()
     requests()
+    flow()
+    seabed()
+    trials()
 
 
 if __name__ == "__main__":

@@ -2,13 +2,13 @@
 
 [![测试覆盖率](https://codecov.io/gh/TJ-Junhao/umber/graph/badge.svg)](https://codecov.io/gh/TJ-Junhao/umber)
 
-umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、ECDF、KDE、箱线图、小提琴图、带状散点图（strip）、蜂群图（swarm）、事件图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、等值线图（contour）、二维直方图、六边形分箱图（hexbin）、向量场图和饼图，支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格，需要时还能加第二条 y 轴。它提供文字和箭头标注、colormap 和 colorbar，排版考究，可用内置字体或你自己的字体，内置三套主题，输出 PNG、SVG 或 PDF。
+umber 是一个 Python 绘图库，渲染核心用 Rust 编写。它可以绘制折线图、阶梯图、散点图、面积图、堆叠面积图、柱状图、直方图、ECDF、KDE、箱线图、小提琴图、带状散点图（strip）、蜂群图（swarm）、事件图、气泡图、误差棒、区间带、杆状图、参考线、热力图、网格色块图（mesh）、等值线图（contour）、二维直方图、六边形分箱图（hexbin）、向量场图、流线图、三角网格图和饼图，支持数值轴、对数轴、类别轴和时间轴，可以单独成图，也可以排成共享坐标轴的多面板网格，需要时还能加第二条 y 轴。它提供文字和箭头标注、colormap 和 colorbar，排版考究，可用内置字体或你自己的字体，内置三套主题，输出 PNG、SVG 或 PDF。
 
 [English](https://github.com/TJ-Junhao/umber/blob/main/README.md)
 
 ![umber 在一张 grid 上画出的十二种图：折线与区间带、分组柱状图、按值着色的散点、环形图、直方图与密度曲线、小提琴图与蜂群图、等值线图、热力图、带标注的时间序列、双 y 轴、六边形分箱图和分组 ECDF](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/gallery.png)
 
-- **大数据量也快。** 渲染在 Rust 中完成：在标准的 GitHub Actions runner 上，100 万个点的折线渲染成 PNG 约 77 ms，渲染成 PDF 约 36 ms，分别比 matplotlib 快 2.7× 和 4.5×（见[性能](#性能)）。
+- **大数据量也快。** 渲染在 Rust 中完成：在标准的 GitHub Actions runner 上，100 万个点的折线渲染成 PNG 约 77 ms，渲染成 PDF 约 37 ms，分别比 matplotlib 快 2.8× 和 4.6×（见[性能](#性能)）。
 - **显式。** 每个选项都是有类型的值（`Color`、`Size`、`Dash`、`TickFormat` 等）。没有格式字符串，没有位置式的样式参数，也没有隐式转换。
 - **尽早报错，并指出问题所在。** 非法输入在引发它的那次调用处就报错，附带说明、提示，并在 traceback 中高亮出错的参数。
 - **静态类型。** 类别轴和数值轴是不同的类型：在数值轴上调用 `bar`，pyright 和 mypy 在运行前就会报错。
@@ -150,7 +150,7 @@ variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 
 ## 颜色与 colorbar
 
-热力图、网格色块图、等值线图、二维直方图和六边形分箱图按数值为每个格子、色带或线条着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。热力图、网格色块图和二维直方图从 10,000 个格子起把格子画成一张每格一个像素的图像，而不是每格一个形状，使大网格的文件更小、渲染更快；`render=ub.Render.VECTOR` 或 `render=ub.Render.RASTER` 可显式指定画法。
+热力图、网格色块图、等值线图、二维直方图和六边形分箱图按数值为每个格子、色带或线条着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。热力图、网格色块图和二维直方图从 10,000 个格子起把格子画成一张每格一个像素的图像，而不是每格一个形状，使大网格的文件更小、渲染更快；`render=ub.Render.VECTOR` 或 `render=ub.Render.RASTER` 可显式指定画法。`scatter`、`line` 和 `tripcolor` 默认是矢量的，除非传入 `render=ub.Render.RASTER`，适用于密到矢量文件会又大又难打开的 mark：此时 SVG 和 PDF 输出按导出时的 `raster_dpi`（默认 300）把这个 mark 画成一张图像，PNG 输出不变，同一个 axes 中依次绘制的 raster mark 共用一张图像。
 
 ```python
 import numpy as np
@@ -207,6 +207,29 @@ ax.figure.save_png("channels.png")
   <img alt="Graphite 主题下带等值标注的填充高程图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/contour-graphite.png" width="49%">
   <img alt="Pigment 主题下标注占比的各渠道访问量环形图" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/pie-pigment.png" width="49%">
 </p>
+
+## 向量场与三角网格
+
+`ax.quiver(x, y, u, v)` 在每个点画一个箭头，`ax.barbs(x, y, u, v)` 画一个风羽；`key=(10, "10 m/s")` 在 legend 中加一个该长度的 quiver 箭头。`ax.streamplot(x, y, u, v)` 为网格上采样的场画流线，`u` 和 `v` 的形状为 `(len(y), len(x))`，与等值线图的 `z` 相同；`density=` 设置流线的疏密。`color=ub.ColorBy(speed)` 按 axes 的 color scale 为箭头或流线着色。
+
+`ax.tripcolor(x, y, values)`、`ax.tricontour(x, y, values)` 和 `ax.triplot(x, y)` 接受散点而不是网格：先把这些点连成三角形，再为三角形着色、画穿过它们的等值线，或画出它们的边。`triangles=` 传入你自己的三角形，例如去掉陆地上三角形的 `ub.delaunay(x, y)[keep]`。
+
+```python
+import numpy as np
+import umber as ub
+
+rng = np.random.default_rng(9)
+x, y = rng.uniform(0, 10, 300), rng.uniform(0, 6, 300)
+depth = 40 + 9 * np.sin(x * 0.6) + 6 * np.cos(y * 1.1)
+
+ax = ub.Figure(theme=ub.Theme.MIDNIGHT).add_axes()
+ax.tricontour(x, y, depth, style=ub.Contour.BOTH, annotate=True).triplot(x, y)
+ax.colorbar("Depth (m)").figure.save_png("seabed.png")
+```
+
+![Pigment 主题下绕过两个涡旋、按速度着色的流线，旁边是同一个场的箭头](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/fields-pigment.png)
+
+![Midnight 主题下一座岛屿周围散布测站的海床深度，分别画成着色三角形和叠在三角网格上带标注的等值线](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/triangles-midnight.png)
 
 ## 时间轴
 
@@ -282,6 +305,8 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
   <img alt="Pigment 主题下标注了发布峰值、故障低谷和虚线目标线的时间序列" src="https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/annotations-pigment.png" width="49%">
 </p>
 
+![Graphite 主题下六项血压试验及其合并估计的 forest plot，带置信区间、绘图区旁的数值列和 caption](https://raw.githubusercontent.com/TJ-Junhao/umber/main/assets/readme/results-graphite.png)
+
 ## 标题与 legend
 
 `fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。`fig.caption(text)` 在整张图下方添加一条说明，例如脚注，布局会为它预留空间。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题、副标题或 caption 分成多行，每行按标题的对齐方式对齐；其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
@@ -340,11 +365,11 @@ fig = ub.Figure(theme=serif)
 # font = ub.Font.system("Helvetica Neue")
 ```
 
-标题和 direct legend 的标签使用粗体。没有粗体字面的字体在绘制这类文字时抛出 `StyleError`，除非创建时传入了 `bold_fallback=True`，此时这类文字改用常规字面；umber 从不合成粗体。字体只读取一次并保存在内存中，之后文件改变也不会影响图。字体缺少的字符先回退到内置字体，再回退到系统字体。
+标题和 direct legend 的标签使用粗体。没有粗体字面的字体在绘制这类文字时抛出 `StyleError`，除非创建时传入了 `bold_fallback=True`，此时这类文字改用常规字面；umber 从不合成粗体。带字重轴和命名实例（named instance）的可变字体按这些实例绘制：常规文字用最接近字重 400 的实例；未提供粗体文件时，粗体文字用字重不低于 600 的实例中最接近 600 的那个，因此一个可变字体文件就能同时提供两种字面。字体只读取一次并保存在内存中，之后文件改变也不会影响图。字体缺少的字符先回退到内置字体，再回退到系统字体。
 
 ## 输出
 
-`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。`ub.save_pdf(path, [fig1, fig2])` 把多个 figure 写入同一个 PDF，每个 figure 一页，页面大小各自保持；`ub.to_pdf([fig1, fig2])` 返回字节。
+`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。用 `render=ub.Render.RASTER` 绘制的 mark 在 SVG 和 PDF 中是图像，分辨率由 `save_svg`、`save_pdf`、`to_svg` 和 `to_pdf` 的 `raster_dpi=` 设置（默认 300）。`ub.save_pdf(path, [fig1, fig2])` 把多个 figure 写入同一个 PDF，每个 figure 一页，页面大小各自保持；`ub.to_pdf([fig1, fig2])` 返回字节。
 
 ### Jupyter 和 `show()`
 
@@ -389,30 +414,30 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 
 ## 性能
 
-以下是与 matplotlib 3.11.2（Agg、SVG 和 PDF 后端，默认样式）对比的 Python 端到端耗时，从构建图形的调用开始，到得到编码后的字节为止。图幅 6 × 4 英寸，PNG 为 200 dpi，两者使用相同的输入数据。每个数值是预热一次后 8 次运行的中位数，两个库各在独立的进程中运行。测量对象为 umber 0.4.0 源码，环境为 GitHub Actions `ubuntu-latest`（AMD EPYC 9V74，4 个 vCPU，Python 3.12，NumPy 2.5），由 [Python bench workflow](https://github.com/TJ-Junhao/umber/actions/workflows/python-bench.yml) 运行（[本次运行](https://github.com/TJ-Junhao/umber/actions/runs/39202691191)）；脚本为 `scripts/bench/python_vs_matplotlib.py`。同一个 runner 标签每次可能分到不同型号的 CPU，所以绝对耗时会随运行变化；在同一台机器上交替测得的加速比才是可比较的数字。
+以下是与 matplotlib 3.11.2（Agg、SVG 和 PDF 后端，默认样式）对比的 Python 端到端耗时，从构建图形的调用开始，到得到编码后的字节为止。图幅 6 × 4 英寸，PNG 为 200 dpi，两者使用相同的输入数据。每个数值是预热一次后 8 次运行的中位数，两个库各在独立的进程中运行。测量对象为 umber 0.5.0 源码，环境为 GitHub Actions `ubuntu-latest`（AMD EPYC 9V74，4 个 vCPU，Python 3.12，NumPy 2.5），由 [Python bench workflow](https://github.com/TJ-Junhao/umber/actions/workflows/python-bench.yml) 运行（[本次运行](https://github.com/TJ-Junhao/umber/actions/runs/43605468817)）；脚本为 `scripts/bench/python_vs_matplotlib.py`。同一个 runner 标签每次可能分到不同型号的 CPU，所以绝对耗时会随运行变化；在同一台机器上交替测得的加速比才是可比较的数字。
 
 | 场景 | umber | matplotlib | 加速比 |
 | --- | ---: | ---: | ---: |
-| 100 万点折线 → PNG | 77 ms | 207 ms | 2.7× |
-| 时间轴上的 100 万点折线 → PNG | 94 ms | 221 ms | 2.4× |
-| 100 万点折线 → SVG | 29 ms | 65 ms | 2.2× |
-| 100 万点折线 → PDF | 36 ms | 164 ms | 4.5× |
-| 10 万点散点图 → PNG | 83 ms | 290 ms | 3.5× |
-| 100 万个值的直方图 → PNG | 32 ms | 63 ms | 2.0× |
-| 100 万个点的二维直方图，100 × 100 个 bin → PNG | 97 ms | 168 ms | 1.7× |
-| 100 万个点的六边形分箱图，grid size 50 → PNG | 122 ms | 142 ms | 1.2× |
-| 1,000 × 1,000 个格子的热力图 → PNG | 189 ms | 253 ms | 1.3× |
-| 1,000 × 1,000 个格子的热力图 → SVG | 171 ms | 443 ms | 2.6× |
-| 1,000 × 1,000 个格子的热力图 → PDF | 141 ms | 178 ms | 1.3× |
-| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 175 ms | 550 ms | 3.1× |
-| 1,000 个点的折线加第二条序列、标题、坐标轴标签和图例 → PNG | 21 ms | 81 ms | 3.9× |
-| 同一张 1,000 个点的折线图 → PDF | 3.6 ms | 128 ms | 36× |
-| 5 根柱子的柱状图 → PNG | 12 ms | 44 ms | 3.8× |
-| 在新解释器中 `import` | 70 ms | 309 ms | 4.4× |
+| 100 万点折线 → PNG | 77 ms | 213 ms | 2.8× |
+| 时间轴上的 100 万点折线 → PNG | 95 ms | 227 ms | 2.4× |
+| 100 万点折线 → SVG | 29 ms | 66 ms | 2.3× |
+| 100 万点折线 → PDF | 37 ms | 171 ms | 4.6× |
+| 10 万点散点图 → PNG | 86 ms | 289 ms | 3.4× |
+| 100 万个值的直方图 → PNG | 34 ms | 61 ms | 1.8× |
+| 100 万个点的二维直方图，100 × 100 个 bin → PNG | 97 ms | 165 ms | 1.7× |
+| 100 万个点的六边形分箱图，grid size 50 → PNG | 126 ms | 143 ms | 1.1× |
+| 1,000 × 1,000 个格子的热力图 → PNG | 152 ms | 250 ms | 1.6× |
+| 1,000 × 1,000 个格子的热力图 → SVG | 138 ms | 436 ms | 3.2× |
+| 1,000 × 1,000 个格子的热力图 → PDF | 105 ms | 175 ms | 1.7× |
+| 4 × 5 网格，每格一条 1 万个点的折线 → PNG | 174 ms | 559 ms | 3.2× |
+| 1,000 个点的折线加第二条序列、标题、坐标轴标签和图例 → PNG | 22 ms | 79 ms | 3.7× |
+| 同一张 1,000 个点的折线图 → PDF | 3.6 ms | 121 ms | 34× |
+| 5 根柱子的柱状图 → PNG | 12 ms | 42 ms | 3.6× |
+| 在新解释器中 `import` | 78 ms | 312 ms | 4.0× |
 
-绑定到单个 CPU 时，只有散点图明显变慢：124 ms（2.3×）。4 × 5 网格使用 12 × 8 英寸的图幅。两个库在哪些场景下做的工作不同（例如六边形分箱的网格构建方式不同），见脚本的 docstring。PDF 热力图比 matplotlib 的大，1.45 MB 对 0.91 MB：umber 精确计算每个格子的颜色，而 matplotlib 从 256 项的 colormap 表中为每个格子取色，压缩率更高。
+绑定到单个 CPU 时，只有散点图明显变慢：137 ms（2.1×）。4 × 5 网格使用 12 × 8 英寸的图幅。两个库在哪些场景下做的工作不同（例如六边形分箱的网格构建方式不同），见脚本的 docstring。PDF 热力图比 matplotlib 的大，1.45 MB 对 0.91 MB：umber 精确计算每个格子的颜色，而 matplotlib 从 256 项的 colormap 表中为每个格子取色，压缩率更高。
 
-对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。
+对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。在 SVG 和 PDF 中，散点图的每个点、折线的每一段都是查看器要绘制的形状，数据很密时文件会很大、打开很慢；在 `scatter`、`line` 或 `tripcolor` 上传入 `render=ub.Render.RASTER`，就改按导出时的 `raster_dpi` 把这个 mark 画成一张图像，PNG 输出不变。这样绘制的 100 万点散点图存为 PDF 约 2 MB，在 MuPDF 中绘制约需 0.05 s。同一个 axes 中依次绘制的 raster mark 共用一张图像：用 `RASTER` 绘制的 200 条各 1 万个点的折线存为 PDF 是 3.2 MB，矢量绘制则是 8.4 MB。
 
 ## Agent Skill
 
