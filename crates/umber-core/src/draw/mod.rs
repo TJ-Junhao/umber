@@ -12,7 +12,8 @@
 //!
 //! A scatter, line or tripcolor drawn with [`MarkRender::Raster`](crate::MarkRender::Raster) has
 //! its items put into one [`Item::Raster`] covering the marks clip, in their place, which SVG and
-//! PDF output draw as one image (see [`raster_items`]).
+//! PDF output draw as one image (see [`raster_items`]). Raster marks that follow each other in
+//! the group, with nothing drawn between them, share one image ([`merge_rasters`]).
 //!
 //! Marks are clipped in *axis space*, before they are mapped to plot coordinates: the raw value
 //! on a linear axis, `ln(value / lower limit)` on a log axis, the band center (in `0..=1`) on a
@@ -178,10 +179,13 @@ pub(crate) struct DrawnMarks {
 
 impl DrawnMarks {
     /// The items as one group clipped to [`marks_clip`]; `None` when nothing is visible.
+    ///
+    /// Consecutive raster marks are merged here, not as each mark is drawn, so that
+    /// [`of_mark`](DrawnMarks::of_mark) keeps the items of each mark apart ([`merge_rasters`]).
     pub(crate) fn into_item(self) -> Option<Item> {
         (!self.items.is_empty()).then_some(Item::Group {
             clip: Some(self.clip),
-            items: self.items,
+            items: merge_rasters(self.items),
         })
     }
 
@@ -694,6 +698,33 @@ fn raster_items(
             items: drawn,
         },
     );
+}
+
+/// Joins each run of [`Item::Raster`] siblings of one rectangle in `items`, the items of one
+/// marks group, into one [`Item::Raster`] holding their items in order, so that many raster
+/// marks in a row are one image, not one image each.
+///
+/// Only items that are adjacent merge, and the order never changes: any other item between two
+/// images (a vector mark, an error bar of a raster scatter, a reference line) keeps them apart,
+/// as it must stay between what the two images draw. Compositing the items of the images in one
+/// pass is what the PNG backend does with them, so the merged image holds the items as the PNG
+/// backend draws them, exactly as [`Item::Raster`] states; the images before it composited one
+/// over the other and so differed from that only by 8-bit rounding.
+fn merge_rasters(items: Vec<Item>) -> Vec<Item> {
+    let mut merged: Vec<Item> = Vec::with_capacity(items.len());
+    for item in items {
+        match (merged.last_mut(), item) {
+            (
+                Some(Item::Raster {
+                    rect: last,
+                    items: last_items,
+                }),
+                Item::Raster { rect, items },
+            ) if *last == rect => last_items.extend(items),
+            (_, item) => merged.push(item),
+        }
+    }
+    merged
 }
 
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when

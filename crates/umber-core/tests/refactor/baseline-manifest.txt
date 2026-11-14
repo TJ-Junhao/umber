@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 4b056a1c6a59b1b2af5a975a2656ee893dc4c85e
+# revision: f0d224531149a0e4b684661f3f30e789c190378e
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt
@@ -1466,6 +1466,12 @@ cd7fca66a7fc990adb599ad8b3c396542804ecbd57bf4c9e854bc52874a33a8b  png/raster-mar
 04d1419c36b1f2e382542a5d17cfa379b7a5e90c72f78fa24a67b9a1183530fb  png/raster-marks-line-midnight.dpi72.png
 4d7a64b4851787d8be4d9a19bddea9d85019e1d14f80cc3f78555658f8dfa3ed  png/raster-marks-line-pigment.dpi200.png
 402b8cbd960c42125b1ec2764065a8f1f24f193b7454ec04b860fd622122bb5a  png/raster-marks-line-pigment.dpi72.png
+a15e817375e3da341e71815a7d5ef623ea684f71a413e7f770dec15821d42e6f  png/raster-marks-runs-graphite.dpi200.png
+0a05fd77e8603d9aaf5bb1a4c3f80a24299e7d94d8bef90da9b41aefca430f4e  png/raster-marks-runs-graphite.dpi72.png
+7e62edcbb2f1885e8cfdc68daabb3c9f6590fc71cbfefe5083e074c39659ca31  png/raster-marks-runs-midnight.dpi200.png
+f35961191f453e0fa62d647f3b4cb3253001e9d3979a82a179c3ced4fdf8dfa8  png/raster-marks-runs-midnight.dpi72.png
+27cc557c6f42811d19b839fe05d76a68f11d911853755b09bc7ffdf272ccac2d  png/raster-marks-runs-pigment.dpi200.png
+5ce1f7148791e124d5b7e7a943201980a7dd97ecc04677f7996c87da0d47d5f3  png/raster-marks-runs-pigment.dpi72.png
 55f8e1735ace581ee6d39cf23781b2ac30c3200d0fcc4c6fa33fca0084754cef  png/raster-marks-scatter-graphite.dpi200.png
 18f575a42eff1554b08f5e808ff213ab0fab9b4725d675a67c1884b9dee595d9  png/raster-marks-scatter-graphite.dpi72.png
 0bd0fc8bbf913b33bca9cf306b81b1df8c135e71278d373eea01a451203c216e  png/raster-marks-scatter-midnight.dpi200.png
@@ -2834,6 +2840,9 @@ cc36eebfd45638aa8a44014d6acda60319a4d1c12d604cb5d9af4f22769d9150  scene/raster-m
 449df150a090d7fd23253dce18bd25827c2a57d7ae210e4a1eba7bcbecfc20ec  scene/raster-marks-line-graphite.txt
 952ee53c9355dc7a6e45663023626e5b9cfb518b8da5ba8f32bb2b90593be222  scene/raster-marks-line-midnight.txt
 ee563f772e21b7d7c681535ff1055a21474f24921bbeaa9a238873707251bfaa  scene/raster-marks-line-pigment.txt
+2af16f47c585747458736d48703aa0136fee4dadbd788c7c520d0ecd297d8a35  scene/raster-marks-runs-graphite.txt
+963ec81f07a23932d09dd36b8331a8833dab9c9ea3170048f220011b27aae7fa  scene/raster-marks-runs-midnight.txt
+83239d852ae315487b2959a50ee832bfa3a240e4a60fb7eab969e52413f4efc5  scene/raster-marks-runs-pigment.txt
 3b6b7dd686892f500c31b316686a504ceb9e25b788dc76e6a4c99b4c77b25923  scene/raster-marks-scatter-graphite.txt
 083eff775c6d69936b0d555c40423656d4617a27a446ab706ac3527587a1e014  scene/raster-marks-scatter-midnight.txt
 7f2aa779e498fa9c6cd6a245979ff37021ffc3bb7052454d6d7e92573301d5e9  scene/raster-marks-scatter-pigment.txt
@@ -4577,6 +4586,12 @@ fea387a81c9ed9f8be552ffa62e17cbca4bcef8ea2d9f85f2faf0829291569c5  svg/raster-mar
 c04101b7787b2d888a69adddafe81c78f2d0420152a9e922aec947d84e9d34dc  svg/raster-marks-line-midnight.outlines.svg
 4b3a386f68cefe6f0eddb547cec58d0d279f3121404a52454e304865cd3a9975  svg/raster-marks-line-pigment.editable.svg
 5a7f1e280e07fd204a1581f98ac00b2417b9180a79c356e8002e5c254d51b82e  svg/raster-marks-line-pigment.outlines.svg
+873bb7251374dbb25b405b60faee4f9a1c8af81e0841e46e5608b96b79566363  svg/raster-marks-runs-graphite.editable.svg
+7d025bcc9968caabb9b8c890cddb4ea02a2b549dc58b7fc5703777aa5dc27312  svg/raster-marks-runs-graphite.outlines.svg
+77f98c522a1335fb703bdb5e2dba5505ab938ee5fcb52a55aa77fabf29e47977  svg/raster-marks-runs-midnight.editable.svg
+50f1e55dcef27a020cde8e05014b57519284b5aaa086949cd4180b581c92da9b  svg/raster-marks-runs-midnight.outlines.svg
+ec7ab94478fd555c35d4357a37603f2b9ab322d450b3101c40f4b51b499b4afe  svg/raster-marks-runs-pigment.editable.svg
+31dc89d3e16c65b040a7ac55860b3a7f718d2adab38110bf5769f40e008067ba  svg/raster-marks-runs-pigment.outlines.svg
 715cfdbd37f8cc10f171bcf8b6e7315f5304aae8313612054f658f0d4c7e62ed  svg/raster-marks-scatter-graphite.editable.svg
 3297f02787fa15867911f3728e1735e35a6f875fc39505915b6270893ce989b9  svg/raster-marks-scatter-graphite.outlines.svg
 e9d8b484b8dcf07f118a0b339427ff2f62f55bd6028c124cd9b90940060fe8e6  svg/raster-marks-scatter-midnight.editable.svg

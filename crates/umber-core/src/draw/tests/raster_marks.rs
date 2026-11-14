@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 use super::{mark_group, nums};
 use crate::model::{AxisData, Figure, LineOptions, ScatterOptions};
+use crate::render::render_png;
 use crate::scene::{Item, Rect};
 use crate::{
     ErrorRange, FontLibrary, MarkRender, Marker, PointLabels, ScaleKind, ScatterGroup, SizeSpec,
-    Theme, Triangles, TripcolorOptions,
+    SvgText, Theme, Triangles, TripcolorOptions,
 };
 
 /// The marks group of `figure`'s scene: its clip and items.
@@ -125,7 +126,7 @@ fn a_scatter_keeps_its_error_bars_out_of_its_images() {
 }
 
 #[test]
-fn each_group_of_a_grouped_raster_scatter_or_line_is_an_image_of_its_own() {
+fn the_groups_of_a_grouped_raster_scatter_or_line_share_one_image() {
     let group = |name: &str, y: f64| {
         ScatterGroup::new(
             name,
@@ -146,7 +147,7 @@ fn each_group_of_a_grouped_raster_scatter_or_line_is_an_image_of_its_own() {
     });
     assert_eq!(
         kinds(&marks_of(&f).1),
-        ["raster[markers markers]", "raster[markers markers]"]
+        ["raster[markers markers markers markers]"]
     );
     let lines = figure(|a| {
         let xy = |y: f64| (nums(&[0.0, 1.0]), AxisData::Numbers(vec![y, y + 1.0]));
@@ -159,10 +160,7 @@ fn each_group_of_a_grouped_raster_scatter_or_line_is_an_image_of_its_own() {
         )
         .unwrap();
     });
-    assert_eq!(
-        kinds(&marks_of(&lines).1),
-        ["raster[stroke]", "raster[stroke]"]
-    );
+    assert_eq!(kinds(&marks_of(&lines).1), ["raster[stroke stroke]"]);
 }
 
 #[test]
@@ -208,4 +206,162 @@ fn a_raster_mark_that_draws_nothing_adds_no_image() {
             .unwrap();
     });
     assert_eq!(kinds(&marks_of(&f).1), ["stroke"]);
+}
+
+fn raster_line(a: &mut crate::AxesMut<'_>, y: f64) {
+    let options = LineOptions {
+        render: MarkRender::Raster,
+        ..LineOptions::default()
+    };
+    a.line(nums(&[0.0, 1.0, 2.0]), &[y, y + 1.0, y], options)
+        .unwrap();
+}
+
+#[test]
+fn consecutive_raster_lines_are_one_image_of_their_items_in_order() {
+    let f = figure(|a| {
+        raster_line(a, 0.0);
+        raster_line(a, 1.0);
+        raster_line(a, 2.0);
+    });
+    let (clip, items) = marks_of(&f);
+    assert_eq!(kinds(&items), ["raster[stroke stroke stroke]"]);
+    let Item::Raster { rect, items: inner } = &items[0] else {
+        unreachable!()
+    };
+    assert_eq!(*rect, clip);
+    assert!(inner.iter().all(|item| matches!(item, Item::Stroke { .. })));
+    // Strokes of different lines differ, so the order of the calls is the order of the items.
+    assert!(inner[0] != inner[1] && inner[1] != inner[2]);
+}
+
+#[test]
+fn a_vector_item_between_raster_marks_keeps_them_two_images() {
+    let f = figure(|a| {
+        raster_line(a, 0.0);
+        a.line(nums(&[0.0, 1.0]), &[1.0, 2.0], LineOptions::default())
+            .unwrap();
+        raster_line(a, 2.0);
+        raster_line(a, 3.0);
+    });
+    assert_eq!(
+        kinds(&marks_of(&f).1),
+        ["raster[stroke]", "stroke", "raster[stroke stroke]"]
+    );
+    // A reference line is drawn after the data marks, so it never splits them.
+    let g = figure(|a| {
+        raster_line(a, 0.0);
+        a.hline(1.0, crate::RuleOptions::default()).unwrap();
+        raster_line(a, 2.0);
+    });
+    assert_eq!(kinds(&marks_of(&g).1), ["raster[stroke stroke]", "stroke"]);
+}
+
+#[test]
+fn a_raster_scatter_after_a_raster_line_shares_its_image() {
+    let f = figure(|a| {
+        raster_line(a, 0.0);
+        a.scatter(
+            nums(&[0.0, 1.0, 2.0]),
+            &[1.0, 2.0, 3.0],
+            scatter(MarkRender::Raster, false, false),
+        )
+        .unwrap();
+    });
+    assert_eq!(kinds(&marks_of(&f).1), ["raster[stroke markers markers]"]);
+}
+
+#[test]
+fn the_error_bars_of_a_raster_scatter_split_the_images_around_them() {
+    let f = figure(|a| {
+        raster_line(a, 0.0);
+        a.scatter(
+            nums(&[0.0, 1.0, 2.0]),
+            &[1.0, 2.0, 3.0],
+            scatter(MarkRender::Raster, false, true),
+        )
+        .unwrap();
+        raster_line(a, 2.0);
+    });
+    let kinds = kinds(&marks_of(&f).1);
+    assert_eq!(kinds.first().map(String::as_str), Some("raster[stroke]"));
+    assert_eq!(
+        kinds.last().map(String::as_str),
+        Some("raster[markers markers stroke]")
+    );
+}
+
+#[test]
+fn two_axes_never_share_an_image() {
+    let grid = crate::Grid::new(1, 2).unwrap();
+    let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), grid).unwrap();
+    for col in 0..2 {
+        let at = crate::Placement {
+            col: crate::GridIndex::At(col),
+            ..crate::Placement::default()
+        };
+        let mut axes = f
+            .add_axes_at(at, ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap();
+        raster_line(&mut axes, 0.0);
+        raster_line(&mut axes, 1.0);
+    }
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let images: Vec<usize> = scene
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Group {
+                clip: Some(_),
+                items,
+            } => Some(
+                items
+                    .iter()
+                    .filter(|i| matches!(i, Item::Raster { .. }))
+                    .count(),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images, [1, 1]);
+}
+
+#[test]
+fn merging_raster_marks_leaves_png_output_as_vector_marks_draw_it() {
+    let draw = |render: MarkRender| {
+        figure(|a| {
+            for y in 0..4 {
+                let options = LineOptions {
+                    render,
+                    ..LineOptions::default()
+                };
+                let y = f64::from(y);
+                a.line(nums(&[0.0, 1.0, 2.0]), &[y, y + 1.0, y], options)
+                    .unwrap();
+            }
+        })
+    };
+    for dpi in [72, 200] {
+        let png = |render| {
+            render_png(&draw(render).to_scene(FontLibrary::global()).unwrap(), dpi).unwrap()
+        };
+        assert_eq!(png(MarkRender::Raster), png(MarkRender::Vector), "{dpi}");
+    }
+}
+
+#[test]
+fn two_hundred_raster_lines_are_one_image_in_pdf_and_svg() {
+    let f = figure(|a| {
+        for y in 0..200 {
+            raster_line(a, f64::from(y));
+        }
+    });
+    let svg = f.to_svg(SvgText::Outlines, 100).unwrap();
+    assert_eq!(svg.matches("<image ").count(), 1);
+    let pdf = f.to_pdf(100).unwrap();
+    let text = String::from_utf8_lossy(&pdf);
+    assert_eq!(
+        text.matches("/Subtype /Image").count() - text.matches("/SMask ").count(),
+        1
+    );
 }

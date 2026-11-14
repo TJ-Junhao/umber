@@ -4241,8 +4241,8 @@ impl<'a> AxesMut<'a> {
     /// Adds one line per named pair of coordinate columns, in the given order.
     /// Each group takes the next palette color. The rules of [`AxesMut::line_shared`]
     /// apply to every group; no mark is added unless all groups are valid.
-    /// An empty list of groups is `Error::Data`. Every group is drawn as `render` says, each
-    /// as an image of its own with [`MarkRender::Raster`](crate::MarkRender::Raster).
+    /// An empty list of groups is `Error::Data`. Every group is drawn as `render` says, and
+    /// with [`MarkRender::Raster`](crate::MarkRender::Raster) the groups share one image.
     ///
     /// # Examples
     ///

@@ -374,8 +374,11 @@ class Render(Enum):
     marks below it show through, and it looks as a PNG at ``raster_dpi`` does; viewers may
     smooth it when they scale it. PNG output is the same as with ``VECTOR``. The axes, text,
     legends and colorbars, the other marks, and the mark's own value labels and error bars stay
-    vector. With ``by``, each group is an image of its own. These marks take no ``AUTO``: a
-    mark is an image only when asked, as its look can change.
+    vector. Marks drawn with ``RASTER`` that follow each other in one axes, with nothing
+    between them, share one image: 200 lines drawn with ``RASTER`` cost one image, and so do
+    the groups of a call with ``by``. A mark drawn as vector shapes between two of them, or the
+    error bars of a scatter, keeps them two images; axes never share an image. These marks
+    take no ``AUTO``: a mark is an image only when asked, as its look can change.
 
     Example:
         >>> import umber as ub

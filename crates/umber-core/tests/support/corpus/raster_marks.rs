@@ -1,7 +1,8 @@
 //! Marks drawn as one image in vector output, in every theme: a dense scatter between a vector
 //! band under it and a vector line over it, with a legend; a long noisy line beside a vector
 //! one; a scatter with its own line, error bars and value labels; a color-mapped scatter with a
-//! colorbar; and a tripcolor with blank triangles and a colorbar. Also the errors of
+//! colorbar; a tripcolor with blank triangles and a colorbar; and two runs of raster lines with a
+//! vector line between them, each run one image. Also the errors of
 //! `raster_dpi` and of an image too large to draw.
 
 use std::fmt::Write as _;
@@ -207,7 +208,42 @@ fn mesh(theme: Theme) -> Figure {
     f
 }
 
-/// Emits the five figures in every theme, then the errors.
+/// (f) Two runs of raster lines with a vector line between them: each run is one image, and the
+/// vector line stays between the two images.
+fn runs(theme: Theme) -> Figure {
+    let mut next = lcg(11);
+    let mut f = figure(theme);
+    {
+        let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        axes.title("Runs of lines drawn as images")
+            .xlim(0.0, 10.0)
+            .unwrap();
+        for index in 0..7 {
+            let render = if index == 3 {
+                MarkRender::Vector
+            } else {
+                RASTER
+            };
+            let x: Vec<f64> = (0..400).map(|i| f64::from(i) / 40.0).collect();
+            let y: Vec<f64> = x
+                .iter()
+                .map(|&t| f64::from(index) + (t + f64::from(index)).sin() + next())
+                .collect();
+            axes.line(
+                AxisData::Numbers(x),
+                &y,
+                LineOptions {
+                    render,
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+    }
+    f
+}
+
+/// Emits the figures in every theme, then the errors.
 pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     for (name, theme) in themes() {
         for (case, figure) in [
@@ -216,6 +252,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             ("dressed", dressed(theme.clone())),
             ("color-by", mapped(theme.clone())),
             ("tripcolor", mesh(theme.clone())),
+            ("runs", runs(theme.clone())),
         ] {
             emit_scene(
                 &format!("raster-marks-{case}-{name}"),

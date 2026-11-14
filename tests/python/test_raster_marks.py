@@ -93,13 +93,30 @@ def test_the_default_render_of_the_marks_is_vector() -> None:
     assert _images(plain.to_svg()) == []
 
 
-def test_each_group_is_an_image_of_its_own() -> None:
+def test_the_groups_of_one_call_share_one_image() -> None:
     x, y = _points(100)
     groups = ["a", "b"] * 50
     scatter = ub.scatter(x, y, by=groups, render=ub.Render.RASTER)
-    assert len(_images(scatter.figure.to_svg())) == 2
+    assert len(_images(scatter.figure.to_svg())) == 1
     line = ub.Figure().add_axes().line(x, y, by=groups, render=ub.Render.RASTER)
-    assert _pdf_images(line.figure.to_pdf()) == 2
+    assert _pdf_images(line.figure.to_pdf()) == 1
+
+
+def test_consecutive_raster_lines_share_one_image() -> None:
+    ax = ub.Figure().add_axes()
+    for offset in range(50):
+        ax.line([0, 1, 2], [offset, offset + 1, offset], render=ub.Render.RASTER)
+    assert len(_images(ax.figure.to_svg())) == 1
+    assert _pdf_images(ax.figure.to_pdf()) == 1
+
+
+def test_a_vector_mark_between_raster_marks_keeps_two_images() -> None:
+    ax = ub.Figure().add_axes()
+    ax.line([0, 1], [0, 1], render=ub.Render.RASTER)
+    ax.line([0, 1], [1, 2])
+    ax.line([0, 1], [2, 3], render=ub.Render.RASTER)
+    assert len(_images(ax.figure.to_svg())) == 2
+    assert _pdf_images(ax.figure.to_pdf()) == 2
 
 
 def test_error_bars_and_value_labels_stay_vector() -> None:
