@@ -385,6 +385,10 @@ pub enum Item {
     /// visible pixel is left out, as is the item when
     /// `rect` is not finite, not positive in size or beyond the renderers' coordinate limit.
     ///
+    /// Marks drawn as images that follow each other in a marks group, with nothing drawn
+    /// between them, and cover the same `rect` are one item holding all their items in order;
+    /// an item between two of them keeps them two images.
+    ///
     /// The PNG backend draws the items as a group without a clip, so PNG output is the same
     /// with and without this item around them.
     Raster {
