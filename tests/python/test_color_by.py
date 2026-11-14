@@ -75,13 +75,28 @@ def test_lists_arrays_and_series_match() -> None:
 
 
 def _marker_styles(svg: str) -> list[dict[str, str]]:
-    """One style per marker: each batch draws all its outlines, then all its fills."""
+    """One style per marker: each batch draws all its outlines, then all its fills.
+
+    A batch of several marks is a group of `<use>` elements; a batch of one is a lone `<use>`
+    that carries the style itself. A clip group is not a batch: its marks may be lone.
+    """
     ns = "{http://www.w3.org/2000/svg}"
-    groups = [
-        group.attrib
-        for group in ElementTree.fromstring(svg).iter(f"{ns}g")
-        if group.find(f"{ns}use") is not None
-    ]
+    groups: list[dict[str, str]] = []
+
+    def collect(element: ElementTree.Element) -> None:
+        for child in element:
+            if child.tag == f"{ns}use":
+                groups.append(child.attrib)
+            elif (
+                child.tag == f"{ns}g"
+                and "clip-path" not in child.attrib
+                and child.find(f"{ns}use") is not None
+            ):
+                groups.append(child.attrib)
+            else:
+                collect(child)
+
+    collect(ElementTree.fromstring(svg))
     markers: list[dict[str, str]] = []
     i = 0
     while i < len(groups):

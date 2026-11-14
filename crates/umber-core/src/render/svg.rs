@@ -433,6 +433,12 @@ impl Writer<'_> {
         let _ = writeln!(self.body, r#"<path d="{}"{attrs}/>"#, path_d(&normalized));
     }
 
+    /// Writes marks of one shape as `<use>` elements of its shared definition. The fill and stroke
+    /// attributes go on a `<g>` around the uses, except when there is exactly one valid
+    /// position: then they go on that `<use>` and no group is written. The referenced `<path>`
+    /// carries no presentation attributes, so it inherits them from its `<use>` exactly as from
+    /// a parent group, and the mark is drawn the same; a scatter that colors every point
+    /// separately would otherwise write a group per point.
     fn markers(
         &mut self,
         shape: &Path,
@@ -472,6 +478,15 @@ impl Writer<'_> {
                 id
             }
         };
+        if let [p] = uses.as_slice() {
+            let _ = writeln!(
+                self.body,
+                "<use href=\"#m{id}\" x=\"{}\" y=\"{}\"{attrs}/>",
+                num(p.x),
+                num(p.y)
+            );
+            return;
+        }
         let _ = writeln!(self.body, "<g{attrs}>");
         for p in uses {
             let _ = writeln!(
@@ -1345,5 +1360,148 @@ mod tests {
         assert_eq!(svg.matches("<path id=").count(), 1, "{svg}");
         assert_eq!(svg.matches("<use ").count(), 6, "{svg}");
         assert_eq!(svg.matches(r##"href="#m0""##).count(), 6, "{svg}");
+    }
+
+    fn marker_scene(
+        fill: Option<Rgba>,
+        stroke: Option<StrokeStyle>,
+        positions: Vec<Point>,
+    ) -> Scene {
+        let mut scene = Scene::new(100.0, 100.0, WHITE);
+        scene.push(Item::Markers {
+            shape: triangle(),
+            fill,
+            stroke,
+            positions,
+        });
+        scene
+    }
+
+    /// The presentation attributes a `<use>` element draws with: its own, over those of its
+    /// ancestors, nearest first. The referenced path has none, so these are what it inherits.
+    fn inherited_attributes(node: roxmltree::Node<'_, '_>) -> Vec<(String, String)> {
+        const PRESENTATION: [&str; 9] = [
+            "fill",
+            "fill-opacity",
+            "stroke",
+            "stroke-opacity",
+            "stroke-width",
+            "stroke-dasharray",
+            "stroke-linecap",
+            "stroke-linejoin",
+            "stroke-miterlimit",
+        ];
+        let mut found: Vec<(String, String)> = Vec::new();
+        for ancestor in node.ancestors().filter(|n| n.is_element()) {
+            for name in PRESENTATION {
+                if let Some(value) = ancestor.attribute(name)
+                    && !found.iter().any(|(n, _)| n == name)
+                {
+                    found.push((name.to_string(), value.to_string()));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_lone_marker_is_one_use_with_its_attributes() {
+        let scene = marker_scene(
+            Some(RED),
+            Some(stroke_style(2.0, vec![3.0, 1.0])),
+            vec![p(5.0, 6.0)],
+        );
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
+        let doc = parse(&svg);
+        assert_eq!(
+            doc.descendants().filter(|n| n.has_tag_name("g")).count(),
+            0,
+            "{svg}"
+        );
+        let uses: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("use"))
+            .collect();
+        assert_eq!(uses.len(), 1, "{svg}");
+        assert_eq!(uses[0].attribute("fill"), Some("#C82814"), "{svg}");
+        assert_eq!(uses[0].attribute("stroke-width"), Some("2"), "{svg}");
+        assert_eq!(uses[0].attribute("stroke-dasharray"), Some("3 1"), "{svg}");
+    }
+
+    #[test]
+    fn two_markers_keep_one_group() {
+        let scene = marker_scene(Some(RED), None, vec![p(5.0, 6.0), p(7.0, 8.0)]);
+        let svg = render_svg(&scene, SvgText::Outlines, 300).unwrap();
+        let doc = parse(&svg);
+        let groups: Vec<_> = doc.descendants().filter(|n| n.has_tag_name("g")).collect();
+        assert_eq!(groups.len(), 1, "{svg}");
+        assert_eq!(groups[0].attribute("fill"), Some("#C82814"), "{svg}");
+        let uses: Vec<_> = groups[0]
+            .children()
+            .filter(|n| n.has_tag_name("use"))
+            .collect();
+        assert_eq!(uses.len(), 2, "{svg}");
+        assert!(uses.iter().all(|u| u.attribute("fill").is_none()), "{svg}");
+    }
+
+    /// A lone mark and the first of two marks, which sit in a group, draw with the same
+    /// attributes, for a fill, a stroke, and a fill with a dashed stroke of every cap and join.
+    #[test]
+    fn a_lone_marker_inherits_what_a_grouped_one_does() {
+        let styled = |cap, join| StrokeStyle {
+            cap,
+            join,
+            ..stroke_style(2.5, vec![3.0, 1.0])
+        };
+        let cases = [
+            (Some(RED), None),
+            (Some(BLUE), None),
+            (None, Some(stroke_style(1.0, vec![]))),
+            (Some(BLUE), Some(styled(LineCap::Round, LineJoin::Round))),
+            (Some(RED), Some(styled(LineCap::Square, LineJoin::Bevel))),
+            (Some(RED), Some(styled(LineCap::Butt, LineJoin::Miter))),
+        ];
+        for (fill, stroke) in cases {
+            let lone = render_svg(
+                &marker_scene(fill, stroke.clone(), vec![p(5.0, 6.0)]),
+                SvgText::Outlines,
+                300,
+            )
+            .unwrap();
+            let grouped = render_svg(
+                &marker_scene(fill, stroke, vec![p(5.0, 6.0), p(9.0, 9.0)]),
+                SvgText::Outlines,
+                300,
+            )
+            .unwrap();
+            let (lone_doc, grouped_doc) = (parse(&lone), parse(&grouped));
+            let attributes = |doc: &roxmltree::Document<'_>| {
+                let first = doc.descendants().find(|n| n.has_tag_name("use")).unwrap();
+                (
+                    first.attribute("x").map(str::to_string),
+                    first.attribute("y").map(str::to_string),
+                    inherited_attributes(first),
+                )
+            };
+            let expected = attributes(&grouped_doc);
+            assert!(!expected.2.is_empty(), "{grouped}");
+            assert_eq!(attributes(&lone_doc), expected, "{lone}\n{grouped}");
+            // Nothing the path in the definitions carries can differ either.
+            let defs = |doc: &roxmltree::Document<'_>| {
+                doc.descendants()
+                    .find(|n| n.has_tag_name("path") && n.attribute("id").is_some())
+                    .map(|n| {
+                        n.attributes()
+                            .map(|a| a.name().to_string())
+                            .collect::<Vec<_>>()
+                    })
+            };
+            assert_eq!(
+                defs(&lone_doc),
+                Some(vec!["id".to_string(), "d".to_string()]),
+                "{lone}"
+            );
+        }
     }
 }
