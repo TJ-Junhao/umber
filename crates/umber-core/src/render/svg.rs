@@ -1454,6 +1454,10 @@ mod tests {
             join,
             ..stroke_style(2.5, vec![3.0, 1.0])
         };
+        let translucent = || StrokeStyle {
+            color: BLUE,
+            ..stroke_style(1.5, vec![])
+        };
         let cases = [
             (Some(RED), None),
             (Some(BLUE), None),
@@ -1461,8 +1465,11 @@ mod tests {
             (Some(BLUE), Some(styled(LineCap::Round, LineJoin::Round))),
             (Some(RED), Some(styled(LineCap::Square, LineJoin::Bevel))),
             (Some(RED), Some(styled(LineCap::Butt, LineJoin::Miter))),
+            (None, Some(translucent())),
+            (Some(RED), Some(translucent())),
         ];
         for (fill, stroke) in cases {
+            let see_through = stroke.as_ref().is_some_and(|s| s.color.a < 255);
             let lone = render_svg(
                 &marker_scene(fill, stroke.clone(), vec![p(5.0, 6.0)]),
                 SvgText::Outlines,
@@ -1487,6 +1494,13 @@ mod tests {
             let expected = attributes(&grouped_doc);
             assert!(!expected.2.is_empty(), "{grouped}");
             assert_eq!(attributes(&lone_doc), expected, "{lone}\n{grouped}");
+            if see_through {
+                let first = lone_doc
+                    .descendants()
+                    .find(|n| n.has_tag_name("use"))
+                    .unwrap();
+                assert_eq!(first.attribute("stroke-opacity"), Some("0.502"), "{lone}");
+            }
             // Nothing the path in the definitions carries can differ either.
             let defs = |doc: &roxmltree::Document<'_>| {
                 doc.descendants()
