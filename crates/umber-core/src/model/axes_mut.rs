@@ -4320,8 +4320,9 @@ impl<'a> AxesMut<'a> {
     /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
     /// All groups use the same marker, size, value labels and `render`, and with `connect` each
     /// group's line joins only its own points. Each group's labels, error bars and line take its
-    /// color, and with [`MarkRender::Raster`](crate::MarkRender::Raster) each group is an image
-    /// of its own. A failed call adds nothing.
+    /// color, and with [`MarkRender::Raster`](crate::MarkRender::Raster) the groups, which follow
+    /// each other, share one image unless an item that is not an image is drawn between them.
+    /// A failed call adds nothing.
     ///
     /// # Errors
     ///

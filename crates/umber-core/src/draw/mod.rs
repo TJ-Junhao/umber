@@ -710,21 +710,23 @@ fn raster_items(
 /// pass is what the PNG backend does with them, so the merged image holds the items as the PNG
 /// backend draws them, exactly as [`Item::Raster`] states; the images before it composited one
 /// over the other and so differed from that only by 8-bit rounding.
-fn merge_rasters(items: Vec<Item>) -> Vec<Item> {
-    let mut merged: Vec<Item> = Vec::with_capacity(items.len());
-    for item in items {
-        match (merged.last_mut(), item) {
-            (
-                Some(Item::Raster {
-                    rect: last,
-                    items: last_items,
-                }),
-                Item::Raster { rect, items },
-            ) if *last == rect => last_items.extend(items),
-            (_, item) => merged.push(item),
+fn merge_rasters(mut items: Vec<Item>) -> Vec<Item> {
+    // In place: an item that merges into the one before it is removed after its items move
+    // over, and nothing is allocated when no two images are adjacent.
+    items.dedup_by(|next, last| match (last, next) {
+        (
+            Item::Raster {
+                rect: last_rect,
+                items: last_items,
+            },
+            Item::Raster { rect, items },
+        ) if *last_rect == *rect => {
+            last_items.append(items);
+            true
         }
-    }
-    merged
+        _ => false,
+    });
+    items
 }
 
 /// How the points of a scatter or bubble mark in `color` are filled: in that color, or, when

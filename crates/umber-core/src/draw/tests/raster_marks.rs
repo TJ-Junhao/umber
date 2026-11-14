@@ -230,9 +230,17 @@ fn consecutive_raster_lines_are_one_image_of_their_items_in_order() {
         unreachable!()
     };
     assert_eq!(*rect, clip);
-    assert!(inner.iter().all(|item| matches!(item, Item::Stroke { .. })));
-    // Strokes of different lines differ, so the order of the calls is the order of the items.
-    assert!(inner[0] != inner[1] && inner[1] != inner[2]);
+    // The items of the same three lines drawn as vector shapes, in the order of the calls.
+    let vector = figure(|a| {
+        for y in [0.0, 1.0, 2.0] {
+            let options = LineOptions::default();
+            a.line(nums(&[0.0, 1.0, 2.0]), &[y, y + 1.0, y], options)
+                .unwrap();
+        }
+    });
+    let (_, expected) = marks_of(&vector);
+    assert_eq!(expected.len(), 3);
+    assert_eq!(*inner, expected);
 }
 
 #[test]

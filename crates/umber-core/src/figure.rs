@@ -110,8 +110,9 @@ impl Figure {
     ///
     /// A scatter, line or tripcolor whose options ask for [`MarkRender::Raster`] has its items
     /// inside one [`Item::Raster`](crate::Item::Raster) covering the clip of the marks, in the
-    /// mark's place; SVG and PDF output draw it as one image. A scatter's error bars stay outside
-    /// it: with a joining line too, the line and the markers are two such items, under and over
+    /// mark's place; SVG and PDF output draw it as one image, which such marks that follow each
+    /// other in the marks group share (see [`Item::Raster`](crate::Item::Raster)). A scatter's
+    /// error bars stay outside it, and split the images: with a joining line too, the line and the markers are two such items, under and over
     /// the bars.
     ///
     /// A 1 × 1 grid is laid out on the whole canvas. On a larger grid every axes' plot area

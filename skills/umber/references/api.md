@@ -4880,9 +4880,9 @@ Args:
     text: How text is written. ``SvgText.OUTLINES`` draws it as paths, which look the
         same everywhere; ``SvgText.EDITABLE`` keeps it as text elements.
     raster_dpi: The resolution, from 10 to 2400 pixels per inch and 300 by default, of
-        the marks drawn with ``render=Render.RASTER``, each one image. It changes
-        nothing else: a figure without such a mark gives the same document at every
-        ``raster_dpi``.
+        the marks drawn with ``render=Render.RASTER``, which share one image
+        when they follow each other. It changes nothing else: a figure without such
+        a mark gives the same document at every ``raster_dpi``.
 
 Returns:
     The SVG document.
