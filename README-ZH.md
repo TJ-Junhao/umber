@@ -150,7 +150,7 @@ variant.axes_at(row=0, col=1).title("Comparison")  # 原图不变
 
 ## 颜色与 colorbar
 
-热力图、网格色块图、等值线图、二维直方图和六边形分箱图按数值为每个格子、色带或线条着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。热力图、网格色块图和二维直方图从 10,000 个格子起把格子画成一张每格一个像素的图像，而不是每格一个形状，使大网格的文件更小、渲染更快；`render=ub.Render.VECTOR` 或 `render=ub.Render.RASTER` 可显式指定画法。`scatter`、`line` 和 `tripcolor` 默认是矢量的，除非传入 `render=ub.Render.RASTER`，适用于密到矢量文件会又大又难打开的 mark：此时 SVG 和 PDF 输出按导出时的 `raster_dpi`（默认 300）把这个 mark 画成一张图像，PNG 输出不变，同一个 axes 中依次绘制的 raster mark 共用一张图像。
+热力图、网格色块图、等值线图、二维直方图和六边形分箱图按数值为每个格子、色带或线条着色；`color=ub.ColorBy(values)` 对散点图或气泡图的点做同样的事。同一个 axes 上所有按值着色的 mark 共用一个 color scale，plot 旁的 colorbar 说明这一映射。热力图、网格色块图和二维直方图从 10,000 个格子起把格子画成一张每格一个像素的图像，而不是每格一个形状，使大网格的文件更小、渲染更快；`render=ub.Render.VECTOR` 或 `render=ub.Render.RASTER` 可显式指定画法。`scatter`、`line` 和 `tripcolor` 默认是矢量的，除非传入 `render=ub.Render.RASTER`，适用于密到矢量文件会又大又难打开的 mark：此时 SVG 和 PDF 输出按导出时的 `raster_dpi`（默认 300）把这个 mark 画成一张图像，PNG 输出不变，同一个 axes 中依次绘制的 raster mark 共用一张图像，除非中间夹着矢量绘制的内容，例如散点图的误差棒；误差棒和数值标签一样保持矢量。
 
 ```python
 import numpy as np
@@ -369,7 +369,7 @@ fig = ub.Figure(theme=serif)
 
 ## 输出
 
-`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。用 `render=ub.Render.RASTER` 绘制的 mark 在 SVG 和 PDF 中是图像，分辨率由 `save_svg`、`save_pdf`、`to_svg` 和 `to_pdf` 的 `raster_dpi=` 设置（默认 300）。`ub.save_pdf(path, [fig1, fig2])` 把多个 figure 写入同一个 PDF，每个 figure 一页，页面大小各自保持；`ub.to_pdf([fig1, fig2])` 返回字节。
+`fig.save_png(path, dpi=...)`、`fig.save_svg(path)` 和 `fig.save_pdf(path)` 写入文件；`to_png()`、`to_svg()` 和 `to_pdf()` 则返回字节或文本。PNG 按所选分辨率抗锯齿渲染。SVG 的文字默认画成轮廓，因此在任何地方看起来都一样；`text=ub.SvgText.EDITABLE` 保留为文字，由查看器用它自己的字体副本绘制。PDF 输出是矢量的，单页，页面大小与 figure 相同，嵌入所用字体的子集，因此文字可以选中和搜索；大型格子网格与 SVG 中一样保留为图像。用 `render=ub.Render.RASTER` 绘制的 `scatter`、`line` 和 `tripcolor` 在 SVG 和 PDF 中是图像，分辨率由 `save_svg`、`save_pdf`、`to_svg` 和 `to_pdf` 的 `raster_dpi=` 设置（默认 300）；画成图像的格子网格始终每格一个像素。`ub.save_pdf(path, [fig1, fig2])` 把多个 figure 写入同一个 PDF，每个 figure 一页，页面大小各自保持；`ub.to_pdf([fig1, fig2])` 返回字节。
 
 ### Jupyter 和 `show()`
 
@@ -437,7 +437,7 @@ ax.bar(["a", "b"], [1, 2])  # pyright 和 mypy 报错：bar() 需要 Axes[str, f
 
 绑定到单个 CPU 时，只有散点图明显变慢：137 ms（2.1×）。4 × 5 网格使用 12 × 8 英寸的图幅。两个库在哪些场景下做的工作不同（例如六边形分箱的网格构建方式不同），见脚本的 docstring。PDF 热力图比 matplotlib 的大，1.45 MB 对 0.91 MB：umber 精确计算每个格子的颜色，而 matplotlib 从 256 项的 colormap 表中为每个格子取色，压缩率更高。
 
-对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。在 SVG 和 PDF 中，散点图的每个点、折线的每一段都是查看器要绘制的形状，数据很密时文件会很大、打开很慢；在 `scatter`、`line` 或 `tripcolor` 上传入 `render=ub.Render.RASTER`，就改按导出时的 `raster_dpi` 把这个 mark 画成一张图像，PNG 输出不变。这样绘制的 100 万点散点图存为 PDF 约 2 MB，在 MuPDF 中绘制约需 0.05 s。同一个 axes 中依次绘制的 raster mark 共用一张图像：用 `RASTER` 绘制的 200 条各 1 万个点的折线存为 PDF 是 3.2 MB，矢量绘制则是 8.4 MB。
+对于 x 值有序的数值或时间折线，按 300 dpi 的标称分辨率计算绘图区的像素列数，点数超过列数的四倍时按列降采样，保留每列的首点、末点、最小值和最大值，视觉上无损。大型散点图最多使用 8 个线程合成；无论用几个线程，输出都完全相同。在 SVG 和 PDF 中，散点图的每个点、折线的每一段都是查看器要绘制的形状，数据很密时文件会很大、打开很慢；在 `scatter`、`line` 或 `tripcolor` 上传入 `render=ub.Render.RASTER`，就改按导出时的 `raster_dpi` 把这个 mark 画成一张图像，PNG 输出不变。这样绘制的 100 万点散点图存为 PDF 约 2 MB，在 MuPDF 中绘制约需 0.05 s。同一个 axes 中依次绘制、中间没有矢量内容的 raster mark 共用一张图像：用 `RASTER` 绘制的 200 条各 1 万个点的折线存为 PDF 是 3.2 MB，矢量绘制则是 8.4 MB。
 
 ## Agent Skill
 
