@@ -65,7 +65,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
                         Marker::Diamond,
                         SizeSpec::Auto,
                         umber_core::PointLabels::default(),
-                        false,
+                        (false, SizeSpec::Auto),
                         umber_core::MarkRender::Vector,
                     )
                     .unwrap(),

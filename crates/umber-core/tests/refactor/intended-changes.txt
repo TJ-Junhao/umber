@@ -1,1 +1,9 @@
-# Cases whose committed outputs change on purpose in this change; none.
+# Cases whose committed outputs change on purpose in this change: a translucent fill color is drawn as given, not at the default fill opacity times its own.
+fig-area-category
+fig-legend-chips-graphite
+fig-legend-chips-midnight
+fig-legend-chips-pigment
+fig-legend-graphite-header
+fig-legend-midnight-header
+fig-scatter-markers
+rules-styles

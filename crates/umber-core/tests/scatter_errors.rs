@@ -185,7 +185,7 @@ fn groups_and_color_maps_color_their_own_bars_and_lines() {
             Marker::Circle,
             SizeSpec::Auto,
             PointLabels::default(),
-            true,
+            (true, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap();

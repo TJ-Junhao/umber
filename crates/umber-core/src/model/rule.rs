@@ -100,7 +100,7 @@ impl Default for RuleOptions {
 pub struct SpanOptions {
     /// The legend label; empty for none.
     pub label: String,
-    /// The fill color, drawn at the area opacity.
+    /// The fill color, drawn at the area opacity; a translucent color is used as given.
     pub color: ColorSpec,
 }
 

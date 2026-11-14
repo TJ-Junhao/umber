@@ -255,7 +255,7 @@ fn two_category_axes_are_refused_when_the_call_is_made() {
             Marker::Circle,
             SizeSpec::Auto,
             labels(Place::Auto),
-            false,
+            (false, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap_err();
@@ -389,7 +389,7 @@ fn labels_take_the_series_color_at_full_opacity() {
             Marker::Circle,
             SizeSpec::Auto,
             labels(Place::Auto),
-            false,
+            (false, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap();
@@ -1129,7 +1129,7 @@ fn label_options_without_annotate_are_refused() {
                 Marker::Circle,
                 SizeSpec::Auto,
                 labels,
-                false,
+                (false, SizeSpec::Auto),
                 umber_core::MarkRender::Vector,
             )
             .unwrap_err();

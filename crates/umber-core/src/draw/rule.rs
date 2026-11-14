@@ -17,7 +17,7 @@
 
 use super::MarkContext;
 use super::chrome::segment;
-use super::fill::AREA_ALPHA;
+use super::fill::{AREA_ALPHA, fill_color};
 use super::line::line_style;
 use super::mapping::{AxisMap, PlotPoint, axis_position, axis_time, axis_value};
 use crate::geometry::Path;
@@ -345,7 +345,7 @@ fn span_item(
     path.close();
     items.push(Item::Fill {
         path,
-        paint: Paint::Solid(color.scale_alpha(AREA_ALPHA)),
+        paint: Paint::Solid(fill_color(color, AREA_ALPHA)),
         rule: FillRule::NonZero,
     });
 }

@@ -30,10 +30,12 @@ enum Fill {
 }
 
 /// `#D64933` at alpha `alpha`, filled as `fill` says in the theme `theme` under `style`, over
-/// that theme's background: the alpha share first rounds to 8 bits (82 and 41 for the area
-/// share of 255 and 128, 242 and 122 for 0.95, 217 and 109 for 0.85, 230 and 115 for 0.90).
+/// that theme's background: the alpha share first rounds to 8 bits (82 for the area share of
+/// 255, 242 for 0.95, 217 for 0.85, 230 for 0.90). A color that is not opaque is filled as
+/// given, whatever the mark.
 fn expected(theme: &str, alpha: u8, fill: Fill, style: FillStyle) -> Rgba {
     let fill = match (fill, style) {
+        _ if alpha != 255 => Fill::Solid,
         (Fill::Histogram, FillStyle::Gradient) => Fill::Histogram,
         (Fill::Histogram, FillStyle::Solid) => Fill::Solid,
         (fill, _) => fill,

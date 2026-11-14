@@ -163,7 +163,7 @@ fn solid_area_is_flat_at_the_area_alpha() {
         assert_eq!(style.color, color);
         assert_eq!(*fill, crate::Rgba { a: 82, ..color });
     }
-    // A faded color fades the fill with it: 0.32 of its own opacity.
+    // A faded color is the fill's color as given, not 0.32 of its own opacity.
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
         .unwrap()
@@ -188,7 +188,7 @@ fn solid_area_is_flat_at_the_area_alpha() {
         panic!("expected a solid fill under the line")
     };
     assert_eq!(style.color.a, 128);
-    assert_eq!(fill.a, 41);
+    assert_eq!(fill.a, 128);
 }
 
 #[test]

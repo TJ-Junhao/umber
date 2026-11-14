@@ -4,7 +4,7 @@
 use super::MarkContext;
 use super::area::{FadeStop, vertical_fade};
 use super::bar_shape::BarFrame;
-use super::fill::HISTOGRAM_TOP_ALPHA;
+use super::fill::{HISTOGRAM_TOP_ALPHA, fill_share};
 use super::line::{line_items, line_style};
 use super::mapping::axis_value;
 use crate::binning::HistBins;
@@ -54,7 +54,7 @@ pub(super) fn hist_items(
 ///
 /// Under [`FillStyle::Solid`] each series' fill is its solid color. Under [`FillStyle::Gradient`]
 /// it is one vertical gradient in the series color, the same for every series, from 0.95 of the
-/// color's opacity at the top of the tallest stack to transparent at the base, so lower bars look
+/// color's opacity (a translucent color: its own opacity) at the top of the tallest stack to transparent at the base, so lower bars look
 /// dimmer (see [`ramp`]); and each bar whose top lies inside the clip range gets a top edge in
 /// the solid color over the fill, from its top down 1.6 pt or to its bottom, whichever is nearer,
 /// so the edge never paints beyond the bar.
@@ -120,7 +120,7 @@ fn bar_items(
                 let v = frame.clip_y(v);
                 FadeStop {
                     y: frame.plot_y(v),
-                    share: HISTOGRAM_TOP_ALPHA * ramp(v, base, tallest),
+                    share: fill_share(color, HISTOGRAM_TOP_ALPHA) * ramp(v, base, tallest),
                 }
             };
             vertical_fade(color, at(tallest), at(base))

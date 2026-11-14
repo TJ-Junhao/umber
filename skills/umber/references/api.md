@@ -215,6 +215,8 @@ Args:
     y: The y values, one per x value.
     label: The name shown in the legend; an empty string leaves the area out of it.
     color: The area color. ``Color.AUTO`` takes the next color of the theme palette.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
     dash: How the line is stroked.
     width: The line width. ``Size.AUTO`` is the line width of the theme.
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
@@ -270,6 +272,8 @@ Args:
         A band always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
     color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
 
 Returns:
     These axes.
@@ -491,6 +495,8 @@ Args:
     groups: One group of numeric samples per category, in category order.
     label: The legend label; an empty string omits the legend entry.
     color: The box color. ``Color.AUTO`` takes the next palette color.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
 
 Returns:
     These axes.
@@ -528,8 +534,9 @@ coordinates draw nothing; a zero-size point's position still counts in the axis
 domains like any point, and a NaN-size point's does not. Markers draw in data order,
 without downsampling. ``ColorBy`` fills stay opaque and use the scatter's 0.5 pt
 outline: contrasting for fills close to the background in Oklab, fading to the
-background color for more distant fills. Single-color markers keep the theme's marker
-alpha and a 0.8 pt background-colored outline.
+background color for more distant fills. Single-color markers take the theme's marker
+alpha, unless their color is translucent and so used as given, and a 0.8 pt
+background-colored outline.
 Automatic limits fit each whole marker and its outline on the final plot, along each
 axis by the marker shape's own extent, in log space on a log axis and in seconds on a
 time axis, before padding (and rounding on a log axis). Shared axes fit bubbles from
@@ -567,6 +574,8 @@ Args:
         ``ColorBy(values)`` colors each bubble by its value instead, as for
         ``scatter()``; the label entry and size references are then drawn in the
         theme's text color, keeping their usual background-colored outline.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.5)``, fills at exactly
+        that opacity; an opaque color fills at the theme's marker alpha.
     marker: The marker shape; size references are always circles.
 
 Returns:
@@ -1217,6 +1226,8 @@ Args:
     label: The name shown in the legend; an empty string leaves the histogram out of
         it.
     color: The bar color. ``Color.AUTO`` takes the next color of the theme palette.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.5)``, fills at exactly
+        that opacity; an opaque color fills as the theme's fill style does.
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
         one series. Names supply legend labels and palette colors; do not pass
         a non-empty ``label`` or an explicit ``color``. Missing or empty names
@@ -1353,6 +1364,8 @@ Args:
         A reference span always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
     color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
 
 Returns:
     These axes.
@@ -1710,7 +1723,7 @@ Example:
 ### `umber.Axes.scatter`
 
 ```text
-Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False, render: Render=Render.VECTOR) -> Self
+Axes.scatter(self, x: Values[X], y: Values[Y], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[X], Values[X]] | Auto=AUTO, y_error: tuple[Values[Y], Values[Y]] | Auto=AUTO, connect: bool=False, connect_width: Size=Size.AUTO, render: Render=Render.VECTOR) -> Self
 ```
 
 Add a marker at each point ``(x[i], y[i])``.
@@ -1719,7 +1732,8 @@ A point with a NaN coordinate is left out. On a category y axis the scatter is a
 plot: each point sits at the centre of its category's band. ``ColorBy`` fills stay
 opaque and get a 0.5 pt outline that contrasts with the background for nearby fill
 colors, fading to the background color as the Oklab distance grows. Single-color
-markers keep the theme's marker alpha and a 0.8 pt background-colored outline. All the
+markers take the theme's marker alpha, unless their color is translucent and so used as
+given, and a 0.8 pt background-colored outline. All the
 outlines of a scatter are drawn under all its fills, so overlapping markers never cut
 into each other. ``size`` is the diameter of the fill: ``Size.pt(6)`` draws a fill 6 pt
 across, and ``Size.AUTO`` is the theme's marker size less the outline's 0.8 pt (at least
@@ -1753,14 +1767,14 @@ points with a line in input order. They belong to the series: they take its colo
 full opacity (each group's with ``by``, the theme's text color with ``ColorBy``), no
 palette color and no legend entry of their own, and half the line width that ``line()``
 and ``y_error_bars()`` draw with ``Size.AUTO``, so that they stay lighter than the marks
-they accompany; the bars have caps as long as those of ``y_error_bars()``. The line is
-drawn first, then the bars, then the markers. Bars extend automatic limits as standalone
-error bars do, and value labels avoid both the bars and the line. A NaN end skips that
-point's bar, so a bar can go on one point only, and neither end of a skipped bar counts
-in the limits. A point left out, for a NaN coordinate or a NaN ``ColorBy`` value, has no
-marker, no value label and no bar, and breaks the line. With ``by``, each group's line
-joins only its own points. Use ``y_error_bars()`` and ``line()`` only for marks that
-stand on their own.
+they accompany (``connect_width`` sets the width of the line); the bars have caps as
+long as those of ``y_error_bars()``. The line is drawn first, then the bars, then the
+markers. Bars extend automatic limits as standalone error bars do, and value labels
+avoid both the bars and the line. A NaN end skips that point's bar, so a bar can go on
+one point only, and neither end of a skipped bar counts in the limits. A point left
+out, for a NaN coordinate or a NaN ``ColorBy`` value, has no marker, no value label and
+no bar, and breaks the line. With ``by``, each group's line joins only its own points.
+Use ``y_error_bars()`` and ``line()`` only for marks that stand on their own.
 
 ``render=Render.RASTER`` draws the markers, and the line of ``connect``, as one image in
 SVG and PDF output, at the export's ``raster_dpi``, for a scatter so dense that the file
@@ -1777,6 +1791,8 @@ Args:
     color: The marker color. ``Color.AUTO`` takes the next color of the theme palette.
         ``ColorBy(values)`` colors each point by its value instead; its ``cmap``,
         ``scale`` and ``center`` must match the other color-mapped marks of these axes.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.5)``, fills at exactly
+        that opacity; an opaque color fills at the theme's marker alpha.
     marker: The marker shape.
     size: The marker size. ``Size.AUTO`` is the marker size of the theme.
     by: One group name per data row, in first-appearance order; ``AUTO`` draws
@@ -1801,6 +1817,11 @@ Args:
         each per point, in y data units: numbers on a linear or log y axis, times on a
         time y axis. ``AUTO`` draws no bars.
     connect: Whether a line joins the points in input order.
+    connect_width: The width of the line that ``connect`` draws. ``Size.AUTO`` is half
+        the line width of the theme, the width of ``line()`` with ``Size.AUTO`` halved;
+        ``Size.pt(p)`` is ``p`` points and ``Size.times(k)`` is ``k`` times the theme's
+        line width. The error bars keep their own width. Only valid with
+        ``connect=True``.
     render: ``Render.VECTOR`` draws vector shapes; ``Render.RASTER`` one image in SVG
         and PDF output (one per group with ``by``). There is no ``AUTO``.
 
@@ -1835,7 +1856,7 @@ Raises:
         marks of these axes; or if ``format``, ``label_size`` or ``place`` is given
         without ``annotate``, or ``place`` is ``Place.COLUMN`` on a twin axes; or if
         ``x_error`` or ``y_error`` lies along a category axis, or holds numbers along a
-        time axis.
+        time axis; or if ``connect_width`` is given without ``connect=True``.
 
 Example:
 
@@ -1843,6 +1864,9 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes()
 >>> ax = ax.scatter([1, 2, 3], [2.0, 1.0, 3.0], marker=ub.Marker.DIAMOND)
+>>> trail = ub.Figure().add_axes().scatter(
+...     [1, 2, 3], [2.0, 1.0, 3.0], connect=True, connect_width=ub.Size.pt(2.5)
+... )
 >>> ax = ax.scatter([1, 2, 3], [3.0, 2.5, 1.0], color=ub.ColorBy([0.2, 0.5, 0.9]))
 >>> dots = ub.Figure().add_axes(y=ub.Scale.category())
 >>> dots = dots.scatter([78.7, 81.0], ["United States", "Germany"])
@@ -2010,6 +2034,8 @@ Args:
     y: The y values, one per x value.
     label: The legend label; an empty string leaves the series out of the legend.
     color: The stem and marker color. ``Color.AUTO`` takes the next palette color.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.5)``, fills at exactly
+        that opacity; an opaque color fills at the theme's marker alpha.
     marker: The marker shape, drawn as a scatter marker.
     size: The marker diameter. ``Size.AUTO`` uses the theme's marker size. The stem
         width stays at 1.5 points regardless of this size.
@@ -2731,6 +2757,8 @@ Args:
     groups: One group of numeric samples per category, in category order.
     label: The legend label; an empty string omits the legend entry.
     color: The violin color. ``Color.AUTO`` takes the next palette color.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
 
 Returns:
     These axes.
@@ -2824,6 +2852,8 @@ Args:
         A reference span always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
     color: The fill color. ``Color.AUTO`` takes the next color of the theme palette.
+        A translucent color, such as ``Color.hex("#1f77b4").alpha(0.15)``, fills at exactly
+        that opacity; an opaque color fills at the theme's area opacity.
 
 Returns:
     These axes.
@@ -7695,7 +7725,7 @@ Example:
 ## `umber.scatter`
 
 ```text
-scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False, render: Render=Render.VECTOR) -> Axes[float, float]
+scatter(x: Values[float], y: Values[float], *, label: str='', color: Color | ColorBy=Color.AUTO, marker: Marker=Marker.CIRCLE, size: Size=Size.AUTO, theme: Theme=Theme.PIGMENT, by: Values[str] | Auto=AUTO, annotate: bool=False, format: TickFormat | Auto=AUTO, label_size: Size=Size.AUTO, place: Place=Place.AUTO, x_error: tuple[Values[float], Values[float]] | Auto=AUTO, y_error: tuple[Values[float], Values[float]] | Auto=AUTO, connect: bool=False, connect_width: Size=Size.AUTO, render: Render=Render.VECTOR) -> Axes[float, float]
 ```
 
 Plot a marker at each point on a new figure and return its axes.
@@ -7726,6 +7756,8 @@ Args:
     y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
         ``Axes.scatter()``.
     connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
+    connect_width: The width of the joining line, as in ``Axes.scatter()``; only with
+        ``connect=True``. ``Size.AUTO`` is half the line width of the theme.
     render: ``Render.RASTER`` draws the markers as one image in SVG and PDF output, as in
         ``Axes.scatter()``.
 

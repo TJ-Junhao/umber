@@ -246,7 +246,7 @@ fn each_group_has_its_own_sub_column() {
             Marker::Circle,
             SizeSpec::Auto,
             column_labels(fixed(1)),
-            false,
+            (false, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap();
@@ -903,7 +903,7 @@ fn a_column_on_twin_axes_is_refused() {
             Marker::Circle,
             SizeSpec::Auto,
             column_labels(None),
-            false,
+            (false, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap_err();
