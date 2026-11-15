@@ -23,6 +23,7 @@ FINITE_HINT = "pass a finite number."
 SWAP_HINT = "swap the two values."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
 LINEAR_X_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
+BETWEEN_HINT = "pass Between(a, b), with a and b two neighbouring categories."
 LINEAR, CATEGORY = 0, 2
 OUTLINES = 0
 AUTO = (0, 0, 1.0)
@@ -376,9 +377,10 @@ ERRORS: list[tuple[Any, str, tuple[object, ...], type, str, object, object]] = [
         "vspan",
         (1, 2),
         ub.UsageError,
-        "Axes.vspan(): this is a category axis; spans along x apply to linear and log axes only.",
-        None,
-        "vspan needs a numeric x axis; use vline on a category.",
+        "Axes.vspan(): low is a number but the x axis is a category axis; place it between two "
+        "categories instead.",
+        "low",
+        BETWEEN_HINT,
     ),
 ]
 
@@ -413,15 +415,11 @@ def test_errors_leave_the_figure_unchanged(
         ("ax.hspan(low=5, high=2)", "high=2"),
         ("ax.vspan(float('nan'), 2)", "float('nan')"),
         ("ax.hline(1.0, color='red')", "color='red'"),
-        ("ub.Figure().add_axes(x=ub.Scale.category()).vspan(0, 1)", ""),
+        ("ub.Figure().add_axes(x=ub.Scale.category()).vspan(0, 1)", "0"),
     ],
 )
 def test_errors_highlight_the_argument(tmp_path: Path, call: str, argument: str) -> None:
     err = _raised(tmp_path, call, "ax = ub.Figure().add_axes()")
-    if not argument:
-        # No single argument is at fault: the note holds the hint only.
-        assert _notes(err) == ["hint: vspan needs a numeric x axis; use vline on a category."]
-        return
     assert _notes(err)[0] == _marked(call, argument)
 
 

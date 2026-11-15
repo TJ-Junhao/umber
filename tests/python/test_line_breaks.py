@@ -10,7 +10,10 @@ import pytest
 import umber as ub
 from umber._errors import details
 
-LINE_BREAK_HINT = "line breaks are supported in titles, subtitles, captions, text() and annotate()."
+LINE_BREAK_HINT = (
+    "line breaks are supported in titles, subtitles, captions, text(), annotate() and the "
+    "categories of a category axis."
+)
 SVG = "{http://www.w3.org/2000/svg}"
 BAD = "Hours\nUTC"
 """Text of one line that holds a line break at index 5."""
@@ -141,27 +144,11 @@ ONE_LINE: list[tuple[str, Callable[[], object], type[Exception], str, str, str]]
     ),
     (
         "Axes.line()",
-        lambda: _category_axes().line(["a", BAD], [1, 2]),
-        ub.DataError,
-        "x[1] holds a line break at index 5; category names are one line.",
-        "x",
-        '["a", BAD]',
-    ),
-    (
-        "Axes.line()",
         lambda: ub.Figure().add_axes().line([0, 1], [1, 2], by=["a", BAD]),
         ub.DataError,
         "by[1] holds a line break at index 5; group names are one line.",
         "by",
         'by=["a", BAD]',
-    ),
-    (
-        "Axes.bar()",
-        lambda: _category_axes().bar(["a", BAD], [1, 2]),
-        ub.DataError,
-        "categories[1] holds a line break at index 5; category names are one line.",
-        "categories",
-        '["a", BAD]',
     ),
     (
         "Axes.xticks_labeled()",
@@ -306,7 +293,12 @@ def test_text_of_one_line_refuses_control_characters(
             ub.StyleError,
             "label",
         ),
-        ("Axes.bar()", lambda: _category_axes().bar([bad], [1]), ub.DataError, "categories[0]"),
+        (
+            "PieAxes.pie()",
+            lambda: ub.Figure().add_pie_axes().pie([bad], [1]),
+            ub.DataError,
+            "categories[0]",
+        ),
         (
             "Axes.yticks_labeled()",
             lambda: ub.Figure().add_axes().yticks_labeled([0], [bad]),
@@ -330,11 +322,13 @@ def test_text_of_one_line_refuses_control_characters(
 
 
 def test_names_in_numpy_arrays_are_checked_as_names() -> None:
-    names = np.array(["North", "South\nEast"])
+    names = np.array(["North", "South\tEast"])
     err = _raised(ub.DataError, lambda: _category_axes().bar(names, [1, 2]))
     assert str(err) == (
-        "Axes.bar(): categories[1] holds a line break at index 5; category names are one line."
+        "Axes.bar(): categories[1] holds U+0009 (a tab) at index 5; text cannot hold control "
+        "characters."
     )
+    _category_axes().bar(np.array(["North", "South\nEast"]), [1, 2])
 
 
 def test_blank_lines_are_kept_and_an_empty_title_draws_nothing() -> None:

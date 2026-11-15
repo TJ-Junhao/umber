@@ -1,7 +1,7 @@
 //! Equal aspect on the planned layout: equal scales, the plot in its room, what follows it, the
 //! fits that change limits, grids and the refusals.
 
-use crate::layout::{Area, Label, Layout};
+use crate::layout::{Area, Layout, TextBlock};
 use crate::model::Figure;
 use crate::pipeline::{plan_figure, try_plan_panels};
 use crate::resolve::Resolved;
@@ -197,8 +197,8 @@ fn ticks_and_axis_labels_follow_the_plot() {
                 layout.xlabel.as_ref().unwrap().y - layout.plot.bottom(),
                 layout.ylabel.as_ref().unwrap().x - layout.plot.x,
                 layout.ylabel.as_ref().unwrap().y - layout.plot.y,
-                layout.y_tick_labels[0].x - layout.plot.x,
-                layout.x_tick_labels[0].y - layout.plot.bottom(),
+                layout.y_tick_labels[0].first().x - layout.plot.x,
+                layout.x_tick_labels[0].first().y - layout.plot.bottom(),
             )
         };
         let (a, b) = (x_of(&plain), x_of(&equal));
@@ -824,7 +824,7 @@ fn another_panel_keeps_its_layout_when_tick_labels_change() {
         layout
             .y_tick_labels
             .iter()
-            .map(Label::width)
+            .map(TextBlock::width)
             .fold(0.0, f64::max)
     };
     let plain = try_plan_panels(&automatic_pair(width, height, [false; 2]), lib()).unwrap();
@@ -837,7 +837,7 @@ fn another_panel_keeps_its_layout_when_tick_labels_change() {
             .y_tick_labels
             .iter()
             .chain(&layout.x_tick_labels)
-            .map(|label| (label.text.clone(), label.x, label.y))
+            .map(|label| (label.text.clone(), label.first().x, label.first().y))
             .collect::<Vec<_>>()
     };
     assert_eq!(labels(&planned[0].1), labels(&plain[0].1));
@@ -932,7 +932,7 @@ fn tick_labels_that_grow_stay_in_their_bounds() {
         layout
             .y_tick_labels
             .iter()
-            .map(Label::width)
+            .map(TextBlock::width)
             .fold(0.0, f64::max)
     };
     assert!(widest(layout) > widest(&plain[0].1));
@@ -943,7 +943,11 @@ fn tick_labels_that_grow_stay_in_their_bounds() {
     );
     assert_close(layout.plot.right(), plain[0].1.plot.right());
     for label in &layout.y_tick_labels {
-        assert!(label.x >= crate::layout::PADDING - 1e-9, "{}", label.x);
+        assert!(
+            label.first().x >= crate::layout::PADDING - 1e-9,
+            "{}",
+            label.first().x
+        );
     }
     assert_eq!(planned[1].1.plot, plain[1].1.plot);
     // The title keeps its place over the plot.
@@ -969,7 +973,11 @@ fn signed_tick_labels_stay_out_of_the_padding() {
         try_plan_panels(&left_and_right((12.0, 4.0), true, left, plain_line), lib()).unwrap();
     assert_equal_scales(&planned[0].0, &planned[0].1);
     for label in &planned[0].1.y_tick_labels {
-        assert!(label.x >= crate::layout::PADDING - 1e-9, "{}", label.x);
+        assert!(
+            label.first().x >= crate::layout::PADDING - 1e-9,
+            "{}",
+            label.first().x
+        );
     }
     assert_eq!(planned[1].1.plot, plain[1].1.plot);
 }
@@ -1197,8 +1205,8 @@ fn a_plot_narrower_than_its_labels_room_keeps_them_on_the_canvas() {
     let (resolved, layout) = plan_figure(&f, (0, 0), lib());
     assert_equal_scales(&resolved, &layout);
     let widest = layout.x_tick_labels.first().unwrap();
-    assert!(widest.x >= crate::layout::X_LABEL_EDGE_GAP - 1e-9);
-    assert!(widest.x + widest.width() <= 432.0 - crate::layout::X_LABEL_EDGE_GAP + 1e-9);
+    assert!(widest.first().x >= crate::layout::X_LABEL_EDGE_GAP - 1e-9);
+    assert!(widest.first().x + widest.width() <= 432.0 - crate::layout::X_LABEL_EDGE_GAP + 1e-9);
 }
 
 #[test]

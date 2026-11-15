@@ -28,7 +28,8 @@ use super::mark::{AreaOptions, LineOptions, Mark, ScatterGroup, ScatterOptions};
 use super::mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 use super::point_labels::PointLabels;
 use super::rule::{
-    AxisValue, HLineMark, RuleOptions, SpanBounds, SpanMark, SpanOptions, VLineMark,
+    AxisValue, Between, HLineMark, RuleOptions, RulePosition, SpanBounds, SpanMark, SpanOptions,
+    VLineMark,
 };
 use super::share::{ExplicitLimits, GivenLimits, LimitEnd, Setting, SharedAxis};
 use super::stacked_area::StackedAreaMark;
@@ -39,14 +40,15 @@ use super::triangles::{
     TRIPLOT_CONTEXT, TricontourMark, TripcolorMark, TripcolorOptions, TriplotMark, TriplotOptions,
 };
 use super::validation::{
-    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, check_band,
-    check_equal_aspect_axis, check_format_axis, check_highlight_axis, check_limits,
-    check_no_time_x, check_numeric_y, check_reference_value, check_series_y, check_span,
-    check_step_order, check_tick_axis, check_time_error_bars, check_time_limits, check_time_span,
-    check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
+    AREA_GAP_HINT, LINE_GAP_HINT, REFERENCE_LINE, SCATTER_GAP_HINT, between_needed, check_band,
+    check_between_axis, check_equal_aspect_axis, check_format_axis, check_highlight_axis,
+    check_limits, check_no_time_x, check_numeric_y, check_reference_value, check_series_y,
+    check_span, check_step_order, check_tick_axis, check_time_error_bars, check_time_limits,
+    check_time_span, check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
 use super::validation::{
     check_band_axes, check_limit_end, check_not_two_categories, check_time_limit_end,
+    check_x_beside_category_rows,
 };
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
@@ -2243,7 +2245,9 @@ impl<'a> AxesMut<'a> {
     /// Adds a horizontal reference line across the whole plot at `y`. It is drawn above all data
     /// marks, and `y` extends the automatic y domain; explicit y limits clip it like any mark.
     ///
-    /// Errors leave the axes unchanged. They are `Error::Data`: `y` is not finite, exceeds
+    /// Errors leave the axes unchanged. `Error::Usage`, naming `y`, on a category y axis, where
+    /// a line sits between two categories ([`AxesMut::hline_between`]), and on a time y axis
+    /// ([`AxesMut::hline_time`]). Otherwise `Error::Data`: `y` is not finite, exceeds
     /// [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude, or is not positive on a log axis.
     ///
     /// # Examples
@@ -2263,12 +2267,19 @@ impl<'a> AxesMut<'a> {
     pub fn hline(&mut self, y: f64, options: RuleOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.hline()";
         let axes = self.axes_mut();
+        if axes.y == ScaleKind::Category {
+            check_x_beside_category_rows(CONTEXT, axes.x)?;
+            return Err(between_needed(CONTEXT, SharedAxis::Y, "y"));
+        }
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
         check_reference_value(CONTEXT, "y", REFERENCE_LINE, y, y_transform)?;
         axes.add_marks(
             CONTEXT,
             LabelSource::Options,
-            [Mark::HLine(HLineMark::new(AxisValue::Number(y), options))],
+            [Mark::HLine(HLineMark::new(
+                RulePosition::At(AxisValue::Number(y)),
+                options,
+            ))],
         )?;
         Ok(self)
     }
@@ -2316,7 +2327,7 @@ impl<'a> AxesMut<'a> {
         axes.add_marks(
             CONTEXT,
             LabelSource::Options,
-            [Mark::VLine(VLineMark::new(x, options))],
+            [Mark::VLine(VLineMark::new(RulePosition::At(x), options))],
         )?;
         Ok(self)
     }
@@ -2325,10 +2336,11 @@ impl<'a> AxesMut<'a> {
     /// across the whole plot, filled at the area opacity. It is drawn below all data marks, and
     /// both values extend the automatic y domain; explicit y limits clip it.
     ///
-    /// Errors leave the axes unchanged. `Error::Data` when `low` or `high`, checked in that
-    /// order, is not finite, exceeds [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude or is
-    /// not positive on a log axis; then `Error::Style`, parameter `high`, when `low` is not
-    /// below `high`.
+    /// Errors leave the axes unchanged. `Error::Usage` on a category y axis, naming `low`, where
+    /// a span runs between points between categories ([`AxesMut::hspan_between`]), and on a
+    /// time y axis. Otherwise `Error::Data` when `low` or `high`, checked in that order, is not
+    /// finite, exceeds [`MAX_MAGNITUDE`](crate::MAX_MAGNITUDE) in magnitude or is not positive
+    /// on a log axis; then `Error::Style`, parameter `high`, when `low` is not below `high`.
     ///
     /// # Examples
     ///
@@ -2346,6 +2358,10 @@ impl<'a> AxesMut<'a> {
     pub fn hspan(&mut self, low: f64, high: f64, options: SpanOptions) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.hspan()";
         let axes = self.axes_mut();
+        if axes.y == ScaleKind::Category {
+            check_x_beside_category_rows(CONTEXT, axes.x)?;
+            return Err(between_needed(CONTEXT, SharedAxis::Y, "low"));
+        }
         let y = check_numeric_y(CONTEXT, axes.y)?;
         check_span(CONTEXT, (low, high), y)?;
         axes.add_marks(
@@ -2363,11 +2379,12 @@ impl<'a> AxesMut<'a> {
     /// the full height of the plot, or only down to the baseline when that sits at the y axis's
     /// lower limit (see [`AxesMut::vline`]), filled at the area opacity. It is drawn below all data marks, and both
     /// values extend the automatic x domain; explicit x limits clip it. A span needs a numeric
-    /// x axis: on a category x axis use [`AxesMut::vline`]. On a category y axis it runs the
-    /// full height, as [`AxesMut::vline`] does.
+    /// x axis: on a category x axis use [`AxesMut::vspan_between`]. On a category y axis it runs
+    /// the full height, as [`AxesMut::vline`] does.
     ///
-    /// Errors leave the axes unchanged. `Error::Usage` on a category x axis, naming `x` when the
-    /// y axis is a category axis too; otherwise as [`AxesMut::hspan`], for the x axis.
+    /// Errors leave the axes unchanged. `Error::Usage` on two category axes, naming `x`, and on a
+    /// category x axis, naming `low`, where a span runs between points between categories
+    /// ([`AxesMut::vspan_between`]); otherwise as [`AxesMut::hspan`], for the x axis.
     ///
     /// # Examples
     ///
@@ -2397,11 +2414,7 @@ impl<'a> AxesMut<'a> {
             .with_hint("use a linear or log x axis."));
         }
         let Some(transform) = axes.x.transform() else {
-            return Err(Error::usage(
-                CONTEXT,
-                "this is a category axis; spans along x apply to linear and log axes only.",
-            )
-            .with_hint("vspan needs a numeric x axis; use vline on a category."));
+            return Err(between_needed(CONTEXT, SharedAxis::X, "low"));
         };
         check_span(CONTEXT, (low, high), transform)?;
         axes.add_marks(
@@ -2409,6 +2422,189 @@ impl<'a> AxesMut<'a> {
             LabelSource::Options,
             [Mark::VSpan(SpanMark::new(
                 SpanBounds::Numbers([low, high]),
+                options,
+            ))],
+        )?;
+        Ok(self)
+    }
+
+    /// Adds a vertical reference line on a category x axis between the categories of `x`: halfway
+    /// between the centres of their bands, as a divider between two neighbouring categories. It
+    /// is drawn as [`AxesMut::vline`] draws a line at a category, and like a category name it
+    /// does not extend the axis.
+    ///
+    /// Whether the two names are categories of the axis, and neighbours there, is known only
+    /// when the figure is rendered: [`Figure::to_scene`](crate::Figure::to_scene),
+    /// [`Figure::to_png`](crate::Figure::to_png) and [`Figure::to_svg`](crate::Figure::to_svg)
+    /// fail in their own context with `Error::Data` for a name that is not a category of the
+    /// axis, and with `Error::Usage` for two categories that are not neighbours.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` on two category axes, naming `x` as for
+    /// [`AxesMut::vline`], and on a linear, log or time x axis, naming `x`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{BarOptions, RuleOptions};
+    /// use umber_core::{Between, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let years = vec!["2013".to_owned(), "2014".to_owned()];
+    /// axes.bar(years, &[3.0, 5.0], BarOptions::default())?;
+    /// axes.vline_between(Between::new("2013", "2014")?, RuleOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn vline_between(&mut self, x: Between, options: RuleOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.vline()";
+        let axes = self.axes_mut();
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+        check_between_axis(CONTEXT, SharedAxis::X, "x", axes.x)?;
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::VLine(VLineMark::new(
+                RulePosition::Between(x),
+                options,
+            ))],
+        )?;
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference line on a category y axis between the categories of `y`, as
+    /// [`AxesMut::vline_between`] adds a vertical one on a category x axis. The x axis beside it
+    /// is linear, log or time, such as the time axis of events in rows. The line runs the full
+    /// width of the plot.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` naming `y` unless the y axis is a
+    /// category axis, then naming `x` when the x axis is a category axis too. At render, as for
+    /// [`AxesMut::vline_between`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{BarOptions, RuleOptions};
+    /// use umber_core::{Between, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// let teams = vec!["North".to_owned(), "South".to_owned()];
+    /// axes.bar(teams, &[3.0, 5.0], BarOptions::default())?;
+    /// axes.hline_between(Between::new("North", "South")?, RuleOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hline_between(&mut self, y: Between, options: RuleOptions) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hline()";
+        let axes = self.axes_mut();
+        check_between_axis(CONTEXT, SharedAxis::Y, "y", axes.y)?;
+        check_x_beside_category_rows(CONTEXT, axes.x)?;
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HLine(HLineMark::new(
+                RulePosition::Between(y),
+                options,
+            ))],
+        )?;
+        Ok(self)
+    }
+
+    /// Adds a vertical reference span on a category x axis from the point between the
+    /// categories of `low` to the point between those of `high`: it covers the categories
+    /// between the two dividers whole. It is drawn as [`AxesMut::vspan`] draws a span, and does
+    /// not extend the axis.
+    ///
+    /// The names are checked when the figure is rendered, as for [`AxesMut::vline_between`];
+    /// then `low` must come before `high` along the axis, or rendering fails with
+    /// `Error::Style`.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` on two category axes, naming `x`, and on
+    /// a linear, log or time x axis, naming `low`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{BarOptions, SpanOptions};
+    /// use umber_core::{Between, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Category, ScaleKind::Linear)?;
+    /// let years: Vec<String> = ["2019", "2020", "2021", "2022"].map(String::from).into();
+    /// axes.bar(years, &[3.0, 1.0, 2.0, 4.0], BarOptions::default())?;
+    /// let (low, high) = (Between::new("2019", "2020")?, Between::new("2021", "2022")?);
+    /// axes.vspan_between(low, high, SpanOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn vspan_between(
+        &mut self,
+        low: Between,
+        high: Between,
+        options: SpanOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.vspan()";
+        let axes = self.axes_mut();
+        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+        check_between_axis(CONTEXT, SharedAxis::X, "low", axes.x)?;
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::VSpan(SpanMark::new(
+                SpanBounds::Between([low, high]),
+                options,
+            ))],
+        )?;
+        Ok(self)
+    }
+
+    /// Adds a horizontal reference span on a category y axis between two points between
+    /// categories, as [`AxesMut::vspan_between`] adds a vertical one on a category x axis. The x
+    /// axis beside it is linear, log or time. The span runs the full width of the plot.
+    ///
+    /// # Errors
+    ///
+    /// Errors leave the axes unchanged: `Error::Usage` naming `low` unless the y axis is a
+    /// category axis, then naming `x` when the x axis is a category axis too. At render, as for
+    /// [`AxesMut::vspan_between`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use umber_core::figure::{BarOptions, SpanOptions};
+    /// use umber_core::{Between, Figure, ScaleKind, Theme};
+    ///
+    /// let mut figure = Figure::new(6.0, 4.0, Theme::pigment())?;
+    /// let mut axes = figure.add_axes(ScaleKind::Linear, ScaleKind::Category)?;
+    /// let rows: Vec<String> = ["a", "b", "c"].map(String::from).into();
+    /// axes.bar(rows, &[3.0, 1.0, 2.0], BarOptions::default())?;
+    /// let (low, high) = (Between::new("a", "b")?, Between::new("b", "c")?);
+    /// axes.hspan_between(low, high, SpanOptions::default())?;
+    /// assert_eq!(axes.marks().len(), 2);
+    /// # Ok::<(), umber_core::Error>(())
+    /// ```
+    pub fn hspan_between(
+        &mut self,
+        low: Between,
+        high: Between,
+        options: SpanOptions,
+    ) -> Result<&mut Self> {
+        const CONTEXT: &str = "Axes.hspan()";
+        let axes = self.axes_mut();
+        check_between_axis(CONTEXT, SharedAxis::Y, "low", axes.y)?;
+        check_x_beside_category_rows(CONTEXT, axes.x)?;
+        axes.add_marks(
+            CONTEXT,
+            LabelSource::Options,
+            [Mark::HSpan(SpanMark::new(
+                SpanBounds::Between([low, high]),
                 options,
             ))],
         )?;
@@ -3231,7 +3427,10 @@ impl<'a> AxesMut<'a> {
         axes.add_marks(
             CONTEXT,
             LabelSource::Options,
-            [Mark::HLine(HLineMark::new(AxisValue::Time(y), options))],
+            [Mark::HLine(HLineMark::new(
+                RulePosition::At(AxisValue::Time(y)),
+                options,
+            ))],
         )?;
         Ok(self)
     }

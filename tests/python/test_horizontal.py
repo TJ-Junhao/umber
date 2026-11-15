@@ -133,8 +133,6 @@ def test_horizontal_values_are_checked_on_the_x_axis() -> None:
         ("step", ([0.0, 1.0], [1.0, 2.0])),
         ("stem", ([0.0, 1.0], [1.0, 2.0])),
         ("hist", ([1.0, 2.0],)),
-        ("hline", (1.0,)),
-        ("hspan", (0.0, 1.0)),
         ("y_error_bars", ([0.0], [0.0], [1.0])),
     ],
 )
@@ -151,6 +149,27 @@ def test_marks_without_a_horizontal_form_refuse_a_category_y(
         f"{context}: y is a category scale; {context} needs a numeric y axis."
     )
     assert details(caught.value) == ("y", NUMERIC_Y_HINT)
+    assert ax.figure.to_svg() == before
+
+
+@pytest.mark.parametrize(("name", "arguments"), [("hline", (1.0,)), ("hspan", (0.0, 1.0))])
+def test_reference_lines_and_spans_sit_between_categories_on_a_category_y(
+    name: str, arguments: tuple[object, ...]
+) -> None:
+    ax = _horizontal()
+    before = ax.figure.to_svg()
+    method: Callable[..., object] = getattr(ax, name)
+    with pytest.raises(ub.UsageError) as caught:
+        method(*arguments)
+    parameter = "y" if name == "hline" else "low"
+    assert str(caught.value) == (
+        f"Axes.{name}(): {parameter} is a number but the y axis is a category axis; place it "
+        "between two categories instead."
+    )
+    assert details(caught.value) == (
+        parameter,
+        "pass Between(a, b), with a and b two neighbouring categories.",
+    )
     assert ax.figure.to_svg() == before
 
 

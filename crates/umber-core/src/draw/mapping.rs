@@ -13,7 +13,7 @@
 
 use crate::geometry::{Path, PathVerb, Point};
 use crate::layout::Area;
-use crate::model::{AxisData, AxisValue, SharedValues};
+use crate::model::{AxisData, AxisValue, Between, RulePosition, SharedValues};
 use crate::resolve::{AxisScale, NormalizedPos, Orientation, ResolvedAxis};
 use crate::scale::log_offset;
 use crate::{ContinuousScale, Instant, Transform};
@@ -312,6 +312,29 @@ pub(super) fn axis_position(axis: &ResolvedAxis, v: &AxisValue) -> f64 {
             }
             AxisScale::Continuous(_) | AxisScale::Time(_) => f64::NAN,
         },
+    }
+}
+
+/// The axis-space position of the reference line position `at` on `axis`: a value as
+/// [`axis_position`] maps it, and a point between two categories as [`between_position`] does.
+pub(super) fn rule_position(axis: &ResolvedAxis, at: &RulePosition) -> f64 {
+    match at {
+        RulePosition::At(value) => axis_position(axis, value),
+        RulePosition::Between(between) => between_position(axis, between),
+    }
+}
+
+/// The axis-space position of the point between two categories on `axis`: halfway between the
+/// centres of their bands; NaN on an axis without categories or for a name it does not have.
+pub(super) fn between_position(axis: &ResolvedAxis, between: &Between) -> f64 {
+    match &axis.scale {
+        AxisScale::Category(scale) => {
+            let [first, second] = between
+                .names()
+                .map(|name| scale.index_of(name).map_or(f64::NAN, |i| scale.center(i)));
+            (first + second) / 2.0
+        }
+        AxisScale::Continuous(_) | AxisScale::Time(_) => f64::NAN,
     }
 }
 

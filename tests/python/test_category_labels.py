@@ -43,3 +43,42 @@ def test_explicit_tick_labels_remain_crowded_and_complete() -> None:
         list(range(100)), explicit
     )
     assert labels(figure) == explicit + explicit
+
+
+def text_nodes(figure: ub.Figure) -> dict[str, tuple[float, float, str]]:
+    """Each editable SVG text by its content: its x, its baseline and its text-anchor."""
+    root = ElementTree.fromstring(figure.to_svg(text=ub.SvgText.EDITABLE))
+    return {
+        node.text or "": (
+            float(node.get("x", "nan")),
+            float(node.get("y", "nan")),
+            node.get("text-anchor", "start"),
+        )
+        for node in root.iter("{http://www.w3.org/2000/svg}text")
+    }
+
+
+def test_a_category_name_breaks_into_lines_under_its_tick() -> None:
+    figure = ub.Figure(5, 3)
+    figure.add_axes(x=ub.Scale.category()).bar(["2025", "2026\n(to Oct)"], [4.0, 3.0])
+    nodes = text_nodes(figure)
+    assert "2026\n(to Oct)" not in nodes
+    first, second = nodes["2026"], nodes["(to Oct)"]
+    # The second line sits one line pitch, 1.2 tick label sizes, below the first; both lines
+    # share the first line's baseline row with the label of one line.
+    assert second[1] > first[1]
+    assert first[1] == pytest.approx(nodes["2025"][1])
+
+
+def test_a_category_axis_of_several_line_names_leaves_less_room_for_the_plot() -> None:
+    def plot_bottom(names: list[str]) -> float:
+        figure = ub.Figure(5, 3)
+        figure.add_axes(x=ub.Scale.category()).bar(names, [1.0] * len(names)).yticks([0, 1])
+        return text_nodes(figure)["0"][1]
+
+    assert plot_bottom(["a", "b\nc"]) < plot_bottom(["a", "b"])
+
+
+def test_numeric_tick_labels_stay_one_line() -> None:
+    with pytest.raises(ub.DataError, match="tick labels are one line"):
+        ub.Figure().add_axes().xticks_labeled([0, 1], ["low", "high\nend"])

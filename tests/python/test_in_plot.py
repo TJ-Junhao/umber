@@ -288,3 +288,29 @@ def test_align_without_text_at_is_a_usage_error() -> None:
         call(ax.annotate)("n", (2, 2), text_at=ub.InPlot(0.8, 0.8), align="right")
     info = details(wrong.value)
     assert info is not None and info[0] == "align"
+
+
+# ``pickle.dumps(ub.InPlot(0.25, 0.75), protocol)`` for protocols 0 to 5, made with umber 0.5.0,
+# before ``InPlot`` moved to another private module. Pickles name the class ``umber.InPlot``,
+# so they keep loading wherever the class is defined.
+PICKLED_BY_0_5_0 = [
+    b"cumber\nInPlot\np0\n(F0.25\nF0.75\ntp1\nRp2\n.",
+    b"cumber\nInPlot\nq\x00(G?\xd0\x00\x00\x00\x00\x00\x00G?\xe8\x00\x00\x00\x00\x00\x00"
+    b"tq\x01Rq\x02.",
+    b"\x80\x02cumber\nInPlot\nq\x00G?\xd0\x00\x00\x00\x00\x00\x00G?\xe8\x00\x00\x00\x00\x00\x00"
+    b"\x86q\x01Rq\x02.",
+    b"\x80\x03cumber\nInPlot\nq\x00G?\xd0\x00\x00\x00\x00\x00\x00G?\xe8\x00\x00\x00\x00\x00\x00"
+    b"\x86q\x01Rq\x02.",
+    b"\x80\x04\x95*\x00\x00\x00\x00\x00\x00\x00\x8c\x05umber\x94\x8c\x06InPlot\x94\x93\x94"
+    b"G?\xd0\x00\x00\x00\x00\x00\x00G?\xe8\x00\x00\x00\x00\x00\x00\x86\x94R\x94.",
+    b"\x80\x05\x95*\x00\x00\x00\x00\x00\x00\x00\x8c\x05umber\x94\x8c\x06InPlot\x94\x93\x94"
+    b"G?\xd0\x00\x00\x00\x00\x00\x00G?\xe8\x00\x00\x00\x00\x00\x00\x86\x94R\x94.",
+]
+
+
+@pytest.mark.parametrize("data", PICKLED_BY_0_5_0, ids=[f"protocol-{p}" for p in range(6)])
+def test_positions_pickled_by_umber_0_5_0_still_load(data: bytes) -> None:
+    restored: object = pickle.loads(data)
+    assert restored == ub.InPlot(0.25, 0.75)
+    protocol = PICKLED_BY_0_5_0.index(data)
+    assert pickle.dumps(ub.InPlot(0.25, 0.75), protocol) == data

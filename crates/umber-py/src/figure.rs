@@ -50,6 +50,7 @@ use umber_core::{TriValues, Triangles, TripcolorOptions, TriplotOptions};
 use crate::color::{ColorArg, cmap_choice, color_spec, color_transform, point_color};
 use crate::enums::{enum_value, render_choice};
 use crate::errors::{core_error, group_error, internal_value};
+use crate::position::between;
 use crate::scale::scale_kind;
 use crate::size::{SizeArg, size_spec};
 use crate::theme::Theme;
@@ -1452,6 +1453,100 @@ impl Figure {
         };
         self.axes(row, col)?
             .vspan(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference line on a category x axis between the categories `x`, a pair of
+    /// names.
+    fn vline_between(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        x: (String, String),
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let x = between(x)?;
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .vline_between(x, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference line on a category y axis between the categories `y`, a pair
+    /// of names.
+    fn hline_between(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        y: (String, String),
+        label: String,
+        color: ColorArg,
+        dash: i64,
+        width: SizeArg,
+    ) -> PyResult<()> {
+        let y = between(y)?;
+        let options = RuleOptions {
+            label,
+            color: color_spec(color)?,
+            dash: enum_value::<Dash>(dash)?,
+            width: size_spec(width)?,
+        };
+        self.axes(row, col)?
+            .hline_between(y, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a vertical reference span on a category x axis between the points `low` and `high`,
+    /// each a pair of names.
+    fn vspan_between(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        low: (String, String),
+        high: (String, String),
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let (low, high) = (between(low)?, between(high)?);
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .vspan_between(low, high, options)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Adds a horizontal reference span on a category y axis between the points `low` and
+    /// `high`, each a pair of names.
+    fn hspan_between(
+        &mut self,
+        row: AxesRow,
+        col: i64,
+        low: (String, String),
+        high: (String, String),
+        label: String,
+        color: ColorArg,
+    ) -> PyResult<()> {
+        let (low, high) = (between(low)?, between(high)?);
+        let options = SpanOptions {
+            label,
+            color: color_spec(color)?,
+        };
+        self.axes(row, col)?
+            .hspan_between(low, high, options)
             .map(drop)
             .map_err(core_error)
     }

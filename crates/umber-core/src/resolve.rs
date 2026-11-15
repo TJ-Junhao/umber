@@ -57,7 +57,9 @@ use crate::model::{
     AreaMark, AxisData, AxisTicks, BarGroupMark, BarMark, ExplicitTicks, LineMark, Mark,
     ScatterMark, SeriesView, SharedValues, StepMark,
 };
-use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
+use crate::model::{
+    AxisValue, BandMark, Figure, HLineMark, RuleOptions, RulePosition, SpanMark, VLineMark,
+};
 use crate::model::{ContinuousGiven, ExplicitLimits, GivenLimits, LimitEnd, TimeGiven};
 use crate::model::{EcdfMark, HistStyle, KdeMark};
 use crate::model::{Edge, holds};
@@ -991,68 +993,191 @@ fn categories<'a, 'm: 'a>(
     CategoryScale::from_first_appearance(marks.flat_map(move |mark| mark.categories(which)))
 }
 
-/// Checks, before `figure` is rendered in `context`, that every vertical reference line on a
-/// category x axis sits at a category of its axes: one that a mark of the same axes names. A
-/// line cannot add a category, and the model cannot know the categories of marks added later,
-/// so this is the one place where an unknown name is found. The first line, in the row-major
-/// order of the axes' top-left cells and the order of the marks, whose name is not a category is
-/// the error: `Error::Data` in `context`, without a parameter, since the call that renders has
-/// no `x`. On a grid of more than one cell the message starts with the axes' top-left cell, as
-/// the layout errors of [`pipeline::scene`](crate::pipeline) do.
+/// Checks, before `figure` is rendered in `context`, the positions of the reference marks that
+/// name categories: a vertical line at a category, and the lines and span ends placed between
+/// two categories ([`Between`](crate::Between)). A reference mark cannot add a category, and the
+/// model cannot know the categories of marks added later, so this is where they are checked
+/// against the categories of their axis, which the marks of every axes sharing it name.
+///
+/// The first bad position, in the row-major order of the axes' top-left cells, x before y, then
+/// in the order of the marks, is the error, in `context` and without a parameter, since the
+/// call that renders has none: `Error::Data` for a name that is not a category; `Error::Usage`
+/// for a [`Between`](crate::Between) whose two categories are not neighbours; `Error::Style`
+/// for a span whose `low` does not come before its `high`. On a grid of more than one cell the
+/// message starts with the axes' top-left cell, as the layout errors of
+/// [`pipeline::scene`](crate::pipeline) do.
 pub(crate) fn check_references(figure: &Figure, context: &'static str) -> Result<()> {
     for axes in figure.all_cartesian_axes() {
-        if axes.x_scale() != ScaleKind::Category {
-            continue;
-        }
-        let mut lines = axes.marks().iter().filter_map(|mark| match mark {
-            Mark::VLine(line) => match line.x() {
-                AxisValue::Category(name) => Some(name),
-                AxisValue::Number(_) | AxisValue::Time(_) => None,
-            },
-            _ => None,
-        });
-        // Axes without a vertical line at a category need no lookup, and no marks resolved.
-        let Some(first) = lines.next() else {
-            continue;
-        };
-        let cells = axes.cells();
-        let key = figure.x_group_of(cells.row(), cells.col());
-        let scale = CategoryScale::from_first_appearance(
-            figure
-                .all_cartesian_axes()
-                .filter(|member| {
-                    let c = member.cells();
-                    figure.x_group_of(c.row(), c.col()) == key
-                })
-                .flat_map(|member| member.marks())
-                .flat_map(mark_categories)
-                .map(String::as_str),
-        );
-        if let Some(name) = std::iter::once(first)
-            .chain(lines)
-            .find(|name| scale.index_of(name).is_none())
-        {
-            let error = Error::data(
-                context,
-                format!(
-                    "x is {}; no mark on this axes has that category.",
-                    quoted(name)
-                ),
-            )
-            .with_hint("draw a mark with that category first.");
-            let grid = figure.grid();
-            if grid.rows() * grid.cols() == 1 {
-                return Err(error);
-            }
-            let cells = axes.cells();
-            return Err(error.with_message_prefix(&format!(
-                "row {}, col {}: ",
-                cells.row(),
-                cells.col()
-            )));
+        for which in [ValueAxis::X, ValueAxis::Y] {
+            check_category_references(figure, axes, which, context).map_err(|error| {
+                let grid = figure.grid();
+                if grid.rows() * grid.cols() == 1 {
+                    return error;
+                }
+                let cells = axes.cells();
+                error.with_message_prefix(&format!("row {}, col {}: ", cells.row(), cells.col()))
+            })?;
         }
     }
     Ok(())
+}
+
+/// A position along a category axis that a reference mark names.
+enum CategoryReference<'a> {
+    /// A line at the category of this name, given as the parameter.
+    Name(&'static str, &'a str),
+    /// A line between two categories, given as the parameter.
+    Between(&'static str, &'a crate::Between),
+    /// A span between two points between categories, `low` then `high`.
+    Span(&'a [crate::Between; 2]),
+}
+
+/// Checks the positions that the reference marks of `axes` name along its category axis
+/// `which`, as [`check_references`] describes; nothing on a linear, log or time axis.
+fn check_category_references(
+    figure: &Figure,
+    axes: &crate::model::Axes,
+    which: ValueAxis,
+    context: &'static str,
+) -> Result<()> {
+    let (kind, axis) = match which {
+        ValueAxis::X => (axes.x_scale(), "x"),
+        ValueAxis::Y => (axes.y_scale(), "y"),
+    };
+    if kind != ScaleKind::Category {
+        return Ok(());
+    }
+    let references: Vec<CategoryReference<'_>> = axes
+        .marks()
+        .iter()
+        .filter_map(|mark| match (which, mark) {
+            (ValueAxis::X, Mark::VLine(line)) => match line.x() {
+                RulePosition::At(AxisValue::Category(name)) => {
+                    Some(CategoryReference::Name("x", name))
+                }
+                RulePosition::Between(between) => Some(CategoryReference::Between("x", between)),
+                RulePosition::At(_) => None,
+            },
+            (ValueAxis::Y, Mark::HLine(line)) => match line.y() {
+                RulePosition::Between(between) => Some(CategoryReference::Between("y", between)),
+                RulePosition::At(_) => None,
+            },
+            (ValueAxis::X, Mark::VSpan(span)) | (ValueAxis::Y, Mark::HSpan(span)) => {
+                span.between().map(CategoryReference::Span)
+            }
+            _ => None,
+        })
+        .collect();
+    // Axes without such a position need no lookup, and no marks resolved.
+    if references.is_empty() {
+        return Ok(());
+    }
+    let cells = axes.cells();
+    let group_of = |row: usize, col: usize| match which {
+        ValueAxis::X => figure.x_group_of(row, col),
+        ValueAxis::Y => figure.y_group_of(row, col),
+    };
+    let key = group_of(cells.row(), cells.col());
+    let scale = CategoryScale::from_first_appearance(
+        figure
+            .all_cartesian_axes()
+            .filter(|member| {
+                let c = member.cells();
+                group_of(c.row(), c.col()) == key
+            })
+            .flat_map(|member| member.marks())
+            .flat_map(|mark| match which {
+                ValueAxis::X => mark_categories(mark),
+                ValueAxis::Y => mark_y_categories(mark),
+            })
+            .map(String::as_str),
+    );
+    let index = |parameter: &str, name: &str| {
+        scale.index_of(name).ok_or_else(|| {
+            Error::data(
+                context,
+                format!(
+                    "{parameter} is {}; no mark on this axes has that category.",
+                    quoted(name)
+                ),
+            )
+            .with_hint("draw a mark with that category first.")
+        })
+    };
+    // The gap after the first of two neighbouring categories.
+    let gap = |parameter: &str, between: &crate::Between| -> Result<usize> {
+        let [first, second] = between.names();
+        let (i, j) = (index(parameter, first)?, index(parameter, second)?);
+        if i.abs_diff(j) != 1 {
+            return Err(Error::usage(
+                context,
+                format!(
+                    "{parameter} is {between}, whose categories are not neighbours: {} is at \
+                     index {i} and {} at index {j} of the {axis} axis's categories.",
+                    quoted(first),
+                    quoted(second),
+                ),
+            )
+            .with_hint("use two neighbouring categories."));
+        }
+        Ok(i.min(j))
+    };
+    for reference in references {
+        match reference {
+            CategoryReference::Name(parameter, name) => {
+                index(parameter, name)?;
+            }
+            CategoryReference::Between(parameter, between) => {
+                gap(parameter, between)?;
+            }
+            CategoryReference::Span([low, high]) => {
+                if gap("low", low)? >= gap("high", high)? {
+                    return Err(Error::style(
+                        context,
+                        format!(
+                            "low is {low}, high is {high}; low must come before high along the \
+                             {axis} axis."
+                        ),
+                    )
+                    .with_hint("swap the two values."));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The categories `mark` names on a category y axis beside a linear or log x axis, in data
+/// order, repeats included: what [`ResolvedMark::categories`] yields along y for the same mark,
+/// found without resolving it. Bars, boxes, violins, strips and swarms are horizontal there.
+fn mark_y_categories(mark: &Mark) -> &[String] {
+    match mark {
+        Mark::Line(mark) => mark.y().categories(),
+        Mark::Scatter(mark) => mark.y().categories(),
+        Mark::Stem(mark) => mark.y().categories(),
+        Mark::Heatmap(mark) => mark.y_categories(),
+        Mark::Area(mark) => mark.y().categories(),
+        Mark::Step(mark) => mark.y().categories(),
+        Mark::Bar(mark) => mark.categories(),
+        Mark::Violin(mark) => mark.categories(),
+        Mark::GroupedViolin(mark) => mark.categories(),
+        Mark::Box(mark) => mark.categories(),
+        Mark::GroupedBox(mark) => mark.categories(),
+        Mark::GroupedBar(mark) | Mark::StackedBar(mark) => mark.categories(),
+        Mark::Strip(mark) => mark.categories(),
+        Mark::Swarm(mark) => mark.categories(),
+        Mark::Events(mark) => mark.rows(),
+        Mark::Hist(_) | Mark::HLine(_) | Mark::VLine(_) | Mark::HSpan(_) | Mark::VSpan(_) => &[],
+        Mark::Mesh(_) | Mark::Hist2d(_) | Mark::Hexbin(_) | Mark::Contour(_) => &[],
+        Mark::Bubbles(_) | Mark::Quiver(_) | Mark::Barbs(_) | Mark::Streamplot(_) => &[],
+        Mark::Triplot(_) | Mark::Tripcolor(_) | Mark::Tricontour(_) => &[],
+        Mark::Band(_) | Mark::StackedArea(_) => &[],
+        Mark::ErrorBars(mark) => match mark.orientation() {
+            ErrorBarOrientation::Horizontal => mark.positions().categories(),
+            ErrorBarOrientation::Vertical => &[],
+        },
+        Mark::GroupedHist(_) | Mark::Ecdf(_) | Mark::Kde(_) => &[],
+    }
 }
 
 /// The categories `mark` names on a category x axis, in data order, repeats included: what
@@ -7894,6 +8019,185 @@ mod tests {
         let mut f = figure(LIN, LIN);
         axes(&mut f).vline(at(3.0), rule()).unwrap();
         assert!(check_references(&f, "Figure.to_svg()").is_ok());
+    }
+
+    fn between(first: &str, second: &str) -> crate::Between {
+        crate::Between::new(first, second).unwrap()
+    }
+
+    /// The text, parameter and hint of the error of checking the references of `f`.
+    fn reference_error(f: &Figure) -> (crate::Error, String, Option<&'static str>) {
+        let err = check_references(f, "Figure.to_png()").unwrap_err();
+        let text = err.to_string();
+        let hint = err.hint();
+        assert_eq!(err.parameter(), None, "{text}");
+        (err, text, hint)
+    }
+
+    #[test]
+    fn points_between_categories_are_checked_before_anything_is_drawn() {
+        let years = || cats(&["2012", "2013", "2014", "2015"]);
+        let build = |add: &dyn Fn(&mut AxesMut<'_>)| {
+            let mut f = figure(ScaleKind::Category, LIN);
+            let mut a = axes(&mut f);
+            add(&mut a);
+            a.scatter(years(), &[1.0, 2.0, 3.0, 4.0], ScatterOptions::default())
+                .unwrap();
+            f
+        };
+        // Neighbours in either order, and spans whose low comes first, pass; a line added
+        // before the marks that bring its categories is fine.
+        let fine = build(&|a| {
+            a.vline_between(between("2014", "2013"), rule()).unwrap();
+            a.vspan_between(between("2012", "2013"), between("2015", "2014"), span())
+                .unwrap();
+            a.vspan_between(between("2012", "2013"), between("2013", "2014"), span())
+                .unwrap();
+        });
+        assert!(check_references(&fine, "Figure.to_png()").is_ok());
+
+        // A name that is not a category: the error of a line at an unknown category.
+        let (err, text, hint) = reference_error(&build(&|a| {
+            a.vline_between(between("2015", "2016"), rule()).unwrap();
+        }));
+        assert!(matches!(err, crate::Error::Data { .. }));
+        assert_eq!(
+            text,
+            "Figure.to_png(): x is \"2016\"; no mark on this axes has that category."
+        );
+        assert_eq!(hint, Some("draw a mark with that category first."));
+        let (_, text, _) = reference_error(&build(&|a| {
+            a.vspan_between(between("2012", "2013"), between("2099", "2015"), span())
+                .unwrap();
+        }));
+        assert_eq!(
+            text,
+            "Figure.to_png(): high is \"2099\"; no mark on this axes has that category."
+        );
+
+        // Two categories that are not neighbours.
+        let (err, text, hint) = reference_error(&build(&|a| {
+            a.vline_between(between("2015", "2013"), rule()).unwrap();
+        }));
+        assert!(matches!(err, crate::Error::Usage { .. }));
+        assert_eq!(
+            text,
+            "Figure.to_png(): x is Between(\"2015\", \"2013\"), whose categories are not \
+             neighbours: \"2015\" is at index 3 and \"2013\" at index 1 of the x axis's \
+             categories."
+        );
+        assert_eq!(hint, Some("use two neighbouring categories."));
+        let (_, text, _) = reference_error(&build(&|a| {
+            a.vspan_between(between("2012", "2014"), between("2014", "2015"), span())
+                .unwrap();
+        }));
+        assert!(
+            text.starts_with("Figure.to_png(): low is Between("),
+            "{text}"
+        );
+
+        // A span whose ends come in the wrong order, or meet.
+        for (low, high) in [
+            (between("2014", "2015"), between("2012", "2013")),
+            (between("2013", "2014"), between("2014", "2013")),
+        ] {
+            let (err, text, hint) = reference_error(&build(&|a| {
+                a.vspan_between(low.clone(), high.clone(), span()).unwrap();
+            }));
+            assert!(matches!(err, crate::Error::Style { .. }));
+            assert_eq!(
+                text,
+                format!(
+                    "Figure.to_png(): low is {low}, high is {high}; low must come before high \
+                     along the x axis."
+                )
+            );
+            assert_eq!(hint, Some("swap the two values."));
+        }
+
+        // The first bad position in mark order is the error.
+        let (_, text, _) = reference_error(&build(&|a| {
+            a.vline(AxisValue::Category("zzz".into()), rule()).unwrap();
+            a.vline_between(between("2015", "2016"), rule()).unwrap();
+        }));
+        assert!(text.contains("x is \"zzz\""), "{text}");
+    }
+
+    #[test]
+    fn points_between_categories_on_a_category_y_axis_are_checked_too() {
+        let mut f = figure(LIN, ScaleKind::Category);
+        axes(&mut f)
+            .bar(
+                vec!["North".into(), "South".into(), "East".into()],
+                &[1.0, 2.0, 3.0],
+                BarOptions::default(),
+            )
+            .unwrap()
+            .hline_between(between("North", "South"), rule())
+            .unwrap()
+            .hspan_between(between("North", "South"), between("South", "East"), span())
+            .unwrap();
+        assert!(check_references(&f, "Figure.to_png()").is_ok());
+        axes(&mut f)
+            .hline_between(between("North", "East"), rule())
+            .unwrap();
+        let (_, text, _) = reference_error(&f);
+        assert_eq!(
+            text,
+            "Figure.to_png(): y is Between(\"North\", \"East\"), whose categories are not \
+             neighbours: \"North\" is at index 0 and \"East\" at index 2 of the y axis's \
+             categories."
+        );
+    }
+
+    #[test]
+    fn points_between_categories_look_up_the_categories_of_shared_axes() {
+        use crate::model::{Grid, GridIndex, Placement};
+        // The left panel has the first two years, the right one the next two: a divider between
+        // 2013 and 2014 is between neighbours of the shared axis, wherever it is drawn.
+        let build = |share: bool, at: &str| {
+            let grid = Grid::new(1, 2).unwrap();
+            let grid = if share {
+                grid.with_share_x(crate::Share::All)
+            } else {
+                grid
+            };
+            let mut f = Figure::with_grid(8.0, 4.0, Theme::pigment(), grid).unwrap();
+            for (col, names) in [(0, ["2012", "2013"]), (1, ["2014", "2015"])] {
+                let mut a = f
+                    .add_axes_at(
+                        Placement {
+                            row: GridIndex::At(0),
+                            col: GridIndex::At(col),
+                            ..Placement::default()
+                        },
+                        ScaleKind::Category,
+                        LIN,
+                    )
+                    .unwrap();
+                a.bar(
+                    names.iter().map(|&n| n.to_owned()).collect(),
+                    &[1.0, 2.0],
+                    BarOptions::default(),
+                )
+                .unwrap();
+                if col == 0 {
+                    a.vline_between(between(at, "2014"), rule()).unwrap();
+                }
+            }
+            f
+        };
+        assert!(check_references(&build(true, "2013"), "Figure.to_png()").is_ok());
+        let (_, text, _) = reference_error(&build(false, "2013"));
+        assert_eq!(
+            text,
+            "Figure.to_png(): row 0, col 0: x is \"2014\"; no mark on this axes has that category."
+        );
+        let (_, text, _) = reference_error(&build(true, "2012"));
+        assert!(
+            text.starts_with("Figure.to_png(): row 0, col 0: x is Between(\"2012\", \"2014\")"),
+            "{text}"
+        );
     }
 
     #[test]

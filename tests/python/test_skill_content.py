@@ -93,7 +93,7 @@ def test_every_public_name_documented() -> None:
     headings = set(re.findall(r"^#{2,3} `([^`]+)`$", text, re.MULTILINE))
     expected = {f"umber.{name}" for name in umber.__all__}
     members = cast(
-        Callable[[Path, str], list[tuple[str, ast.stmt, str]]],
+        Callable[[Path, str], list[tuple[str, list[ast.stmt], str]]],
         runpy.run_path(str(ROOT / "scripts/gen_skill.py"))["_public_members"],
     )
     for name in umber.__all__:

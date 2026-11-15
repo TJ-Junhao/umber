@@ -121,7 +121,9 @@ def test_argument_types_are_checked() -> None:
     with pytest.raises(TypeError):
         ax.xtick_highlight(["a"], color=cast(Any, "red"))
     with pytest.raises(ub.DataError):
-        ax.xtick_highlight(["a\nb"])
+        ax.xtick_highlight(["a\tb"])
+    # A category name may break into lines, so a highlight may name one.
+    ax.xtick_highlight(["a\nb"])
 
 
 def test_an_unknown_category_is_a_data_error_when_rendering() -> None:

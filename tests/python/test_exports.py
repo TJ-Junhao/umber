@@ -14,6 +14,7 @@ EXPECTED = [
     "Align",
     "Auto",
     "Axes",
+    "Between",
     "Cell",
     "Series",
     "Cmap",

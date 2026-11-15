@@ -284,7 +284,7 @@ def bar(
         DataError: If ``by`` has invalid names or differs in length from the data; or if
             the data cannot be plotted: lengths differ, a category repeats, or a
             height is infinite.
-            It is also raised for a line break or other control character in a category name.
+            It is also raised for a tab or another control character in a category name.
         StyleError: If ``label`` or a category name is too long, or ``format`` is
             ``TickFormat.iso()``.
         UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes

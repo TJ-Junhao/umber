@@ -3455,6 +3455,10 @@ mod font_error_tests;
 mod line_break_tests;
 
 #[cfg(test)]
+#[path = "category_line_break_tests.rs"]
+mod category_line_break_tests;
+
+#[cfg(test)]
 #[path = "pie_grid_tests.rs"]
 mod pie_grid_tests;
 
@@ -4073,7 +4077,7 @@ mod tests {
             assert!(y.slack(&resolved.y.ticks) >= 0.0, "{:?}", layout.plot);
             assert!(x.slack(&resolved.x.ticks) >= 0.0, "{:?}", layout.plot);
             // The drawn labels: baselines a line and the gap apart.
-            let baselines: Vec<f64> = layout.y_tick_labels.iter().map(|l| l.y).collect();
+            let baselines: Vec<f64> = layout.y_tick_labels.iter().map(|l| l.first().y).collect();
             assert!(baselines.windows(2).all(|w| (w[0] - w[1]).abs() >= 15.0));
         }
         // The panels whose y labels crowded for the target alone get round steps, with 0 a

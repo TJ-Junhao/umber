@@ -639,12 +639,12 @@ pub(crate) struct PanelBands {
     /// The header, measured, with the legend row wrapped as [`measure_panel`] was asked.
     pub(super) heading: Header,
     /// The y tick labels at their ticks' positions, not yet placed.
-    pub(super) y_labels: Vec<(NormalizedPos, Label)>,
+    pub(super) y_labels: Vec<(NormalizedPos, TextBlock)>,
     /// The width of the widest y tick label, or of the title of a value row above the plot
     /// when that is wider; 0 without either.
     pub(super) y_label_width: f64,
     /// The x tick labels at their ticks' positions, not yet placed.
-    pub(super) x_labels: Vec<(NormalizedPos, Label)>,
+    pub(super) x_labels: Vec<(NormalizedPos, TextBlock)>,
     /// The color of each x and y tick label, by its index in `x_labels` and `y_labels`
     /// ([`tick_colors`]).
     tick_colors: [Vec<Rgba>; 2],
@@ -953,13 +953,18 @@ pub(crate) fn measure_panel(
         .max(row_title);
 
     // How far the y tick label of a tick at the plot top reaches above it, and that of a tick
-    // at the plot bottom below it.
+    // at the plot bottom below it. A category name of several lines is centered on its tick, so
+    // the tallest one reaches half its further lines further each way.
+    let y_more = y_labels
+        .iter()
+        .map(|(_, label)| label.below_first())
+        .fold(0.0, f64::max);
     let (label_rise, label_drop) = if y_labels.is_empty() {
         (0.0, 0.0)
     } else {
         (
-            (y_tick_ascent - Y_LABEL_CENTER * y_tick_size).max(0.0),
-            (Y_LABEL_CENTER * y_tick_size + y_tick_descent).max(0.0),
+            (y_tick_ascent - Y_LABEL_CENTER * y_tick_size).max(0.0) + y_more / 2.0,
+            (Y_LABEL_CENTER * y_tick_size + y_tick_descent).max(0.0) + y_more / 2.0,
         )
     };
 
@@ -1005,10 +1010,15 @@ pub(crate) fn measure_panel(
             half: label.width() / 2.0,
         })
         .collect();
+    // The row is as tall as the x tick label of the most lines.
+    let x_more = x_labels
+        .iter()
+        .map(|(_, label)| label.below_first())
+        .fold(0.0, f64::max);
     let x_band = if x_labels.is_empty() {
         0.0
     } else {
-        X_LABEL_GAP + tick_ascent + tick_descent
+        X_LABEL_GAP + tick_ascent + tick_descent + x_more
     };
     let x_title_band = if xlabel.is_some() {
         AXIS_LABEL_GAP + xlabel_ascent + xlabel_descent
@@ -1192,16 +1202,20 @@ pub(crate) fn place_panel(
             .placed(plot.y + 2.0 * super::placement::BEST_PADDING),
     };
 
+    // A y tick label of several lines is centered on its tick, each line right-aligned beside
+    // the plot; an x tick label has each line centered under its tick.
     for (pos, label) in &mut y_labels {
-        label.x = match input.axes {
-            Layer::Primary(_) => plot.x - Y_LABEL_GAP - label.width(),
-            Layer::Twin { .. } => plot.right() + Y_LABEL_GAP,
-        };
-        label.y = plot.y_at(*pos) + Y_LABEL_CENTER * y_tick_size;
+        let baseline = plot.y_at(*pos) + Y_LABEL_CENTER * y_tick_size - label.below_first() / 2.0;
+        match input.axes {
+            Layer::Primary(_) => label.place(baseline, |width| plot.x - Y_LABEL_GAP - width),
+            Layer::Twin { .. } => label.place(baseline, |_| plot.right() + Y_LABEL_GAP),
+        }
     }
     for (pos, label) in &mut x_labels {
-        label.x = plot.x_at(*pos) - label.width() / 2.0;
-        label.y = plot.bottom() + X_LABEL_GAP + tick_ascent;
+        let center = plot.x_at(*pos);
+        label.place(plot.bottom() + X_LABEL_GAP + tick_ascent, |width| {
+            center - width / 2.0
+        });
     }
     if let Some(label) = &mut xlabel {
         label.x = plot.x + plot.width / 2.0 - label.width() / 2.0;
@@ -1593,8 +1607,14 @@ mod tests {
             }
             bits.labels("xlabel", &layout.xlabel);
             bits.labels("ylabel", &layout.ylabel);
-            bits.labels("x_tick_labels", &layout.x_tick_labels);
-            bits.labels("y_tick_labels", &layout.y_tick_labels);
+            bits.labels(
+                "x_tick_labels",
+                layout.x_tick_labels.iter().flat_map(TextBlock::lines),
+            );
+            bits.labels(
+                "y_tick_labels",
+                layout.y_tick_labels.iter().flat_map(TextBlock::lines),
+            );
             for (i, y) in layout.y_grid.iter().enumerate() {
                 bits.num(&format!("y_grid[{i}]"), *y);
             }
@@ -1798,7 +1818,7 @@ mod tests {
                 l.y_tick_labels
                     .iter()
                     .chain(&l.x_tick_labels)
-                    .flat_map(|t| [t.x.to_bits(), t.y.to_bits()])
+                    .flat_map(|t| [t.first().x.to_bits(), t.first().y.to_bits()])
                     .collect()
             };
             assert_eq!(ticks(&moved), ticks(&layout));

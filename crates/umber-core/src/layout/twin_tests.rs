@@ -50,12 +50,12 @@ fn twin_uses_one_resolved_x_and_one_plot() {
         assert!(
             b.y_tick_labels
                 .iter()
-                .all(|label| label.x == b.plot.right() + super::super::Y_LABEL_GAP)
+                .all(|label| label.first().x == b.plot.right() + super::super::Y_LABEL_GAP)
         );
         assert!(
             b.y_tick_labels
                 .iter()
-                .all(|label| label.x + label.width() <= b.frame.right())
+                .all(|label| label.first().x + label.width() <= b.frame.right())
         );
         let scale = left.x.continuous().unwrap();
         assert!(scale.domain().0 <= -2. && scale.domain().1 >= 4.);
@@ -195,7 +195,7 @@ fn one_row_legend_and_right_reserve_clear_ticks() {
             let ticks = b
                 .y_tick_labels
                 .iter()
-                .map(|label| label.x + label.width())
+                .map(|label| label.first().x + label.width())
                 .fold(0., f64::max);
             assert!(
                 a.legend
@@ -294,7 +294,7 @@ fn wrapped_twin_legends_stay_in_their_reserved_bands() {
                     );
                     assert!(bottom < layout.plot.y);
                     for tick in &layout.y_tick_labels {
-                        assert!(bottom < tick.y - f64::from(tick.layout.ascent()));
+                        assert!(bottom < tick.first().y - f64::from(tick.first().layout.ascent()));
                     }
                 }
             }
@@ -447,7 +447,7 @@ fn shared_direct_column_clears_ticks_and_precedes_both_colorbars() {
             let ticks_right = right
                 .y_tick_labels
                 .iter()
-                .map(|label| label.x + label.width())
+                .map(|label| label.first().x + label.width())
                 .fold(0., f64::max);
             assert!(a.x >= ticks_right + super::super::Y_LABEL_GAP);
             let bars: Vec<_> = [left, right]
@@ -498,7 +498,7 @@ fn category_direct_label_clears_right_tick_column() {
     let ticks_right = layout
         .y_tick_labels
         .iter()
-        .map(|label| label.x + label.width())
+        .map(|label| label.first().x + label.width())
         .fold(0., f64::max);
     let label = layout.direct[0].label.as_ref().unwrap();
     assert!(

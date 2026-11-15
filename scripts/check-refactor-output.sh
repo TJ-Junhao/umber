@@ -90,6 +90,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/bubbles.rs
   crates/umber-core/tests/support/corpus/caption.rs
   crates/umber-core/tests/support/corpus/by.rs
+  crates/umber-core/tests/support/corpus/category_axis.rs
   crates/umber-core/tests/support/corpus/category_labels.rs
   crates/umber-core/tests/support/corpus/cmap.rs
   crates/umber-core/tests/support/corpus/color_by.rs

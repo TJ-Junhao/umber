@@ -235,7 +235,7 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
@@ -343,7 +343,7 @@ Raises:
         the data cannot be plotted: lengths differ, a category repeats, a
         height is infinite or not positive on a log axis, or neither axis is a
         category axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` or a category name is too long, or ``format`` is
         ``TickFormat.iso()``. Rendering raises it when a value label does not fit
         inside the plot: under explicit limits, or on a plot too small for it.
@@ -508,7 +508,7 @@ Raises:
     DataError: If group counts differ, categories repeat, or samples are not
         numeric, are infinite, exceed the supported range or are not positive on
         a log axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a label or category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -972,7 +972,7 @@ Raises:
     DataError: If the data cannot be plotted: ``series`` is empty, a series has a
         different length, a category repeats, a height is infinite or not positive on
         a log axis, or neither axis is a category axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
         Rendering raises it when a value label does not fit inside the plot, as in
         ``bar()``.
@@ -1017,7 +1017,7 @@ Raises:
     DataError: If distributions are empty, group counts differ, categories repeat,
         or a sample is infinite, exceeds the supported range or is not positive
         on a log axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -1060,7 +1060,7 @@ Raises:
     DataError: If distributions are empty, group counts differ, categories repeat,
         or a sample is infinite, exceeds the supported range or is not positive
         on a log axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -1136,7 +1136,7 @@ Raises:
     DataError: If ``values`` is not shaped ``(len(y_categories), len(x_categories))``,
         ``outline`` is not shaped like ``values``, a category repeats, or a value is
         infinite, beyond 1e300 in magnitude, or not positive on a log scale.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a category name is too long, ``center`` is not finite or comes
         with a log scale, ``format`` is ``TickFormat.iso()``, or the color range set by
         ``clim()`` does not suit ``scale`` or ``center``.
@@ -1320,6 +1320,7 @@ Example:
 
 ```text
 Axes.hline(self: SY, y: Y, *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SY
+Axes.hline(self: SCY, y: Between, *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SCY
 ```
 
 Add a horizontal reference line across the whole plot at ``y``.
@@ -1327,9 +1328,16 @@ Add a horizontal reference line across the whole plot at ``y``.
 The line is drawn above the data marks. Without explicit y limits the y axis extends to
 include ``y``; with limits, a line outside them is not drawn.
 
+On a category y axis beside a linear, log or time x axis, ``y`` is a ``Between``
+position: the line divides two neighbouring categories, halfway between their centres,
+and runs the full width of the plot. It does not add a category; whether its names are
+neighbouring categories of the axis is checked when the figure is rendered
+(``DataError`` for a name that is not a category and ``UsageError`` for categories that
+are not neighbours, from ``to_png()``, ``to_svg()`` and the save methods).
+
 Args:
-    y: The y value of the line; finite, and positive on a log y axis; a time on a time
-        y axis.
+    y: The y value of the line: finite, and positive on a log y axis; a time on a time
+        y axis; a ``Between`` position on a category y axis.
     label: The name shown in the legend; an empty string leaves the line out of it.
         A reference line always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
@@ -1344,7 +1352,8 @@ Raises:
     TypeError: If an argument has the wrong type.
     DataError: If ``y`` is not finite, or not positive on a log axis.
     StyleError: If ``label`` is too long or holds a line break or another control character.
-    UsageError: If the y axis is a category axis.
+    UsageError: If ``y`` is a number on a category y axis, or a ``Between`` on a linear,
+        log or time y axis, or both axes are category axes.
 
 Example:
 
@@ -1352,12 +1361,16 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
 >>> ax = ax.hline(2.5, label="Threshold", dash=ub.Dash.DASHED)
+>>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+>>> rows = rows.bar(["North", "South", "East"], [3, 5, 2])
+>>> rows = rows.hline(ub.Between("South", "East"), dash=ub.Dash.DOTTED)
 ```
 
 ### `umber.Axes.hspan`
 
 ```text
 Axes.hspan(self: SY, low: Y, high: Y, *, label: str='', color: Color=Color.AUTO) -> SY
+Axes.hspan(self: SCY, low: Between, high: Between, *, label: str='', color: Color=Color.AUTO) -> SCY
 ```
 
 Add a horizontal reference span between the y values ``low`` and ``high``.
@@ -1366,9 +1379,15 @@ The span fills the region between the two values across the whole plot, at the o
 of an area, and is drawn below the data marks. Without explicit y limits the y axis
 extends to include both values; with limits, the span is clipped to them.
 
+On a category y axis beside a linear, log or time x axis, both ends are ``Between``
+positions and the span covers the categories between them whole. Their names are
+checked when the figure is rendered, as for ``hline()``, and then ``low`` must come
+before ``high`` along the axis (``StyleError``).
+
 Args:
-    low: The lower y value; finite, and positive on a log y axis.
-    high: The upper y value; finite and above ``low``.
+    low: The lower y value: finite, and positive on a log y axis; a time on a time y
+        axis; a ``Between`` position on a category y axis.
+    high: The upper y value, above ``low``, of the same kind.
     label: The name shown in the legend; an empty string leaves the span out of it.
         A reference span always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
@@ -1380,11 +1399,13 @@ Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, including one ``Between`` end and
+        one value.
     DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
     StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
         line break or another control character.
-    UsageError: If the y axis is a category axis.
+    UsageError: If the ends are numbers on a category y axis or ``Between`` positions on
+        a linear, log or time y axis, or both axes are category axes.
 
 Example:
 
@@ -1392,6 +1413,9 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1.0, 3.0, 2.0])
 >>> ax = ax.hspan(1.5, 2.5, label="Normal range")
+>>> rows = ub.Figure().add_axes(y=ub.Scale.category())
+>>> rows = rows.bar(["North", "South", "East", "West"], [3, 5, 2, 4])
+>>> rows = rows.hspan(ub.Between("North", "South"), ub.Between("East", "West"))
 ```
 
 ### `umber.Axes.kde`
@@ -1536,7 +1560,7 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, or names and numbers do not match the x
         axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
@@ -1847,7 +1871,7 @@ Raises:
         ``x_error`` or ``y_error`` is infinite or not positive on a log axis, they do
         not hold one value per point, or a low end is above its high end; the message
         names the argument and the index.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control
         character, a ``ColorBy`` does not suit the color range set by ``clim()``, or
         ``format`` does not suit the value axis (``TickFormat.iso()`` for numbers, a
@@ -2007,7 +2031,7 @@ Raises:
         different length, a category repeats, a height is infinite or not positive on
         a log axis, a stack exceeds the supported magnitude, or neither axis is a
         category axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a category name is too long, or ``format`` is ``TickFormat.iso()``.
         Rendering raises it when a value label does not fit inside its segment with
         2 pt to spare on every side.
@@ -2108,7 +2132,7 @@ Raises:
         the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the x
         axis, or x is not in non-decreasing order.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``by`` comes with an explicit color or a non-empty label; or if
         the y axis is a category axis.
@@ -2781,7 +2805,7 @@ Raises:
     DataError: If group counts differ, categories repeat, or samples are not
         numeric, are infinite, exceed the supported range or are not positive on
         a log axis.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If a label or category name is too long.
     UsageError: If neither axis or both axes are category axes.
 
@@ -2799,22 +2823,26 @@ Example:
 
 ```text
 Axes.vline(self, x: X, *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> Self
+Axes.vline(self: SCX, x: Between, *, label: str='', color: Color=Color.AUTO, dash: Dash=Dash.SOLID, width: Size=Size.AUTO) -> SCX
 ```
 
 Add a vertical reference line at ``x`` across the plot.
 
 On a linear or log x axis ``x`` is a number, and without explicit x limits the x axis
 extends to include it. On a category x axis ``x`` is a category name, and the line is
-drawn at the centre of that category. A name does not add a category: it must be the
-name of one of the categories of the other marks of these axes, which is checked when
-the figure is rendered (``DataError`` from ``to_png()``, ``to_svg()`` and the save
-methods). The line is drawn above the data marks. It runs the full height of the plot,
-except when the baseline sits at the y axis's lower limit (0 is not inside a linear y
-domain): then it ends at the baseline, since only padding lies below it.
+drawn at the centre of that category, or a ``Between`` position, and the line divides
+two neighbouring categories, halfway between their centres. Neither adds a category: the
+names must be categories of the other marks of these axes, and the two of a ``Between``
+neighbours there, which is checked when the figure is rendered (``DataError`` for a name
+that is not a category and ``UsageError`` for categories that are not neighbours, from
+``to_png()``, ``to_svg()`` and the save methods). The line is drawn above the data
+marks. It runs the full height of the plot, except when the baseline sits at the y
+axis's lower limit (0 is not inside a linear y domain): then it ends at the baseline,
+since only padding lies below it.
 
 Args:
     x: The x value of the line: a finite number, positive on a log axis, a category
-        name, or a time on a time axis.
+        name or a ``Between`` position on a category axis, or a time on a time axis.
     label: The name shown in the legend; an empty string leaves the line out of it.
         A reference line always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
@@ -2828,10 +2856,12 @@ Returns:
 Raises:
     TypeError: If an argument has the wrong type, including a number on a category
         axis or a name on a linear or log axis.
-    DataError: If ``x`` is not finite, or not positive on a log axis.
+    DataError: If ``x`` is not finite, or not positive on a log axis, or a category name
+        holds a control character other than a line break.
     StyleError: If ``label`` is too long or holds a line break or another control character.
-    UsageError: If both axes are category axes. Type checkers accept such axes,
-        so this is raised when the call runs.
+    UsageError: If both axes are category axes, or ``x`` is a ``Between`` on a linear,
+        log or time axis. Type checkers accept two category axes, so this is raised
+        when the call runs.
 
 Example:
 
@@ -2841,12 +2871,16 @@ Example:
 >>> ax = ax.vline(31, label="Event")
 >>> cats = ub.Figure().add_axes(x=ub.Scale.category()).bar(["Q1", "Q2"], [4, 6])
 >>> cats = cats.vline("Q2")
+>>> years = ub.Figure().add_axes(x=ub.Scale.category())
+>>> years = years.bar(["2012", "2013", "2014", "2015"], [3, 4, 6, 5])
+>>> years = years.vline(ub.Between("2013", "2014"), dash=ub.Dash.DASHED)
 ```
 
 ### `umber.Axes.vspan`
 
 ```text
 Axes.vspan(self: SX, low: X, high: X, *, label: str='', color: Color=Color.AUTO) -> SX
+Axes.vspan(self: SCX, low: Between, high: Between, *, label: str='', color: Color=Color.AUTO) -> SCX
 ```
 
 Add a vertical reference span between the x values ``low`` and ``high``.
@@ -2855,12 +2889,18 @@ The span fills the region between the two values across the plot, at the opacity
 area, and is drawn below the data marks. It has the full height of the plot, except when
 the baseline sits at the y axis's lower limit (0 is not inside a linear y domain): then
 it ends at the baseline. Without explicit x limits the x axis extends to include both
-values; with limits, the span is clipped to them. It needs a linear or log x axis: on a
-category axis use ``vline()``.
+values; with limits, the span is clipped to them.
+
+On a category x axis both ends are ``Between`` positions and the span covers the
+categories between them whole: ``vspan(Between("2009", "2010"), Between("2013",
+"2014"))`` covers 2010 to 2013. Their names are checked when the figure is rendered, as
+for ``vline()``, and then ``low`` must come before ``high`` along the axis
+(``StyleError``).
 
 Args:
-    low: The lower x value; finite, and positive on a log x axis.
-    high: The upper x value; finite and above ``low``.
+    low: The lower x value: finite, and positive on a log x axis; a time on a time x
+        axis; a ``Between`` position on a category x axis.
+    high: The upper x value, above ``low``, of the same kind.
     label: The name shown in the legend; an empty string leaves the span out of it.
         A reference span always takes an entry in the legend row, also under
         ``LegendStyle.DIRECT``.
@@ -2872,11 +2912,13 @@ Returns:
     These axes.
 
 Raises:
-    TypeError: If an argument has the wrong type.
+    TypeError: If an argument has the wrong type, including one ``Between`` end and
+        one value.
     DataError: If ``low`` or ``high`` is not finite, or not positive on a log axis.
     StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
         line break or another control character.
-    UsageError: If the x axis is a category axis.
+    UsageError: If the ends are numbers on a category x axis or ``Between`` positions on
+        a linear, log or time x axis, or both axes are category axes.
 
 Example:
 
@@ -2884,6 +2926,9 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 30, 60], [1.0, 3.0, 2.0])
 >>> ax = ax.vspan(40, 50, label="Window")
+>>> years = ub.Figure().add_axes(x=ub.Scale.category())
+>>> years = years.bar(["2009", "2010", "2011", "2012"], [3, 1, 2, 4])
+>>> years = years.vspan(ub.Between("2009", "2010"), ub.Between("2011", "2012"))
 ```
 
 ### `umber.Axes.x_error_bars`
@@ -2924,7 +2969,7 @@ Raises:
     DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the y
         axis, or a value of ``low`` is above the value of ``high`` at the same index.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the x axis is a category axis.
 
@@ -3245,7 +3290,7 @@ Raises:
     DataError: If the data cannot be plotted: lengths differ, a value is infinite, a
         value is not positive on a log axis, names and numbers do not match the x axis,
         or a value of ``low`` is above the value of ``high`` at the same index.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If the y axis is a category axis.
 
@@ -3521,6 +3566,65 @@ Example:
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 3, 2])
 >>> ax = ax.yticks_labeled([0, 1, 2], ["low", "mid", "high"])
+```
+
+## `umber.Between`
+
+```text
+Between(first: str, second: str)
+```
+
+An immutable position halfway between two neighbouring categories of a category axis.
+
+``Between("2013", "2014")`` is the point halfway between the centres of the categories
+``"2013"`` and ``"2014"``: where a divider between them goes. Pass it as ``x`` to
+``Axes.vline()`` on a category x axis, as ``y`` to ``Axes.hline()`` on a category y axis,
+or as both ends of ``Axes.vspan()`` or ``Axes.hspan()`` for a span that covers whole
+categories. The two names may come in either order; they must be categories of the axis
+and neighbours there, which is checked when the figure is rendered, since a mark added later
+may bring them. Positions compare equal when both names are equal, in the same order.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Between("2013", "2014")
+Between('2013', '2014')
+>>> ax = ub.Figure().add_axes(x=ub.Scale.category())
+>>> ax = ax.bar(["2012", "2013", "2014", "2015"], [3, 4, 6, 5])
+>>> ax = ax.vline(ub.Between("2013", "2014"), dash=ub.Dash.DASHED)
+```
+
+### `umber.Between.first`
+
+```text
+Between.first(self) -> str
+```
+
+The name of the first category.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Between("Q1", "Q2").first
+'Q1'
+```
+
+### `umber.Between.second`
+
+```text
+Between.second(self) -> str
+```
+
+The name of the second category.
+
+Example:
+
+```python
+>>> import umber as ub
+>>> ub.Between("Q1", "Q2").second
+'Q2'
 ```
 
 ## `umber.Cell`
@@ -7528,7 +7632,7 @@ Raises:
     DataError: If ``by`` has invalid names or differs in length from the data; or if
         the data cannot be plotted: lengths differ, a category repeats, or a
         height is infinite.
-        It is also raised for a line break or other control character in a category name.
+        It is also raised for a tab or another control character in a category name.
     StyleError: If ``label`` or a category name is too long, or ``format`` is
         ``TickFormat.iso()``.
     UsageError: If ``format`` or ``size`` is given without ``annotate``, or ``by`` comes

@@ -23,6 +23,8 @@ umber has no global state: there is no `plt` and no current figure; `fig.show()`
 | `ax.stackplot(x, ys, labels=...)` | `ax.stacked_area(x, [ub.Series(label, y), ...])` |
 | `ax.errorbar(x, y, yerr=e)` | `ax.y_error_bars(x, y - e, y + e)` plus the line or points |
 | `ax.axhline(y)` / `ax.axvspan(a, b)` | `ax.hline(y)` / `ax.vspan(a, b)` |
+| `ax.axvline(1.5)` between bars 1 and 2 of a category axis | `ax.vline(ub.Between("2013", "2014"))`; `ax.vspan(ub.Between(...), ub.Between(...))` for a shaded run of categories |
+| `ax.set_xticklabels(["2026\n(to Oct)"])` | name the category `"2026\n(to Oct)"`: category names break into lines at `"\n"` |
 | `ax.imshow(m)` with labelled ticks | `ax.heatmap(x_names, y_names, m)` on two category axes |
 | `ax.pcolormesh(xe, ye, m)` | `ax.mesh(xe, ye, m)` |
 | `ax.contour(x, y, z)` | `ax.contour(x, y, z)` |

@@ -57,9 +57,9 @@ use super::panel::{
 };
 use super::program;
 use super::{
-    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Label, Layout, LayoutInput,
-    MIN_PLOT, PADDING, PlotSize, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest, widths,
-    x_labels_wider_than, y_labels_leave_no_room,
+    AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Layout, LayoutInput, MIN_PLOT,
+    PADDING, PlotSize, TextBlock, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest,
+    widths, x_labels_wider_than, y_labels_leave_no_room,
 };
 use crate::error::quoted;
 use crate::model::{CellRange, Grid};
@@ -1739,7 +1739,7 @@ fn x_labels_do_not_fit(
         .fold(None, |best: Option<usize>, i| {
             let width = |i: usize| {
                 widest(&bands[i].x_labels)
-                    .map_or(0.0, Label::width)
+                    .map_or(0.0, TextBlock::width)
                     .max(bands[i].colorbar_tick_width())
             };
             match best {
@@ -2373,7 +2373,7 @@ mod tests {
         let label_width = layout
             .y_tick_labels
             .iter()
-            .map(super::super::Label::width)
+            .map(super::super::TextBlock::width)
             .fold(0.0, f64::max);
         let boundary = 75.0 + label_width + super::super::Y_LABEL_GAP;
         let failing = boundary.ceil() - 1.0;
@@ -2664,16 +2664,20 @@ mod tests {
             let last = &middle.x_tick_labels[2];
             // Each end label ends exactly in the middle of its gap, where the neighbour's frame
             // starts, and never reaches the neighbour's y tick labels.
-            assert!((first.x - left.frame.right()).abs() < 1e-6, "{}", first.x);
-            assert!((last.x + last.width() - right.frame.x).abs() < 1e-6);
+            assert!(
+                (first.first().x - left.frame.right()).abs() < 1e-6,
+                "{}",
+                first.first().x
+            );
+            assert!((last.first().x + last.width() - right.frame.x).abs() < 1e-6);
             assert_eq!(middle.frame.x, left.frame.right());
             assert_eq!(middle.frame.right(), right.frame.x);
             let right_labels = right
                 .y_tick_labels
                 .iter()
-                .map(|l| l.x)
+                .map(|l| l.first().x)
                 .fold(f64::INFINITY, f64::min);
-            assert!(last.x + last.width() < right_labels);
+            assert!(last.first().x + last.width() < right_labels);
             let _ = lib;
         }
     }
@@ -2693,7 +2697,7 @@ mod tests {
         let all = layouts(&f).unwrap();
         assert_aligned(&all).unwrap();
         let last = &all[1].1.x_tick_labels[1];
-        let end = last.x + last.width();
+        let end = last.first().x + last.width();
         assert!((end - (864.0 - X_LABEL_EDGE_GAP)).abs() < 1e-6, "{end}");
     }
 
@@ -3078,8 +3082,12 @@ mod tests {
         assert_aligned(&all).unwrap();
         let top = &all[0].1.x_tick_labels[0];
         let bottom = &all[1].1.x_tick_labels[0];
-        assert!((top.x - X_LABEL_EDGE_GAP).abs() < 1e-6, "{}", top.x);
-        assert!((bottom.x + bottom.width() - all[1].1.frame.right()).abs() < 1e-6);
+        assert!(
+            (top.first().x - X_LABEL_EDGE_GAP).abs() < 1e-6,
+            "{}",
+            top.first().x
+        );
+        assert!((bottom.first().x + bottom.width() - all[1].1.frame.right()).abs() < 1e-6);
     }
 
     #[test]
@@ -3118,7 +3126,7 @@ mod tests {
             let baseline = |i: usize| all[i].1.xlabel.as_ref().unwrap().y;
             assert!((baseline(0) - baseline(1)).abs() < 1e-9);
             assert_eq!(all[0].1.plot.bottom(), all[1].1.plot.bottom());
-            assert!(baseline(1) > all[1].1.x_tick_labels[0].y);
+            assert!(baseline(1) > all[1].1.x_tick_labels[0].first().y);
         }
     }
 
@@ -3139,8 +3147,8 @@ mod tests {
         let all = layouts(&f).unwrap();
         let upper = &all[0].1;
         let label = &upper.y_tick_labels[0];
-        let descent = f64::from(label.layout.descent());
-        assert!(label.y + descent <= upper.frame.bottom() + 1e-9);
+        let descent = f64::from(label.first().layout.descent());
+        assert!(label.first().y + descent <= upper.frame.bottom() + 1e-9);
         assert!(upper.frame.bottom() <= all[1].1.frame.y + 1e-9);
     }
 
@@ -3245,7 +3253,10 @@ mod tests {
             assert!(layout.xlabel.is_none());
             assert_eq!(layout.y_tick_labels.len(), 2);
             let label = &layout.y_tick_labels[0];
-            let bottom = label.y + crate::layout::metrics(&fonts, &label.style).unwrap().1;
+            let bottom = label.first().y
+                + crate::layout::metrics(&fonts, &label.first().style)
+                    .unwrap()
+                    .1;
             assert_eq!(layout.legend.entries().len(), 1);
             let entry = &layout.legend.entries()[0];
             // A single entry occupies one row, with its swatch centered in the band.

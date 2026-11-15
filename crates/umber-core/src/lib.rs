@@ -57,7 +57,8 @@
 //!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, the [`ScatterGroup`]
 //!   of a grouped scatter, [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
 //!   position, [`StemOptions`], [`RuleOptions`] and [`SpanOptions`] with the [`AxisValue`] of
-//!   a vertical line, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
+//!   a vertical line, the [`RulePosition`] of a line and the [`Between`] that places lines and
+//!   span ends between two categories, [`BandOptions`], [`ErrorBarOptions`] with its [`ErrorBarOrientation`],
 //!   [`BoxOptions`], [`ViolinOptions`] and [`Distribution`], [`BarOptions`], [`Series`],
 //!   [`HistOptions`] with its [`Bins`], bin limit [`MAX_BINS`], [`HistStyle`] and [`HistStat`],
 //!   [`GroupedHistOptions`], [`EcdfOptions`], [`KdeOptions`] and [`GroupedKdeOptions`] with
@@ -209,7 +210,9 @@ pub use figure::{
     ArrowKey, ArrowLength, BarbOptions, BarbsMark, Direction, FieldForm, FieldVectors, Pivot,
     QuiverMark, QuiverOptions, VectorField,
 };
-pub use figure::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub use figure::{
+    AxisValue, Between, HLineMark, RuleOptions, RulePosition, SpanMark, SpanOptions, VLineMark,
+};
 pub use figure::{BandMark, BandOptions};
 pub use figure::{
     Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,

@@ -333,8 +333,8 @@ fn render_error(f: &Figure) -> Error {
 
 #[test]
 fn one_line_texts_refuse_line_breaks_when_rendered() {
-    let line_breaks =
-        "line breaks are supported in titles, subtitles, captions, text() and annotate().";
+    let line_breaks = "line breaks are supported in titles, subtitles, captions, text(), annotate() and the \
+         categories of a category axis.";
     let mut f = single(Align::Left, "Title", "");
     f.single_axes_mut().xlabel("Hours\nUTC");
     let err = render_error(&f);
@@ -427,26 +427,11 @@ fn titles_refuse_other_control_characters_when_rendered() {
 
 #[test]
 fn checked_arguments_refuse_line_breaks_at_the_call() {
-    let line_breaks =
-        "line breaks are supported in titles, subtitles, captions, text() and annotate().";
+    let line_breaks = "line breaks are supported in titles, subtitles, captions, text(), annotate() and the \
+         categories of a category axis.";
+    // The categories of a category axis take line breaks, and no other control character.
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = f.add_axes(ScaleKind::Category, ScaleKind::Linear).unwrap();
-    let err = axes
-        .bar(
-            vec!["North".into(), "South\nEast".into()],
-            &[1.0, 2.0],
-            crate::BarOptions::default(),
-        )
-        .unwrap_err();
-    assert!(matches!(err, Error::Data { .. }), "{err}");
-    assert_eq!(
-        err.to_string(),
-        "Axes.bar(): categories[1] holds a line break at index 5; category names are one line."
-    );
-    assert_eq!(
-        (err.parameter(), err.hint()),
-        (Some("categories"), Some(line_breaks))
-    );
     let err = axes
         .line(
             AxisData::Categories(vec!["a\tb".into()]),
@@ -459,8 +444,38 @@ fn checked_arguments_refuse_line_breaks_at_the_call() {
         err.to_string(),
         "Axes.line(): x[0] holds U+0009 (a tab) at index 1; text cannot hold control characters."
     );
-    assert_eq!(err.hint(), Some("use spaces instead of tabs."));
+    assert_eq!(
+        err.hint(),
+        Some("use spaces instead of tabs, and \"\\n\" for a line break.")
+    );
     assert!(axes.marks().is_empty());
+    axes.bar(
+        vec!["North".into(), "South\nEast".into()],
+        &[1.0, 2.0],
+        crate::BarOptions::default(),
+    )
+    .unwrap();
+
+    // The categories of a pie name its slices in the legend, and are one line.
+    let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+    let err = f
+        .add_pie_axes()
+        .unwrap()
+        .pie(
+            vec!["North".into(), "South\nEast".into()],
+            &[1.0, 2.0],
+            PieOptions::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Data { .. }), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "PieAxes.pie(): categories[1] holds a line break at index 5; category names are one line."
+    );
+    assert_eq!(
+        (err.parameter(), err.hint()),
+        (Some("categories"), Some(line_breaks))
+    );
 
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
@@ -807,7 +822,8 @@ fn a_system_family_name_is_one_line() {
             "DejaVu Sans\n",
             "Font.system(): family holds a line break at index 11; font family names are one \
              line.",
-            "line breaks are supported in titles, subtitles, captions, text() and annotate().",
+            "line breaks are supported in titles, subtitles, captions, text(), annotate() and the \
+         categories of a category axis.",
         ),
         (
             "Inter\t",

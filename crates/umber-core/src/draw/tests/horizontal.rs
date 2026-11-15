@@ -345,10 +345,10 @@ fn categories_run_top_to_bottom() {
         .iter()
         .map(|l| l.text.as_str())
         .collect();
-    let order: Vec<f64> = layout.y_tick_labels.iter().map(|l| l.y).collect();
+    let order: Vec<f64> = layout.y_tick_labels.iter().map(|l| l.first().y).collect();
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
     let mut sorted = layout.y_tick_labels.clone();
-    sorted.sort_by(|a, b| a.y.total_cmp(&b.y));
+    sorted.sort_by(|a, b| a.first().y.total_cmp(&b.first().y));
     assert_eq!(
         sorted.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
         ["Gamma", "Alpha", "Beta", "Delta"]
@@ -357,7 +357,7 @@ fn categories_run_top_to_bottom() {
     let ends: Vec<f64> = layout
         .y_tick_labels
         .iter()
-        .map(|l| l.x + l.width())
+        .map(|l| l.first().x + l.width())
         .collect();
     assert!(
         ends.iter()
@@ -584,7 +584,7 @@ fn many_long_y_categories_fit_or_name_the_label() {
         .map(|l| l.width())
         .fold(0.0, f64::max);
     assert!(layout.plot.x > widest, "{} vs {widest}", layout.plot.x);
-    assert!(layout.y_tick_labels.iter().all(|l| l.x >= 0.0));
+    assert!(layout.y_tick_labels.iter().all(|l| l.first().x >= 0.0));
     assert_eq!(layout.y_tick_labels[0].text, labels[0]);
     assert!(wide.to_scene(&lib).is_ok());
     // A narrow one has no room for the plot, and the error names the widest label.
