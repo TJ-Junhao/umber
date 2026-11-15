@@ -2043,6 +2043,17 @@ pub(super) fn check_numeric_x(context: &'static str, kind: ScaleKind) -> Result<
     .with_hint("use a linear or log x axis."))
 }
 
+/// Checks the x axis, of scale kind `kind`, beside a category y axis that a horizontal reference
+/// line or span of the method `context` runs across: a linear, log or time axis, such as the
+/// time axis of events in rows. Two category axes take no reference mark: `Error::Usage` naming
+/// `x`, as [`check_numeric_x`] words it.
+pub(super) fn check_x_beside_category_rows(context: &'static str, kind: ScaleKind) -> Result<()> {
+    if kind == ScaleKind::Category {
+        return check_numeric_x(context, kind).map(drop);
+    }
+    Ok(())
+}
+
 /// The `Error::Usage` for a reference line or span given a number as `parameter` along `axis`, a
 /// category axis, where reference marks sit between two categories instead.
 pub(super) fn between_needed(

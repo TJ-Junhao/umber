@@ -972,10 +972,14 @@ mod tests {
                 )
             );
         }
-        assert_eq!(
-            refuse(ScaleKind::Time, cat, &hline).0,
-            "Axes.hline(): x is a time scale; Axes.hline() needs a numeric x axis."
-        );
+        // Beside a category y axis the x axis may be linear, log or time, as for events in rows.
+        for x in [LIN, LOG, ScaleKind::Time] {
+            let mut f = figure(x, cat);
+            let mut a = f.single_axes_mut();
+            hline(&mut a).unwrap();
+            hspan(&mut a).unwrap();
+            assert_eq!(f.single_axes().marks().len(), 2, "{x:?}");
+        }
         // A number on a category axis is refused with the way to place it between categories.
         let (text, parameter, hint) = refuse(LIN, cat, &|a: &mut AxesMut<'_>| {
             a.hspan(0.0, 1.0, SpanOptions::default()).map(drop)

@@ -449,6 +449,45 @@ fn a_line_between_categories_on_a_category_y_axis_runs_across_the_plot() {
 }
 
 #[test]
+fn a_divider_between_rows_of_events_runs_across_a_time_axis() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let at = |micros: i64| Some(crate::Instant::from_micros(micros).unwrap());
+    let day = 86_400_000_000;
+    let rows = ["Build", "Test", "Deploy"].map(String::from).to_vec();
+    let positions = vec![
+        crate::model::AxisData::Times(vec![at(0), at(day)]),
+        crate::model::AxisData::Times(vec![at(day / 2)]),
+        crate::model::AxisData::Times(vec![at(2 * day)]),
+    ];
+    f.add_axes(ScaleKind::Time, ScaleKind::Category)
+        .unwrap()
+        .events(rows, positions, crate::model::EventsOptions::default())
+        .unwrap()
+        .hline_between(between("Test", "Build"), RuleOptions::default())
+        .unwrap()
+        .hspan_between(
+            between("Test", "Build"),
+            between("Test", "Deploy"),
+            SpanOptions::default(),
+        )
+        .unwrap();
+    let plot = plot_of(&f);
+    let (strokes, fills) = strokes_and_fills(&f);
+    // The divider is the last stroke, above the event ticks; the first row is at the top.
+    let ((x0, y0), (x1, y1)) = ends(strokes.last().unwrap());
+    assert_near(y0, plot.y + plot.height / 3.0);
+    assert_near(y1, y0);
+    assert_near(x0, plot.x);
+    assert_near(x1, plot.right());
+    let span = fills.iter().find(|item| corners(item).len() == 4).unwrap();
+    let (left, top, right, bottom) = rect(span);
+    assert_near(top, plot.y + plot.height / 3.0);
+    assert_near(bottom, plot.y + 2.0 * plot.height / 3.0);
+    assert_near(left, plot.x);
+    assert_near(right, plot.right());
+}
+
+#[test]
 fn rules_and_spans_on_log_axes_are_placed_in_log_space() {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
     let log = ScaleKind::Log { base: LogBase::TEN };

@@ -46,7 +46,7 @@ use super::validation::{
     check_span, check_step_order, check_tick_axis, check_time_error_bars, check_time_limits,
     check_time_span, check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
-use super::validation::{check_band_axes, check_not_two_categories};
+use super::validation::{check_band_axes, check_not_two_categories, check_x_beside_category_rows};
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
     Align, ColorSpec, Error, Instant, LegendPosition, LegendStyle, Result, ScaleKind, SizeSpec,
@@ -2189,7 +2189,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.hline()";
         let axes = self.axes_mut();
         if axes.y == ScaleKind::Category {
-            check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+            check_x_beside_category_rows(CONTEXT, axes.x)?;
             return Err(between_needed(CONTEXT, SharedAxis::Y, "y"));
         }
         let y_transform = check_numeric_y(CONTEXT, axes.y)?;
@@ -2280,7 +2280,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.hspan()";
         let axes = self.axes_mut();
         if axes.y == ScaleKind::Category {
-            check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+            check_x_beside_category_rows(CONTEXT, axes.x)?;
             return Err(between_needed(CONTEXT, SharedAxis::Y, "low"));
         }
         let y = check_numeric_y(CONTEXT, axes.y)?;
@@ -2396,13 +2396,14 @@ impl<'a> AxesMut<'a> {
     }
 
     /// Adds a horizontal reference line on a category y axis between the categories of `y`, as
-    /// [`AxesMut::vline_between`] adds a vertical one on a category x axis. The x axis must be
-    /// linear or log, as for horizontal bars. The line runs the full width of the plot.
+    /// [`AxesMut::vline_between`] adds a vertical one on a category x axis. The x axis beside it
+    /// is linear, log or time, such as the time axis of events in rows. The line runs the full
+    /// width of the plot.
     ///
     /// # Errors
     ///
     /// Errors leave the axes unchanged: `Error::Usage` naming `y` unless the y axis is a
-    /// category axis, then naming `x` unless the x axis is linear or log. At render, as for
+    /// category axis, then naming `x` when the x axis is a category axis too. At render, as for
     /// [`AxesMut::vline_between`].
     ///
     /// # Examples
@@ -2423,7 +2424,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.hline()";
         let axes = self.axes_mut();
         check_between_axis(CONTEXT, SharedAxis::Y, "y", axes.y)?;
-        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+        check_x_beside_category_rows(CONTEXT, axes.x)?;
         axes.add_marks(
             CONTEXT,
             LabelSource::Options,
@@ -2487,13 +2488,12 @@ impl<'a> AxesMut<'a> {
 
     /// Adds a horizontal reference span on a category y axis between two points between
     /// categories, as [`AxesMut::vspan_between`] adds a vertical one on a category x axis. The x
-    /// axis must be linear or log, as for horizontal bars. The span runs the full width of the
-    /// plot.
+    /// axis beside it is linear, log or time. The span runs the full width of the plot.
     ///
     /// # Errors
     ///
     /// Errors leave the axes unchanged: `Error::Usage` naming `low` unless the y axis is a
-    /// category axis, then naming `x` unless the x axis is linear or log. At render, as for
+    /// category axis, then naming `x` when the x axis is a category axis too. At render, as for
     /// [`AxesMut::vspan_between`].
     ///
     /// # Examples
@@ -2520,7 +2520,7 @@ impl<'a> AxesMut<'a> {
         const CONTEXT: &str = "Axes.hspan()";
         let axes = self.axes_mut();
         check_between_axis(CONTEXT, SharedAxis::Y, "low", axes.y)?;
-        check_not_two_categories(CONTEXT, axes.x, axes.y)?;
+        check_x_beside_category_rows(CONTEXT, axes.x)?;
         axes.add_marks(
             CONTEXT,
             LabelSource::Options,

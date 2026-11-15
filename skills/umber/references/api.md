@@ -1328,12 +1328,12 @@ Add a horizontal reference line across the whole plot at ``y``.
 The line is drawn above the data marks. Without explicit y limits the y axis extends to
 include ``y``; with limits, a line outside them is not drawn.
 
-On a category y axis beside a linear or log x axis, ``y`` is a ``Between`` position: the
-line divides two neighbouring categories, halfway between their centres, and runs the
-full width of the plot. It does not add a category; whether its names are neighbouring
-categories of the axis is checked when the figure is rendered (``DataError`` for a name
-that is not a category and ``UsageError`` for categories that are not neighbours, from
-``to_png()``, ``to_svg()`` and the save methods).
+On a category y axis beside a linear, log or time x axis, ``y`` is a ``Between``
+position: the line divides two neighbouring categories, halfway between their centres,
+and runs the full width of the plot. It does not add a category; whether its names are
+neighbouring categories of the axis is checked when the figure is rendered
+(``DataError`` for a name that is not a category and ``UsageError`` for categories that
+are not neighbours, from ``to_png()``, ``to_svg()`` and the save methods).
 
 Args:
     y: The y value of the line: finite, and positive on a log y axis; a time on a time
@@ -1353,7 +1353,7 @@ Raises:
     DataError: If ``y`` is not finite, or not positive on a log axis.
     StyleError: If ``label`` is too long or holds a line break or another control character.
     UsageError: If ``y`` is a number on a category y axis, or a ``Between`` on a linear,
-        log or time y axis, or the x axis beside a category y axis is not linear or log.
+        log or time y axis, or both axes are category axes.
 
 Example:
 
@@ -1379,10 +1379,10 @@ The span fills the region between the two values across the whole plot, at the o
 of an area, and is drawn below the data marks. Without explicit y limits the y axis
 extends to include both values; with limits, the span is clipped to them.
 
-On a category y axis beside a linear or log x axis, both ends are ``Between`` positions
-and the span covers the categories between them whole. Their names are checked when the
-figure is rendered, as for ``hline()``, and then ``low`` must come before ``high`` along
-the axis (``StyleError``).
+On a category y axis beside a linear, log or time x axis, both ends are ``Between``
+positions and the span covers the categories between them whole. Their names are
+checked when the figure is rendered, as for ``hline()``, and then ``low`` must come
+before ``high`` along the axis (``StyleError``).
 
 Args:
     low: The lower y value: finite, and positive on a log y axis; a time on a time y
@@ -1405,8 +1405,7 @@ Raises:
     StyleError: If ``low`` is not below ``high``, or ``label`` is too long or holds a
         line break or another control character.
     UsageError: If the ends are numbers on a category y axis or ``Between`` positions on
-        a linear, log or time y axis, or the x axis beside a category y axis is not
-        linear or log.
+        a linear, log or time y axis, or both axes are category axes.
 
 Example:
 

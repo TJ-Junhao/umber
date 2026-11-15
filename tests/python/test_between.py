@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, cast
 from xml.etree import ElementTree
 
+import numpy as np
 import pytest
 
 import umber as ub
@@ -102,6 +103,24 @@ def test_spans_cover_whole_categories_on_either_category_axis() -> None:
     assert "Window" in ax.figure.to_svg(text=ub.SvgText.EDITABLE)
     h = rows().hline(ub.Between("N", "S")).hspan(ub.Between("N", "S"), ub.Between("S", "E"))
     assert h.figure.to_png()
+
+
+def test_rows_of_events_on_a_time_axis_take_a_divider_and_a_span() -> None:
+    day = np.datetime64("2026-03-01")
+    one = np.timedelta64(1, "D")
+    ax = ub.Figure(5, 3).add_axes(x=ub.Scale.time(), y=ub.Scale.category())
+    ax.events(["Build", "Test", "Deploy"], [[day, day + one], [day + 2 * one], [day + 3 * one]])
+    plain = ax.figure.to_svg()
+    ax.hline(ub.Between("Test", "Build"), dash=ub.Dash.DASHED, label="Release")
+    ax.hspan(ub.Between("Build", "Test"), ub.Between("Test", "Deploy"), label="Testing")
+    drawn = ax.figure.to_svg(text=ub.SvgText.EDITABLE)
+    assert drawn != plain
+    assert "Release" in drawn and "Testing" in drawn
+    assert ax.figure.to_png()
+    # Two category axes still take no divider.
+    heat = ub.Figure().add_axes(x=ub.Scale.category(), y=ub.Scale.category())
+    with pytest.raises(ub.UsageError, match="needs a numeric x axis"):
+        call(heat.hline)(ub.Between("a", "b"))
 
 
 def test_a_between_needs_a_category_axis() -> None:

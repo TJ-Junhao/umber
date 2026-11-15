@@ -28,6 +28,8 @@ rows = ub.Figure().add_axes(y=ub.Scale.category())
 divider = ub.Between("Q1", "Q2")
 by_category: ub.Axes[str, float] = cats.vline(divider, dash=ub.Dash.DASHED).vspan(divider, divider)
 by_row: ub.Axes[float, str] = rows.hline(divider, label="Split").hspan(divider, divider)
+timed_rows = ub.Figure().add_axes(x=ub.Scale.time(), y=ub.Scale.category())
+by_timed_row: ub.Axes[ub.Time, str] = timed_rows.hline(divider).hspan(divider, divider)
 
 # Negative: Between needs a category axis along its line.
 numeric.vline(divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

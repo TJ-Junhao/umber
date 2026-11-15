@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 1745a1e62e01b2f2946089118bc959d204b632ac
+# revision: f88d2eeac7e0871980f711f6e0441d8a835e8f54
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt
@@ -24,7 +24,7 @@ f1f2bdb55580340607df02df92909a0b7733bc4be2b8789e71aa22ed35be00e6  errors/baselin
 e0643cbc622ad6eca7816f18835e7e6bea2885bc163b98344ab9e61d5f4bf591  errors/box.txt
 6f90228298b349625f3c99a1983311e7d422126426c1b3d4c4580e7f5d2eebe0  errors/bubbles.txt
 8c6ce49313c7cc1278f3f1c1f0c8a19536536f062feb7e356fb3d5b91ff3e325  errors/caption.txt
-46874211ac00a4858c44326c3dd2c482ffeb45e0d8150a8d34b8ba184c45612a  errors/category-axis.txt
+8267a538a4c675d860062d71b008d170ec8327b4ffc933931937246a4fbfadde  errors/category-axis.txt
 a2591a3b5f637b265ab5e543f411f68d7ec5a0ca500e8cd29921f7dc237568ea  errors/color-by.txt
 b05871ed85b38d8d8348b8d46804f8f72c8944b88fb53a39b055a30a3ee07dec  errors/contour.txt
 ecf50fa26396839fbe7191e22476962c34522171e995d9e715994772a93b3300  errors/ecdf.txt
@@ -376,6 +376,8 @@ e3223a532ae026b78eeaa9062cc5a3fc00a79265c5f4afa18105406afa716e4d  png/category-a
 39cb44370e78e94e56b02a9402cfec152c6fee585f6b1a2be8cfe85d1bb78624  png/category-axis-rows.dpi72.png
 372558f3ad0480eaa9bbfef26d3ff9c33faef6deb6d8e0baa56f70f095cc7045  png/category-axis-shared-grid.dpi200.png
 4914b2651d946493f721070bdb23f7bd774e2d665a587bc14fc542047f324e6d  png/category-axis-shared-grid.dpi72.png
+41e180b42192b92120093cd2586854d084be3ca26a01f4544c6f27e1cd2d0478  png/category-axis-time-rows.dpi200.png
+9eb087c318060f81eeda62d604dc3da073bf65c73a5ac128c080378fd08d8a38  png/category-axis-time-rows.dpi72.png
 ff617baee494405d59005e29a38e695c7989043f23273d04a25a2ec5fcfae6d5  png/color-by-all-nan.dpi200.png
 5c6e93248f24e8f962b4c3cfd687888e29321ff6da3c7e663330676ddc11d264  png/color-by-all-nan.dpi72.png
 035e189aa0b840b57c6ba4497953f7e91f60976b058e0a72d408126690d4e8f5  png/color-by-bubbles-graphite.dpi200.png
@@ -2356,6 +2358,7 @@ ac9f7a3b37b6d677b4de5c8ba82016a96fb2a11fe6cfb680af9a808796ebd309  scene/category
 c9601a34429dc642e4f2df308105f252dcded90d26fda9e232efa67ce544cb3a  scene/category-axis-highlight.txt
 86bb697a0e1dc8d65f58c4cd2d6ddc48650372637520cfb03bc99613a6817f11  scene/category-axis-rows.txt
 4cbbe2f1d6d9ec9ff2e7ae9a12d1b02f2f56803357bdb500ee704b261833365b  scene/category-axis-shared-grid.txt
+b95185a7a6f47cc74aa0e053e08254bd0bcbb4cfe2173ba509cc165133eab42c  scene/category-axis-time-rows.txt
 a221734c9c1955f2ae691a401c87e5d8392cd9228506414f253dc05e4bb25bbb  scene/color-by-all-nan.txt
 ffb974a9e48e09ba687f384dbb6d5d132b13714740708d757219980949ca553c  scene/color-by-bubbles-graphite.txt
 7952c42e0f0f01c56e315b6e03f99270326d5b68a0d82333e504cd269457890d  scene/color-by-bubbles-midnight.txt
@@ -3586,6 +3589,8 @@ a20eb00234a1632d8a3394e1aec0dcd4c11899fe009408daa53197a483810684  svg/caption-si
 bbedf7f0fcc0bf00e0c72a68579449106defa43c665481eac432bb0d223c3744  svg/category-axis-rows.outlines.svg
 c28e3cadb179688a030696db5f5dfce103c0bcf0d11342f677cbd7e7fa6259d3  svg/category-axis-shared-grid.editable.svg
 e9ff56317b15b93ccfcf8c70e514d72a34e318e3d0d075acbf14d2fe11108da7  svg/category-axis-shared-grid.outlines.svg
+b24348a6ecc8079df8524127f852f189e63ac80263a95d9412a6280e0438fdfd  svg/category-axis-time-rows.editable.svg
+79b0af7c8c1de9fdb060102687bb6a9977354c25750c0d6accb7a22f410fe74f  svg/category-axis-time-rows.outlines.svg
 bc4268d619d52e57957bd7cda5a4ae15dd425642e7fc11aa3f3841b2fae05e89  svg/color-by-all-nan.editable.svg
 0c5064c217effe82803bde32026421199051749ed883baf31afc1f451898b792  svg/color-by-all-nan.outlines.svg
 eadefe7e7a833fe37cd83ef12fecd7aa2fa1c3c1d6f4c31af548018a7b6130be  svg/color-by-bubbles-graphite.editable.svg

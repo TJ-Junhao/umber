@@ -5,17 +5,20 @@
 //! horizontal bars with row names of several lines, a divider and a span on the category y
 //! axis; a highlighted category of two lines; crowded category names of two and three lines,
 //! which the automatic labels thin by their whole blocks; a divider on a grid with a shared
-//! category axis, between categories of different panels.
+//! category axis, between categories of different panels; events in rows on a time axis with a
+//! divider and a span between rows.
 //!
 //! In `errors/category-axis.txt`: every error branch of `Between` and of the methods that take
 //! one, in the order the checks run, with the state after each failed call, and the failures of
 //! rendering: a name that is not a category, two categories that are not neighbours, span ends
 //! in the wrong order, and the same on a grid.
 
-use umber_core::figure::{BarOptions, LineOptions, RuleOptions, ScatterOptions, SpanOptions};
+use umber_core::figure::{
+    BarOptions, EventsOptions, LineOptions, RuleOptions, ScatterOptions, SpanOptions,
+};
 use umber_core::{
-    AxisData, AxisValue, Between, ColorSpec, Dash, Figure, FontLibrary, Grid, GridIndex, Placement,
-    ScaleKind, Share, SvgText, Theme,
+    AxisData, AxisValue, Between, ColorSpec, Dash, Figure, FontLibrary, Grid, GridIndex, Instant,
+    Placement, ScaleKind, Share, SvgText, Theme,
 };
 
 use super::super::{Log, Output, axes, emit_scene, figure, linear, log, themes};
@@ -153,6 +156,44 @@ fn figures() -> Vec<(String, Figure)> {
         )
         .unwrap();
     out.push(("category-axis-crowded-y".to_owned(), f));
+
+    // Events in rows on a time axis, with a divider and a span between rows.
+    let day = 86_400_000_000_i64;
+    let at = |days: i64| Some(Instant::from_micros(days * day).unwrap());
+    let mut f = figure(
+        6.0,
+        3.5,
+        Theme::midnight(),
+        ScaleKind::Time,
+        ScaleKind::Category,
+    );
+    axes(&mut f)
+        .title("Pipeline runs")
+        .events(
+            names(&["Build", "Test\nsuite", "Deploy"]),
+            vec![
+                AxisData::Times(vec![at(0), at(3), at(7), at(12)]),
+                AxisData::Times(vec![at(1), at(4), at(8)]),
+                AxisData::Times(vec![at(5), at(13)]),
+            ],
+            EventsOptions::default(),
+        )
+        .unwrap()
+        .hline_between(
+            between("Build", "Test\nsuite"),
+            RuleOptions {
+                dash: Dash::Dashed,
+                ..rule("Gate")
+            },
+        )
+        .unwrap()
+        .hspan_between(
+            between("Build", "Test\nsuite"),
+            between("Test\nsuite", "Deploy"),
+            span("Tests"),
+        )
+        .unwrap();
+    out.push(("category-axis-time-rows".to_owned(), f));
 
     // A divider on a grid with a shared category axis, between categories of two panels.
     let grid = Grid::new(1, 2).unwrap().with_share_x(Share::All);
