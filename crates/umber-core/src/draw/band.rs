@@ -5,7 +5,7 @@
 
 use super::MarkContext;
 use super::clip::{ClampedPoint, clamp_polyline};
-use super::fill::AREA_ALPHA;
+use super::fill::{AREA_ALPHA, fill_color};
 use super::line::{LineClip, downsample_columns, downsample_range};
 use super::mapping::{PlotPoint, axis_numbers, axis_shared};
 use crate::Rgba;
@@ -86,7 +86,7 @@ pub(super) fn band_fill_items(
     if !path.is_empty() {
         items.push(Item::Fill {
             path,
-            paint: Paint::Solid(color.scale_alpha(AREA_ALPHA)),
+            paint: Paint::Solid(fill_color(color, AREA_ALPHA)),
             rule: FillRule::NonZero,
         });
     }

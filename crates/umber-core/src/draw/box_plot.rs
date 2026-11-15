@@ -8,7 +8,7 @@ use super::MarkContext;
 use super::bar::{GROUP_GAP, group_slots, in_axis_order};
 use super::clip::{Bounds, clip_segment};
 use super::error_bars::bar_style;
-use super::fill::AREA_ALPHA;
+use super::fill::{AREA_ALPHA, fill_color};
 use super::mapping::{AxisPoint, axis_value};
 use super::scatter::scatter_layers;
 use crate::geometry::Path;
@@ -116,7 +116,7 @@ fn box_group(
             outline.extend(&path);
             items.push(Item::Fill {
                 path,
-                paint: Paint::Solid(color.scale_alpha(AREA_ALPHA)),
+                paint: Paint::Solid(fill_color(color, AREA_ALPHA)),
                 rule: FillRule::NonZero,
             });
         }

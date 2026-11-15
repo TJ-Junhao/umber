@@ -8,7 +8,7 @@
 use crate::model::Layer;
 use std::collections::HashSet;
 
-use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, marker_alpha};
+use crate::draw::fill::{AREA_ALPHA, HISTOGRAM_TOP_ALPHA, fill_color, marker_alpha};
 use crate::model::Figure;
 use crate::resolve::{Anchor, AxisLimits, Limits, ResolvedMark, SeriesKey, SeriesKind};
 use crate::{Dash, FillStyle, LegendStyle, Marker, Rgba, ScaleKind, Theme, TickFormat};
@@ -40,7 +40,7 @@ impl SwatchFill {
     fn color(self, color: Rgba, theme: &Theme) -> Rgba {
         let share = match self {
             Self::Series => return color,
-            Self::Solid => 1.0,
+            Self::Solid => return color.over(theme.background()),
             Self::Area => AREA_ALPHA,
             Self::Histogram => match theme.fill_style() {
                 FillStyle::Gradient => HISTOGRAM_TOP_ALPHA,
@@ -48,7 +48,7 @@ impl SwatchFill {
             },
             Self::Marker => marker_alpha(theme),
         };
-        color.scale_alpha(share).over(theme.background())
+        fill_color(color, share).over(theme.background())
     }
 }
 

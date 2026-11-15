@@ -36,8 +36,8 @@ NO_SIZE = (0, 0.0)
 # Bars without value labels: annotate, format and size.
 NO_LABELS = (False, None, NO_SIZE)
 NO_POINT_LABELS = (False, None, NO_SIZE, 0)
-# No error bars and no connecting line of a scatter's own: x_error, y_error and connect.
-NO_OWN_MARKS = (None, None, False)
+# No error bars and no connecting line of a scatter's own: x_error, y_error, connect, connect_width.
+NO_OWN_MARKS = (None, None, False, NO_SIZE)
 RED = (2, 0xD64933FF, 1.0)
 BLUE = (2, 0x3366B8FF, 1.0)
 LINEAR, LOG, CATEGORY = 0, 1, 2

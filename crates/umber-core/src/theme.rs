@@ -211,11 +211,12 @@ impl Align {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FillStyle {
     /// A flat fill: areas at 0.32 of the series color's opacity, histogram bins in the series
-    /// color.
+    /// color. The 0.32 applies to opaque colors only; a translucent color is used as given.
     Solid,
     /// A vertical gradient that fades out toward the baseline: areas from 0.32 of the series
     /// color's opacity at the line, histogram bins from 0.95 at the tallest bin, with a solid
-    /// top edge on each bin.
+    /// top edge on each bin. The 0.32 and 0.95 apply to opaque colors only; a translucent
+    /// color sets the colored end of the gradient as given, and the gradient fades as before.
     Gradient,
 }
 

@@ -4465,8 +4465,9 @@ impl<'a> AxesMut<'a> {
 
     /// Adds one scatter per group, in order with palette colors.
     /// Coordinates follow [`AxesMut::scatter_shared`]; groups must not be empty.
-    /// All groups use the same marker, size, value labels and `render`, and with `connect` each
-    /// group's line joins only its own points. Each group's labels, error bars and line take its
+    /// All groups use the same marker, size, value labels and `render`, and with `connect` (the
+    /// first of the pair that follows the labels, the second being `connect_width`) each group's
+    /// line joins only its own points. Each group's labels, error bars and line take its
     /// color, and with [`MarkRender::Raster`](crate::MarkRender::Raster) the groups, which follow
     /// each other, share one image unless an item that is not an image is drawn between them.
     /// A failed call adds nothing.
@@ -4490,7 +4491,7 @@ impl<'a> AxesMut<'a> {
     ///     AxisData::Numbers(vec![2.0, 3.0]),
     /// )];
     /// let labels = PointLabels::default();
-    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, labels, true, MarkRender::Vector)?;
+    /// axes.grouped_scatter(groups, Marker::Circle, SizeSpec::Auto, labels, (true, SizeSpec::Auto), MarkRender::Vector)?;
     /// assert_eq!(axes.marks().len(), 1);
     /// # Ok::<(), umber_core::Error>(())
     /// ```
@@ -4500,7 +4501,7 @@ impl<'a> AxesMut<'a> {
         marker: crate::Marker,
         size: crate::SizeSpec,
         labels: PointLabels,
-        connect: bool,
+        (connect, connect_width): (bool, crate::SizeSpec),
         render: crate::MarkRender,
     ) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.scatter()";
@@ -4536,6 +4537,7 @@ impl<'a> AxesMut<'a> {
                         x_error,
                         y_error,
                         connect,
+                        connect_width,
                         render,
                         ..ScatterOptions::default()
                     },

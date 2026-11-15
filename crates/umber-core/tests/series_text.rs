@@ -339,7 +339,7 @@ fn grouped_scatters_label_each_group_in_its_readable_color() {
                 format: Some(TickFormat::fixed(1).unwrap()),
                 ..PointLabels::default()
             },
-            false,
+            (false, SizeSpec::Auto),
             umber_core::MarkRender::Vector,
         )
         .unwrap();

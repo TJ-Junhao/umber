@@ -160,6 +160,7 @@ def scatter(
     x_error: tuple[Values[float], Values[float]] | Auto = AUTO,
     y_error: tuple[Values[float], Values[float]] | Auto = AUTO,
     connect: bool = False,
+    connect_width: Size = Size.AUTO,
     render: Render = Render.VECTOR,
 ) -> Axes[float, float]:
     """Plot a marker at each point on a new figure and return its axes.
@@ -190,6 +191,8 @@ def scatter(
         y_error: The ends ``(low, high)`` of each point's vertical error bar, as in
             ``Axes.scatter()``.
         connect: Whether a line joins the points in input order, as in ``Axes.scatter()``.
+        connect_width: The width of the joining line, as in ``Axes.scatter()``; only with
+            ``connect=True``. ``Size.AUTO`` is half the line width of the theme.
         render: ``Render.RASTER`` draws the markers as one image in SVG and PDF output, as in
             ``Axes.scatter()``.
 
@@ -235,6 +238,7 @@ def scatter(
             x_error=x_error,
             y_error=y_error,
             connect=connect,
+            connect_width=connect_width,
             render=render,
         )
 

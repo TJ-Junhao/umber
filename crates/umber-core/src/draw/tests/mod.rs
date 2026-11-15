@@ -33,6 +33,7 @@ mod stacked_area;
 mod stem;
 mod step;
 mod strip;
+mod translucent_fills;
 mod violin;
 
 use crate::geometry::{Path, PathVerb, Point};

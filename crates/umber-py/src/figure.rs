@@ -929,6 +929,7 @@ impl Figure {
         x_error: ErrorArgs<'_>,
         y_error: ErrorArgs<'_>,
         connect: bool,
+        connect_width: SizeArg,
         render: i64,
     ) -> PyResult<()> {
         const CONTEXT: &str = "Axes.scatter()";
@@ -942,6 +943,7 @@ impl Figure {
             x_error: error_range(CONTEXT, "x_error", x_error)?,
             y_error: error_range(CONTEXT, "y_error", y_error)?,
             connect,
+            connect_width: size_spec(connect_width)?,
             render: enum_value::<MarkRender>(render)?,
         };
         self.axes(row, col)?
@@ -2533,6 +2535,7 @@ impl Figure {
         label_size: SizeArg,
         place: i64,
         connect: bool,
+        connect_width: SizeArg,
         render: i64,
     ) -> PyResult<()> {
         let groups = scatter_groups("Axes.scatter()", groups)?;
@@ -2540,7 +2543,14 @@ impl Figure {
         let labels = point_labels(annotate, format, label_size, place)?;
         let render = enum_value::<MarkRender>(render)?;
         self.axes(row, col)?
-            .grouped_scatter(groups, marker, size, labels, connect, render)
+            .grouped_scatter(
+                groups,
+                marker,
+                size,
+                labels,
+                (connect, size_spec(connect_width)?),
+                render,
+            )
             .map(drop)
             .map_err(core_error)
     }

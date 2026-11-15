@@ -173,6 +173,7 @@ mod corpus {
     pub mod text_size;
     pub mod ticks;
     pub mod time;
+    pub mod translucent_fills;
     pub mod triangles;
     pub mod tricontour;
     pub mod twin_y;
@@ -277,6 +278,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::tricontour::cases(&lib, &mut sink);
     corpus::raster_marks::cases(&lib, &mut sink);
     corpus::axis_limits::cases(&lib, &mut sink);
+    corpus::translucent_fills::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {

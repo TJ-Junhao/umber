@@ -428,6 +428,7 @@ class Figure:
         x_error: _ErrorArg,
         y_error: _ErrorArg,
         connect: bool,
+        connect_width: _SizeArg,
         render: int,
     ) -> None: ...
     def bubbles(
@@ -891,6 +892,7 @@ class Figure:
         label_size: _SizeArg,
         place: int,
         connect: bool,
+        connect_width: _SizeArg,
         render: int,
     ) -> None: ...
     def grouped_step(

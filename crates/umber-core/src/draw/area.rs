@@ -4,7 +4,7 @@
 
 use super::MarkContext;
 use super::clip::{clamp_polyline, crossing};
-use super::fill::AREA_ALPHA;
+use super::fill::{AREA_ALPHA, fill_color, fill_share};
 use super::line::{LineClip, plot_subpaths, stroke};
 use super::mapping::PlotPoint;
 use crate::geometry::Path;
@@ -103,13 +103,14 @@ fn side(y: f64, baseline_y: f64) -> BaselineSide {
 /// (the boundary, then down to the baseline and back).
 ///
 /// Under [`FillStyle::Gradient`] a part is painted with the vertical ramp from the line's
-/// extreme on its side of the baseline, at 0.32 of the line's opacity, to the baseline, at 0:
+/// extreme on its side of the baseline, at 0.32 of the line's opacity, to the baseline, at 0
+/// (a translucent color is used as given: its own opacity at the line, not 0.32 of it):
 /// parts above the baseline fade from their top, parts below from their bottom. The gradient
 /// runs from the part's drawn extreme to the baseline, so its ends stay inside the clip, and
 /// each end has the ramp's opacity there (see [`ramp_share`]): where the line runs beyond the
 /// plot, the drawn extreme is the clip edge, which gets the share of its distance to the
 /// baseline, not the full 0.32. Under [`FillStyle::Solid`] a part is painted flat at 0.32 of the
-/// line's opacity.
+/// line's opacity, or in a translucent color as given.
 fn area_fills(
     boundary: &[FillPoint],
     baseline: Baseline,
@@ -186,12 +187,17 @@ fn area_fills(
             path.line_to(at_baseline(first.x));
             path.close();
             let paint = match style {
-                FillStyle::Solid => Paint::Solid(color.scale_alpha(AREA_ALPHA)),
+                FillStyle::Solid => Paint::Solid(fill_color(color, AREA_ALPHA)),
                 FillStyle::Gradient => vertical_fade(
                     color,
                     FadeStop {
                         y: extreme,
-                        share: ramp_share(drawn, line, baseline.value),
+                        share: ramp_share(
+                            drawn,
+                            line,
+                            baseline.value,
+                            fill_share(color, AREA_ALPHA),
+                        ),
                     },
                     FadeStop {
                         y: baseline_y,
@@ -209,19 +215,19 @@ fn area_fills(
 }
 
 /// The share of the line's opacity that an area's gradient ramp gives the axis-space value
-/// `drawn`, for a ramp from `line`, the line's extreme on one side of the baseline, at 0.32, to
-/// the baseline `base`, at 0: `0.32 × clamp((drawn − base) / (line − base), 0, 1)`. When the
-/// line is drawn up to its extreme (`drawn == line`, the line stays inside the clip), the share
-/// is exactly 0.32.
-fn ramp_share(drawn: f64, line: f64, base: f64) -> f32 {
+/// `drawn`, for a ramp from `line`, the line's extreme on one side of the baseline, at `top`
+/// (0.32 for an opaque color, 1 for a translucent one), to the baseline `base`, at 0:
+/// `top × clamp((drawn − base) / (line − base), 0, 1)`. When the line is drawn up to its
+/// extreme (`drawn == line`, the line stays inside the clip), the share is exactly `top`.
+fn ramp_share(drawn: f64, line: f64, base: f64, top: f32) -> f32 {
     if drawn == line {
-        return AREA_ALPHA;
+        return top;
     }
     let ratio = (drawn - base) / (line - base);
     if ratio.is_nan() {
         return 0.0;
     }
-    AREA_ALPHA * ratio.clamp(0.0, 1.0) as f32
+    top * ratio.clamp(0.0, 1.0) as f32
 }
 
 /// One end of a [`vertical_fade`]: a plot y and the share of the color's own opacity there.

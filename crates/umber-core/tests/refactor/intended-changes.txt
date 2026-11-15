@@ -153,6 +153,7 @@ text-size-points-pigment
 text-size-times-graphite
 text-size-times-midnight
 text-size-times-pigment
+translucent-area-graphite
 twin-y-direct-colorbars-graphite
 twin-y-direct-colorbars-midnight
 twin-y-direct-colorbars-pigment

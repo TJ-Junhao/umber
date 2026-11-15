@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::MarkContext;
 use super::clip::Bounds;
 use super::contrast::Background;
-use super::fill::marker_alpha;
+use super::fill::{fill_color, marker_alpha};
 use super::mapping::AxisPoint;
 use super::marker::{extent, marker_shape};
 use crate::color_scale::ResolvedColorScale;
@@ -38,7 +38,7 @@ pub(crate) fn marker_reach(shape: Marker, diameter: f32, outline: f32) -> (f64, 
 
 /// The scene items of one scatter: one batch of `shape` markers of diameter `size` (the
 /// diameter of the fill, see [`Theme::drawn_fill_size`]), filled with `color` at the theme's
-/// marker alpha times the color's own, outlined 0.8 pt in the background color. Points whose
+/// marker alpha (a translucent color is used as given), outlined 0.8 pt in the background color. Points whose
 /// marker cannot reach the plot area are dropped. The outlines come first and the fills after
 /// them, so no outline lies over a fill of the same batch.
 pub(super) fn scatter_layers(
@@ -49,7 +49,7 @@ pub(super) fn scatter_layers(
     shape: Marker,
     size: f32,
 ) -> Vec<Item> {
-    let fill = color.scale_alpha(marker_alpha(context.theme));
+    let fill = fill_color(color, marker_alpha(context.theme));
     markers_layers(context, (xs, ys), fill, shape, size, Outline::Background)
 }
 
@@ -220,7 +220,7 @@ impl PointFill<'_> {
     /// (NaN), which is not drawn.
     pub(super) fn at(self, theme: &Theme, index: usize) -> Option<Rgba> {
         match self {
-            PointFill::Uniform(color) => Some(color.scale_alpha(marker_alpha(theme))),
+            PointFill::Uniform(color) => Some(fill_color(color, marker_alpha(theme))),
             PointFill::Mapped { scale, values } => {
                 values.get(index).and_then(|&value| scale.color(value))
             }
