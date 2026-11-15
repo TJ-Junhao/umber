@@ -16,7 +16,7 @@ use crate::layout::{
 };
 use crate::legend::Legend;
 use crate::model::Layer;
-use crate::model::{Axes, Figure, ShareGroups, label_visibility};
+use crate::model::{Axes, ExplicitLimits, Figure, GivenLimits, ShareGroups, label_visibility};
 use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
@@ -222,6 +222,32 @@ fn check_equal_aspect(figure: &Figure, context: &'static str) -> Result<()> {
             figure
                 .check_equal_aspect_share(axes, context)
                 .map_err(|error| in_cell(figure, layer, error))?;
+        }
+    }
+    Ok(())
+}
+
+/// Checks every axis group of `panels` whose limits fix one end ([`resolve::check_fixed_end`]),
+/// x axes first, each group in the row-major order of its first member: the first error, in
+/// `context`, starts with that member's cell on a grid of more than one cell.
+fn check_fixed_ends(
+    figure: &Figure,
+    panels: &[Panel<'_>],
+    groups: &ShareGroups,
+    context: &'static str,
+) -> Result<()> {
+    for side in Side::BOTH {
+        let keys = side.groups(groups);
+        for (i, panel) in panels.iter().enumerate() {
+            if keys[i] != i {
+                continue;
+            }
+            let marks = (0..panels.len())
+                .filter(|&j| keys[j] == i)
+                .flat_map(|j| panels[j].marks.iter());
+            let limits = Limits::of(panel.axes);
+            resolve::check_fixed_end(marks, side.axis(), limits.axis(side.axis()), context)
+                .map_err(|err| in_cell(figure, panel.axes, err))?;
         }
     }
     Ok(())
@@ -1387,16 +1413,17 @@ fn plan(
                 if axis.ticks.explicit().is_some() {
                     continue;
                 }
-                let scale = match side {
-                    Side::X => resolved[i].x.continuous(),
-                    Side::Y => resolved[i].y.continuous(),
+                let resolved_axis = match side {
+                    Side::X => &resolved[i].x,
+                    Side::Y => &resolved[i].y,
                 };
-                let Some(scale) = scale.copied() else {
+                let steps = resolved_axis.steps;
+                let Some(scale) = resolved_axis.continuous().copied() else {
                     continue;
                 };
                 let mut candidates: Vec<Vec<_>> = if scale.transform() == crate::Transform::Linear {
                     scale
-                        .tick_pairs(axis.ticks.format())
+                        .tick_pairs(axis.ticks.format(), steps)
                         .into_iter()
                         .map(|pair| {
                             pair.into_iter()
@@ -2177,13 +2204,28 @@ impl<'a> ArrowPlanner<'_, 'a> {
         }
         panels.iter().enumerate().find_map(|(i, panel)| {
             let limits = Limits::of(panel.axes);
-            let automatic = [ValueAxis::X, ValueAxis::Y].map(|axis| match limits.axis(axis) {
-                resolve::AxisLimits::Continuous(axis) => axis.explicit.is_none(),
-                resolve::AxisLimits::Time(axis) => axis.explicit.is_none(),
-                resolve::AxisLimits::Category => false,
+            let held = [ValueAxis::X, ValueAxis::Y].map(|axis| {
+                use draw::field::HeldEnds;
+                match limits.axis(axis) {
+                    resolve::AxisLimits::Continuous(axis) => match axis.explicit {
+                        None => HeldEnds::Both,
+                        Some(GivenLimits::OneEnd(end, value)) => {
+                            HeldEnds::Free(end, crate::bubble_fit::ReachFrom::Number(value))
+                        }
+                        Some(GivenLimits::Both(_)) => HeldEnds::Neither,
+                    },
+                    resolve::AxisLimits::Time(axis) => match axis.explicit {
+                        None => HeldEnds::Both,
+                        Some(GivenLimits::OneEnd(end, time)) => {
+                            HeldEnds::Free(end, crate::bubble_fit::ReachFrom::Time(time))
+                        }
+                        Some(GivenLimits::Both(_)) => HeldEnds::Neither,
+                    },
+                    resolve::AxisLimits::Category => HeldEnds::Neither,
+                }
             });
             let (resolved, layout) = &planned.panels[i];
-            draw::field::spill(&panel.marks, &frames[i], resolved, layout.plot, automatic)
+            draw::field::spill(&panel.marks, &frames[i], resolved, layout.plot, held)
                 .map(|spill| (i, spill))
         })
     }
@@ -2556,7 +2598,23 @@ fn lay_out_cells(
             if matches!(passing, Rooms::Provisional(_)) && !equal {
                 continue;
             }
-            let limits = [axes.x_limits(), axes.y_limits()];
+            // Explicit limits keep their window; one explicit end keeps itself, and the other
+            // end holds whole cells.
+            let window = |given| match given {
+                Some(ExplicitLimits::Continuous(GivenLimits::Both(limits))) => {
+                    let (lo, hi) = limits.domain();
+                    crate::bin2d::Window::Fixed(lo, hi)
+                }
+                Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(end, value))) => {
+                    crate::bin2d::Window::End(end, value)
+                }
+                Some(ExplicitLimits::Time(_)) | None => crate::bin2d::Window::Automatic,
+            };
+            let windows = [window(axes.x_given_limits()), window(axes.y_given_limits())];
+            // Counting on its own fits whole cells around the data alone, so any explicit end
+            // needs the axes; the metric changes with the aspect only beside both explicit ends.
+            let given = windows.map(|window| window != crate::bin2d::Window::Automatic);
+            let fixed = windows.map(crate::bin2d::Window::is_fixed);
             let shared = groups.x.iter().filter(|&&g| g == groups.x[i]).count() > 1
                 || groups.y.iter().filter(|&&g| g == groups.y[i]).count() > 1;
             // Hexbins without paired finite points count no cells, and leave the others alone.
@@ -2567,15 +2625,15 @@ fn lay_out_cells(
                     matches!(m, ResolvedMark::Hexbin { mark, .. } if !mark.extents[0].is_empty())
                 })
                 .count();
-            let independent = !shared && !equal && limits == [None, None] && hexbins <= 1;
+            let independent = !shared && !equal && given == [false, false] && hexbins <= 1;
             let only_hexbin = panel
                 .marks
                 .iter()
                 .all(|m| matches!(m, ResolvedMark::Hexbin { .. }));
             let aspect_change = aspects[i] / counting_aspects[i] - 1.0;
             let recount = !equal
-                && limits[1].is_some()
-                && if limits[0].is_some() {
+                && fixed[1]
+                && if fixed[0] {
                     aspect_change.abs() >= 1e-12
                 } else {
                     aspect_change < -1e-12
@@ -2606,7 +2664,11 @@ fn lay_out_cells(
                                     // The shape of the limits, which a provisional plot may not
                                     // have, and no room for end caps: both keep the metric equal.
                                     if equal { x / y } else { aspects[i] },
-                                    if equal { [None, None] } else { limits },
+                                    if equal {
+                                        [crate::bin2d::Window::Automatic; 2]
+                                    } else {
+                                        windows
+                                    },
                                 )
                             };
                             *bins =
@@ -2624,11 +2686,11 @@ fn lay_out_cells(
                                 })?;
                         }
                         if equal {
-                            bins.fit_equal_aspect(scales[i], limits);
+                            bins.fit_equal_aspect(scales[i], windows);
                         } else if independent && only_hexbin && tight {
                             bins.fit(aspects[i]);
                         } else {
-                            bins.fit_on_axes(aspects[i], scales[i], limits, context)
+                            bins.fit_on_axes(aspects[i], scales[i], windows, context)
                                 .map_err(Unplanned::Failed)?;
                         }
                         for j in 0..2 {
@@ -2938,6 +3000,7 @@ fn scene_with_labels(
     let rooms = Rooms::of(reference.as_ref());
     point_labels::fit_then_place(|held| {
         let mut panels = panels(figure, &groups, fonts)?;
+        check_fixed_ends(figure, &panels, &groups, context)?;
         if let Some(held) = held {
             for (panel, sides) in panels.iter_mut().zip(held) {
                 panel.points.hold(sides.clone());

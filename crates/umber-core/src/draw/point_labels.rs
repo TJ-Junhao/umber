@@ -72,7 +72,7 @@ use crate::bubble_fit::{EndReach, ReachFrom};
 use crate::color_scale::ResolvedColorScale;
 use crate::error::quoted;
 use crate::layout::{Area, ColumnInput, Label, Layout, value_text};
-use crate::model::{Axes, AxisData, values_on_x};
+use crate::model::{Axes, AxisData, ExplicitLimits, GivenLimits, LimitEnd, values_on_x};
 use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
 use crate::scene::Item;
 use crate::text::SceneFonts;
@@ -178,19 +178,48 @@ impl Sides {
 enum Limits {
     /// Automatic limits, which grow to hold every point.
     Automatic,
-    /// Explicit numeric limits, the lower first.
+    /// Explicit numeric limits, the lower first; an automatic end of a one-sided limit is
+    /// infinite.
     Numbers(f64, f64),
-    /// Explicit time limits, the earlier first.
-    Times(Instant, Instant),
+    /// Explicit time limits, the earlier first; `None` for an automatic end of a one-sided
+    /// limit.
+    Times(Option<Instant>, Option<Instant>),
 }
 
 impl Limits {
-    /// The limits of an axis with the explicit numeric limits `numbers` or time limits `times`.
-    fn new(numbers: Option<(f64, f64)>, times: Option<(Instant, Instant)>) -> Limits {
-        match (numbers, times) {
-            (Some((a, b)), _) => Limits::Numbers(a.min(b), a.max(b)),
-            (None, Some((a, b))) => Limits::Times(a.min(b), a.max(b)),
-            (None, None) => Limits::Automatic,
+    /// The limits of an axis with the explicit limits `given`, if set. A point beyond an
+    /// automatic end is always drawn, since that end holds every point beyond the fixed one.
+    fn new(given: Option<ExplicitLimits>) -> Limits {
+        match given {
+            None => Limits::Automatic,
+            Some(ExplicitLimits::Continuous(GivenLimits::Both(scale))) => {
+                let (low, high) = scale.domain();
+                Limits::Numbers(low, high)
+            }
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(LimitEnd::Low, low))) => {
+                Limits::Numbers(low, f64::INFINITY)
+            }
+            Some(ExplicitLimits::Continuous(GivenLimits::OneEnd(LimitEnd::High, high))) => {
+                Limits::Numbers(f64::NEG_INFINITY, high)
+            }
+            Some(ExplicitLimits::Time(GivenLimits::Both((low, high)))) => {
+                Limits::Times(Some(low), Some(high))
+            }
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(LimitEnd::Low, low))) => {
+                Limits::Times(Some(low), None)
+            }
+            Some(ExplicitLimits::Time(GivenLimits::OneEnd(LimitEnd::High, high))) => {
+                Limits::Times(None, Some(high))
+            }
+        }
+    }
+
+    /// Whether the low and the high end are automatic.
+    fn automatic_ends(self) -> [bool; 2] {
+        match self {
+            Limits::Automatic => [true, true],
+            Limits::Numbers(low, high) => [low == f64::NEG_INFINITY, high == f64::INFINITY],
+            Limits::Times(low, high) => [low.is_none(), high.is_none()],
         }
     }
 
@@ -199,7 +228,9 @@ impl Limits {
     fn holds(self, at: Option<ReachFrom>) -> bool {
         match (self, at) {
             (Limits::Numbers(low, high), Some(ReachFrom::Number(v))) => (low..=high).contains(&v),
-            (Limits::Times(low, high), Some(ReachFrom::Time(t))) => (low..=high).contains(&t),
+            (Limits::Times(low, high), Some(ReachFrom::Time(t))) => {
+                low.is_none_or(|low| low <= t) && high.is_none_or(|high| t <= high)
+            }
             _ => true,
         }
     }
@@ -258,9 +289,12 @@ pub(crate) struct ScatterLabels {
     /// The value column as the layout reserves it; `None` when no value goes there and the
     /// axes set no column title.
     column: Option<ColumnInput>,
-    /// Whether the x and the y axis have explicit limits: an automatic label never leaves the
-    /// plot across them, and the hint of a fixed-side label that leaves the plot names them.
+    /// Whether the x and the y axis have explicit limits, at both ends or one: the hint of a
+    /// fixed-side label that leaves the plot names them.
     explicit: [bool; 2],
+    /// Whether the low and the high end of the x and of the y axis are automatic: an automatic
+    /// label never leaves the plot across an explicit end.
+    automatic: [[bool; 2]; 2],
     /// The sides the automatic labels took in the previous pass, which the limit fits make
     /// room for; `None` in the first pass.
     held: Option<Sides>,
@@ -288,8 +322,8 @@ impl ScatterLabels {
             axes.y_tick_format()
         };
         let within = [
-            Limits::new(axes.x_limits(), axes.x_time_limits()),
-            Limits::new(axes.y_limits(), axes.y_time_limits()),
+            Limits::new(axes.x_given_limits()),
+            Limits::new(axes.y_given_limits()),
         ];
         let mut measured = Vec::new();
         let mut columns = Vec::new();
@@ -375,12 +409,14 @@ impl ScatterLabels {
             }
         }
         let explicit = within.map(|limits| limits != Limits::Automatic);
+        let automatic = within.map(Limits::automatic_ends);
         let column = column::input(axes, on_x, &columns);
         Ok(ScatterLabels {
             marks: measured,
             columns,
             column,
             explicit,
+            automatic,
             held: None,
         })
     }
@@ -625,7 +661,9 @@ pub(crate) fn items(
                 bounds
             } else {
                 // An axis whose limits grow: automatic, and not a category axis.
-                let grows = [0, 1].map(|axis| !labels.explicit[axis] && point.at[axis].is_some());
+                let grows = [0, 1].map(|axis| {
+                    labels.automatic[axis].map(|automatic| automatic && point.at[axis].is_some())
+                });
                 let clear = |bounds| !obstacles.hit(padded(bounds));
                 let boxes = labels.order(m, p).map(|side| (side, candidate(side)));
                 let (side, bounds) = boxes
@@ -793,21 +831,28 @@ fn reach(
     }
 }
 
-/// The box `bounds` with its extent along each axis whose limits grow (`grows`, x then y)
-/// replaced by the plot's: inside the plot exactly when `bounds` leaves the plot only along
-/// those axes.
-fn along(plot: Area, [left, top, right, bottom]: Bounds, [x, y]: [bool; 2]) -> Bounds {
-    let (left, right) = if x {
-        (plot.x, plot.right())
-    } else {
-        (left, right)
-    };
-    let (top, bottom) = if y {
-        (plot.y, plot.bottom())
-    } else {
-        (top, bottom)
-    };
-    [left, top, right, bottom]
+/// The box `bounds` with each of its sides past an end whose limit grows (`grows`, the low and
+/// the high end of x, then of y) moved onto the plot's edge: inside the plot exactly when
+/// `bounds` leaves the plot only across those ends. The plot's top is the high end of y.
+fn along(
+    plot: Area,
+    [left, top, right, bottom]: Bounds,
+    [[x_low, x_high], [y_low, y_high]]: [[bool; 2]; 2],
+) -> Bounds {
+    [
+        if x_low { left.max(plot.x) } else { left },
+        if y_high { top.max(plot.y) } else { top },
+        if x_high {
+            right.min(plot.right())
+        } else {
+            right
+        },
+        if y_low {
+            bottom.min(plot.bottom())
+        } else {
+            bottom
+        },
+    ]
 }
 
 /// The box `bounds` widened by [`PADDING`] on every side.
@@ -907,12 +952,17 @@ mod tests {
         };
         // Above the top edge: only a growing y axis holds it.
         let above = [40.0, 12.0, 60.0, 18.0];
-        assert!(!contains(plot, along(plot, above, [true, false])));
-        assert!(contains(plot, along(plot, above, [false, true])));
-        // Past the top right corner: both axes must grow.
+        let (none, both) = ([false, false], [true, true]);
+        assert!(!contains(plot, along(plot, above, [both, none])));
+        assert!(contains(plot, along(plot, above, [none, both])));
+        // Only the high end of y holds it: a lower limit fixed at one end does not stop it.
+        assert!(contains(plot, along(plot, above, [none, [false, true]])));
+        assert!(!contains(plot, along(plot, above, [none, [true, false]])));
+        // Past the top right corner: both axes must grow, at their high ends.
         let corner = [105.0, 12.0, 125.0, 18.0];
-        assert!(!contains(plot, along(plot, corner, [false, true])));
-        assert!(contains(plot, along(plot, corner, [true, true])));
+        assert!(!contains(plot, along(plot, corner, [none, both])));
+        assert!(contains(plot, along(plot, corner, [both, both])));
+        assert!(!contains(plot, along(plot, corner, [[true, false], both])));
     }
 
     #[test]

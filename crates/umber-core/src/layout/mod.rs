@@ -2159,7 +2159,9 @@ mod tests {
         f.single_axes_mut()
             .line(
                 AxisData::Numbers(vec![0.0, 6.0, 12.0, 18.0, 24.0]),
-                &[1.0, 3.0, 2.0, 4.0, 3.0],
+                // A fraction keeps the y ticks in steps such as 0.5, whose labels set the
+                // width of the y tick label column.
+                &[1.0, 3.0, 2.0, 4.0, 3.5],
                 LineOptions::default(),
             )
             .unwrap()

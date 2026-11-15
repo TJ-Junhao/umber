@@ -1030,7 +1030,7 @@ impl ContinuousScale {
             };
             let fit = ticks::Fit {
                 quantum: if self.transform == Transform::Linear {
-                    judge.quantum()
+                    judge.steps().quantum(judge.quantum(), (lo, hi))
                 } else {
                     0.0
                 },
@@ -1075,12 +1075,18 @@ impl ContinuousScale {
         self.uncrowded(choose(Room::TooFewTicks), judge)
     }
 
-    /// Labelled whole-step pairs for a linear axis, for trying on the layouts they produce.
-    pub(crate) fn tick_pairs(&self, format: &crate::TickFormat) -> Vec<Vec<Tick>> {
+    /// Labelled whole-step pairs for a linear axis whose automatic ticks take `steps`, for
+    /// trying on the layouts they produce.
+    pub(crate) fn tick_pairs(
+        &self,
+        format: &crate::TickFormat,
+        steps: ticks::TickSteps,
+    ) -> Vec<Vec<Tick>> {
         if self.transform != Transform::Linear {
             return Vec::new();
         }
-        ticks::linear_pairs(self.lo, self.hi, format.quantum())
+        let quantum = steps.quantum(format.quantum(), (self.lo, self.hi));
+        ticks::linear_pairs(self.lo, self.hi, quantum)
             .into_iter()
             .filter_map(|values| self.inside_ticks(&values))
             .map(|ticks| format.relabel(ticks.ticks, ticks.values))
@@ -1205,6 +1211,11 @@ pub(crate) trait TickJudge {
     /// The smallest exactly writable unit of a linear tick step, or zero for no restriction.
     fn quantum(&self) -> f64 {
         0.0
+    }
+
+    /// The steps that the values of the axis allow its linear ticks.
+    fn steps(&self) -> ticks::TickSteps {
+        ticks::TickSteps::Any
     }
 
     /// Whether the previous constrained choice is checked by the layout instead of here.

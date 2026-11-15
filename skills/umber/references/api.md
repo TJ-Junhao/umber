@@ -2970,7 +2970,7 @@ Example:
 ### `umber.Axes.xlim`
 
 ```text
-Axes.xlim(self: SX, low: X, high: X) -> SX
+Axes.xlim(self: SX, low: X | Auto, high: X | Auto) -> SX
 ```
 
 Set the x limits, replacing the automatic ones; for linear, log and time x axes.
@@ -2981,24 +2981,40 @@ values inside the limits, not the limits themselves. Lines keep their exact x
 extent, cells keep their edges, and bubbles fit their whole markers. Single values
 expand to a usable range. Explicit limits are used as given.
 
+``ub.AUTO`` for one limit fixes the other and keeps this one automatic:
+``xlim(0, ub.AUTO)`` starts the axis at 0. The automatic end follows the rules above
+with the fixed end in place of the data on its side: the span runs from the fixed end
+to the farthest value, and the padding, 5% of that span, is added on the automatic
+side only. With no value beyond the fixed end, the automatic end is as far from it as
+a single value would expand. Bubbles, arrows, barbs and value labels widen the
+automatic end to hold them, as automatic limits do. The fixed end works as an explicit
+limit: bubbles, arrows and barbs are clipped there, and a value label that would reach
+past it must fit inside the plot, or rendering raises ``StyleError``. A fixed limit at
+the end of the supported range, which leaves no room for the automatic one, is refused.
+
 Args:
-    low: The lower limit; finite, and positive on a log axis; a time on a time axis.
-    high: The upper limit; finite and above ``low``.
+    low: The lower limit; finite, and positive on a log axis; a time on a time axis;
+        or ``ub.AUTO`` for an automatic lower limit.
+    high: The upper limit; finite and above ``low``; or ``ub.AUTO`` for an automatic
+        upper limit.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``low`` or ``high`` is not a number.
-    StyleError: If the limits are not finite, ``low`` is not below ``high``, or a
-        limit is not positive on a log axis.
-    UsageError: If the x axis is a category axis.
+    TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
+    StyleError: If the limits are not finite, ``low`` is not below ``high``, a limit
+        is not positive on a log axis, or a single limit leaves no room for the other.
+        Rendering raises it when every value lies beyond the one fixed limit, or when a
+        value label does not fit inside it.
+    UsageError: If the x axis is a category axis, or both limits are ``ub.AUTO``.
 
 Example:
 
 ```python
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 5, 10], [1, 4, 2]).xlim(0, 8)
+>>> ax = ax.xlim(ub.AUTO, 8)
 ```
 
 ### `umber.Axes.xtick_format`
@@ -3116,9 +3132,12 @@ Set the x ticks to ``positions``, replacing the automatic ones.
 
 Automatic linear ticks are round values inside the limits, at whole multiples of
 a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
-Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
-areas and stems; lines and cells keep their exact position extents. The tick count
-depends on available space and label size. Explicit positions need not follow that grid.
+When every value the automatic limits come from is an integer, such as years or
+counts, the step is a whole number and labels have no decimals, unless the limits
+hold fewer than two integers. Limits follow the data with 5% padding, keeping an end
+at zero for bars, histograms, areas and stems; lines and cells keep their exact
+position extents. The tick count depends on available space and label size. Explicit
+positions need not follow that grid.
 
 The positions are used in the order given. An empty list leaves the x axis without
 ticks and gridlines. Calling any x tick method again replaces the ticks and drops
@@ -3271,7 +3290,7 @@ Example:
 ### `umber.Axes.ylim`
 
 ```text
-Axes.ylim(self: SY, low: Y, high: Y) -> SY
+Axes.ylim(self: SY, low: Y | Auto, high: Y | Auto) -> SY
 ```
 
 Set the y limits, replacing the automatic ones.
@@ -3282,23 +3301,41 @@ values inside the limits, not the limits themselves. Cells keep their edges, and
 bubbles fit their whole markers. Single values expand to a usable range.
 Explicit limits are used as given.
 
+``ub.AUTO`` for one limit fixes the other and keeps this one automatic:
+``ylim(0, ub.AUTO)`` starts the axis at 0 and lets the top follow the data. The
+automatic end follows the rules above with the fixed end in place of the data on its
+side: the span runs from the fixed end to the farthest value, and the padding, 5% of
+that span, is added on the automatic side only. With no value beyond the fixed end,
+the automatic end is as far from it as a single value would expand. Bubbles, arrows,
+barbs and value labels widen the automatic end to hold them, as automatic limits do.
+The fixed end works as an explicit limit: bubbles, arrows and barbs are clipped there,
+and a value label that would reach past it must fit inside the plot, or rendering
+raises ``StyleError``. A fixed limit at the end of the supported range, which leaves no
+room for the automatic one, is refused.
+
 Args:
-    low: The lower limit; finite, and positive on a log axis; a time on a time axis.
-    high: The upper limit; finite and above ``low``.
+    low: The lower limit; finite, and positive on a log axis; a time on a time axis;
+        or ``ub.AUTO`` for an automatic lower limit.
+    high: The upper limit; finite and above ``low``; or ``ub.AUTO`` for an automatic
+        upper limit.
 
 Returns:
     These axes.
 
 Raises:
-    TypeError: If ``low`` or ``high`` is not a number.
-    StyleError: If the limits are not finite, ``low`` is not below ``high``, or a
-        limit is not positive on a log axis.
+    TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
+    StyleError: If the limits are not finite, ``low`` is not below ``high``, a limit
+        is not positive on a log axis, or a single limit leaves no room for the other.
+        Rendering raises it when every value lies beyond the one fixed limit, or when a
+        value label does not fit inside it.
+    UsageError: If the y axis is a category axis, or both limits are ``ub.AUTO``.
 
 Example:
 
 ```python
 >>> import umber as ub
 >>> ax = ub.Figure().add_axes().line([0, 1, 2], [1, 4, 2]).ylim(0, 5)
+>>> ax = ax.ylim(0, ub.AUTO)
 ```
 
 ### `umber.Axes.ytick_format`
@@ -3414,9 +3451,12 @@ Set the y ticks to ``positions``, replacing the automatic ones.
 
 Automatic linear ticks are round values inside the limits, at whole multiples of
 a 1, 2, 2.5 or 5 times a power of ten step, including zero when it lies inside.
-Limits follow the data with 5% padding, keeping an end at zero for bars, histograms,
-areas and stems; lines and cells keep their exact position extents. The tick count
-depends on available space and label size. Explicit positions need not follow that grid.
+When every value the automatic limits come from is an integer, such as years or
+counts, the step is a whole number and labels have no decimals, unless the limits
+hold fewer than two integers. Limits follow the data with 5% padding, keeping an end
+at zero for bars, histograms, areas and stems; lines and cells keep their exact
+position extents. The tick count depends on available space and label size. Explicit
+positions need not follow that grid.
 
 The positions are used in the order given. An empty list leaves the y axis without
 ticks and gridlines. Calling any y tick method again replaces the ticks and drops

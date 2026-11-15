@@ -92,7 +92,10 @@ pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 pub use render::{MarkRender, Render};
 pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
-pub(crate) use share::{ShareGroups, label_visibility};
+pub use share::LimitEnd;
+pub(crate) use share::{
+    ContinuousGiven, ExplicitLimits, GivenLimits, ShareGroups, TimeGiven, label_visibility,
+};
 pub use stacked_area::StackedAreaMark;
 pub use stem::{StemMark, StemOptions};
 pub(crate) use step::{Edge, holds};
@@ -111,7 +114,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{Error, LogBase, Result, ScaleKind, Theme};
+    use crate::{Error, Instant, LogBase, Result, ScaleKind, Theme};
 
     fn figure() -> Figure {
         Figure::new(6.0, 4.0, Theme::pigment()).unwrap()
@@ -668,6 +671,56 @@ mod tests {
             a.ylim(1e-301, 1.0).unwrap_err().to_string(),
             "Axes.ylim(): the limits are 1e-301 and 1; a log scale supports values from 1e-300 to 1e300."
         );
+    }
+
+    #[test]
+    fn one_limit_is_checked_and_replaces_the_limits_before_it() {
+        let mut f = figure();
+        let mut a = f.add_axes(ScaleKind::Linear, log_kind()).unwrap();
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e301, -1e301] {
+            for end in [LimitEnd::Low, LimitEnd::High] {
+                let err = a.xlim_end(end, value).unwrap_err();
+                assert!(matches!(err, Error::Style { .. }), "{err}");
+                assert_eq!(err.parameter(), Some(end.name()));
+            }
+        }
+        for value in [0.0, -1.0, 1e-301, 1e301] {
+            assert_style(a.ylim_end(LimitEnd::Low, value), "Axes.ylim()");
+        }
+        assert_eq!(
+            a.ylim_end(LimitEnd::High, 0.0).unwrap_err().to_string(),
+            "Axes.ylim(): high is 0; a log scale needs positive limits."
+        );
+        assert_eq!(
+            (a.x_limits(), a.x_limit_end(), a.y_limit_end()),
+            (None, None, None)
+        );
+        a.xlim(0.0, 1.0)
+            .unwrap()
+            .xlim_end(LimitEnd::High, 5.0)
+            .unwrap();
+        assert_eq!(
+            (a.x_limits(), a.x_limit_end()),
+            (None, Some((LimitEnd::High, 5.0)))
+        );
+        a.ylim_end(LimitEnd::Low, 1e-300).unwrap();
+        assert_eq!(a.y_limit_end(), Some((LimitEnd::Low, 1e-300)));
+    }
+
+    #[test]
+    fn one_limit_needs_an_axis_of_its_kind() {
+        let mut f = figure();
+        let mut a = f.add_axes(ScaleKind::Category, ScaleKind::Time).unwrap();
+        assert_usage(a.xlim_end(LimitEnd::Low, 0.0), "Axes.xlim()");
+        assert_usage(a.ylim_end(LimitEnd::Low, 0.0), "Axes.ylim()");
+        let start = Instant::from_micros(0).unwrap();
+        assert_usage(a.xlim_time_end(LimitEnd::Low, start), "Axes.xlim()");
+        a.ylim_time_end(LimitEnd::High, start).unwrap();
+        assert_eq!(a.y_time_limit_end(), Some((LimitEnd::High, start)));
+        assert_eq!(a.y_time_limits(), None);
+        let mut g = figure();
+        let mut linear = g.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+        assert_usage(linear.ylim_time_end(LimitEnd::Low, start), "Axes.ylim()");
     }
 
     #[test]

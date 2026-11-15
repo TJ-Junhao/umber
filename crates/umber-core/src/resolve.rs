@@ -7,7 +7,10 @@
 //! axis), and the positions axis beside it.
 //!
 //! Automatic linear limits follow the data extent, adding 5 % of its span on each side.
-//! Round ticks are chosen inside that domain, independently of the limits. An x positions
+//! Round ticks are chosen inside that domain, independently of the limits; when every value
+//! the automatic limits come from is an integer, their steps are whole numbers
+//! ([`TickSteps`]). A limit fixed at one end takes the place of the data on its side: the
+//! other end follows the automatic rules from it, and only that end is padded. An x positions
 //! axis of lines keeps their exact extent; areas count as lines along their positions axis.
 //! Cells keep exact cell extents, combined with the padded extents of other marks. A linear
 //! value axis holding bars, histograms, areas or stems includes 0 and keeps a zero end fixed.
@@ -47,7 +50,7 @@ pub(crate) mod swarm;
 
 use crate::binning::HistBins;
 use crate::color_scale::{ColorLevels, ColorScaleSpec, MappedColors, ResolvedColorScale};
-use crate::error::quoted;
+use crate::error::{number, quoted};
 use crate::layout::TickRoom;
 use crate::legend::{LegendEntry, Swatch, SwatchFill};
 use crate::model::{
@@ -55,6 +58,7 @@ use crate::model::{
     ScatterMark, SeriesView, SharedValues, StepMark,
 };
 use crate::model::{AxisValue, BandMark, Figure, HLineMark, RuleOptions, SpanMark, VLineMark};
+use crate::model::{ContinuousGiven, ExplicitLimits, GivenLimits, LimitEnd, TimeGiven};
 use crate::model::{EcdfMark, HistStyle, KdeMark};
 use crate::model::{Edge, holds};
 use crate::model::{ErrorBarMark, ErrorBarOrientation};
@@ -66,13 +70,13 @@ use crate::scale::{
 use crate::stacking::{AreaStacks, Stacks};
 use crate::stats::{BoxStats, box_stats, kde_scott, quantile_type7};
 use crate::tick_format::TickFormat;
-use crate::ticks::{AutoTicks, TickValues};
+use crate::ticks::{AutoTicks, TickSteps, TickValues};
 use crate::time::{
     TimeStep, coarser_ticks, concise_labels, explicit_labels, iso_label, label_step, time_ticks,
 };
 use crate::{
-    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, Marker, NumberStyle, Result,
-    Rgba, ScaleKind, Theme, Tick, Transform, ticks,
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, MAX_MAGNITUDE, MIN_LOG_VALUE,
+    Marker, NumberStyle, Result, Rgba, ScaleKind, Theme, Tick, Transform, ticks,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -121,13 +125,16 @@ pub(crate) struct AxisTick {
     pub label: String,
 }
 
-/// A resolved axis: its scale and its ticks.
+/// A resolved axis: its scale, its ticks and the steps its automatic linear ticks may take.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedAxis {
     /// The scale.
     pub scale: AxisScale,
     /// The ticks, in increasing position.
     pub ticks: Vec<AxisTick>,
+    /// The steps that automatic ticks on a linear axis may take; [`TickSteps::Any`] on other
+    /// axes.
+    pub steps: TickSteps,
 }
 
 impl ResolvedAxis {
@@ -402,8 +409,8 @@ enum AutoLimits {
 pub(crate) struct ContinuousLimits<'a> {
     /// The transform of the axis.
     pub transform: Transform,
-    /// The scale of the explicit limits; `None` to fit the data.
-    pub explicit: Option<ContinuousScale>,
+    /// The explicit limits, both ends or one; `None` to fit the data.
+    pub explicit: Option<ContinuousGiven>,
     /// The explicit ticks, if set, and the tick label format.
     pub ticks: &'a AxisTicks,
 }
@@ -412,10 +419,36 @@ pub(crate) struct ContinuousLimits<'a> {
 /// settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TimeLimits<'a> {
-    /// The explicit limits, the lower first; `None` to fit the data.
-    pub explicit: Option<(Instant, Instant)>,
+    /// The explicit limits, both ends or one; `None` to fit the data.
+    pub explicit: Option<TimeGiven>,
     /// The explicit ticks, if set, and the tick label format.
     pub ticks: &'a AxisTicks,
+}
+
+impl ContinuousLimits<'_> {
+    /// The values that the explicit limits leave on the plot, both ends included: the limits,
+    /// or from the one fixed end on to infinity on the automatic side; `None` without explicit
+    /// limits.
+    pub(crate) fn bounds(&self) -> Option<(f64, f64)> {
+        self.explicit.map(|given| match given {
+            GivenLimits::Both(scale) => scale.domain(),
+            GivenLimits::OneEnd(LimitEnd::Low, low) => (low, f64::INFINITY),
+            GivenLimits::OneEnd(LimitEnd::High, high) => (f64::NEG_INFINITY, high),
+        })
+    }
+}
+
+impl TimeLimits<'_> {
+    /// The times that the explicit limits leave on the plot, both ends included, as the lower
+    /// and the upper limit; `None` for an automatic end, and for both without explicit limits.
+    fn bounds(&self) -> (Option<Instant>, Option<Instant>) {
+        match self.explicit {
+            Some(GivenLimits::Both((low, high))) => (Some(low), Some(high)),
+            Some(GivenLimits::OneEnd(LimitEnd::Low, low)) => (Some(low), None),
+            Some(GivenLimits::OneEnd(LimitEnd::High, high)) => (None, Some(high)),
+            None => (None, None),
+        }
+    }
 }
 
 /// What an axis fixes before any data is seen: whether it lists categories, and for a
@@ -431,24 +464,29 @@ pub(crate) enum AxisLimits<'a> {
 }
 
 impl<'a> AxisLimits<'a> {
-    /// The limits of an axis of scale `kind` with the explicit limits `explicit` of a linear or
-    /// log axis, or `explicit_times` of a time axis, and the tick settings `ticks`, which a
-    /// category axis does not use.
+    /// The limits of an axis of scale `kind` with the explicit limits `explicit`, if set, and
+    /// the tick settings `ticks`, which a category axis does not use.
     fn new(
         kind: ScaleKind,
-        (explicit, explicit_times): (Option<ContinuousScale>, Option<(Instant, Instant)>),
+        explicit: Option<ExplicitLimits>,
         ticks: &'a AxisTicks,
     ) -> AxisLimits<'a> {
         if kind == ScaleKind::Time {
             return AxisLimits::Time(TimeLimits {
-                explicit: explicit_times,
+                explicit: match explicit {
+                    Some(ExplicitLimits::Time(given)) => Some(given),
+                    Some(ExplicitLimits::Continuous(_)) | None => None,
+                },
                 ticks,
             });
         }
         match kind.transform() {
             Some(transform) => AxisLimits::Continuous(ContinuousLimits {
                 transform,
-                explicit,
+                explicit: match explicit {
+                    Some(ExplicitLimits::Continuous(given)) => Some(given),
+                    Some(ExplicitLimits::Time(_)) | None => None,
+                },
                 ticks,
             }),
             None => AxisLimits::Category,
@@ -485,12 +523,12 @@ impl<'a> Limits<'a> {
         Limits {
             x: AxisLimits::new(
                 axes.x_scale(),
-                (axes.x_limit_scale(), axes.x_time_limits()),
+                axes.x_given_limits(),
                 axes.x_tick_settings(),
             ),
             y: AxisLimits::new(
                 axes.y_scale(),
-                (axes.y_limit_scale(), axes.y_time_limits()),
+                axes.y_given_limits(),
                 axes.y_tick_settings(),
             ),
         }
@@ -612,18 +650,22 @@ struct ContinuousAxis {
 
 /// A continuous axis, as its `limits` and tick settings fix it and the `data` extent fits it.
 ///
-/// The domain is the scale of the explicit limits when set. Otherwise, with automatic ticks, it
-/// is the empty-data range (0 to 1, or 1 to 10 on log) when there is no finite data, else the
-/// data extent fitted as `auto` says; with explicit ticks it is [`enclosing`] the data and the
-/// ticks. Linear axes choose ticks inside the final domain; log axes retain their enclosing
-/// powers. Explicit ticks are the ones inside the domain ([`explicit_ticks`]). The tick
-/// format then labels every tick except those given with labels of their own. Automatic ticks
-/// keep their labels apart along the axis as `room` asks ([`DrawnTicks`]).
+/// The domain is the scale of the explicit limits when both are set. Otherwise, with automatic
+/// ticks, it is the empty-data range (0 to 1, or 1 to 10 on log) when there is no finite data,
+/// else the data extent fitted as `auto` says; with explicit ticks it is [`enclosing`] the data
+/// and the ticks. With one end fixed, that extent runs from the fixed end instead
+/// ([`with_fixed_end`]), and the fixed end replaces the end that the fit gives ([`pinned`]).
+/// Linear axes choose ticks inside the final domain, in the steps `steps` allows; log axes
+/// retain their enclosing powers. Explicit ticks are the ones inside the domain
+/// ([`explicit_ticks`]). The tick format then labels every tick except those given with labels
+/// of their own. Automatic ticks keep their labels apart along the axis as `room` asks
+/// ([`DrawnTicks`]).
 fn continuous(
     limits: ContinuousLimits<'_>,
     data: Option<(f64, f64)>,
     auto: AutoLimits,
     room: &TickRoom<'_>,
+    steps: TickSteps,
 ) -> ContinuousAxis {
     let ContinuousLimits {
         transform,
@@ -635,6 +677,7 @@ fn continuous(
             let judge = DrawnTicks {
                 format: settings.format(),
                 room,
+                steps,
             };
             let (scale, unpadded, ticks) =
                 automatic(transform, explicit, data, auto, room.target, &judge);
@@ -645,9 +688,15 @@ fn continuous(
             )
         }
         Some(given) => {
+            let extent = union(data, extent(tick_positions(given)));
             let (scale, unpadded) = match explicit {
-                Some(scale) => (scale, scale),
-                None => enclosing(transform, data, given, auto),
+                Some(GivenLimits::Both(scale)) => (scale, scale),
+                Some(GivenLimits::OneEnd(end, value)) => {
+                    let (scale, unpadded) =
+                        enclosing(transform, Some(with_fixed_end(extent, end, value)), auto);
+                    (pinned(scale, end, value), pinned(unpadded, end, value))
+                }
+                None => enclosing(transform, extent, auto),
             };
             let ticks = match explicit_ticks(given, transform, &scale) {
                 ExplicitLabels::Given(ticks) => ticks,
@@ -668,18 +717,27 @@ fn continuous(
 /// The final domain, its unpadded extent and automatic ticks. Explicit limits and empty-data
 /// ranges stay as given. Linear axes pad the data before choosing round ticks inside it;
 /// log axes retain enclosing powers and their existing padding. Single-value expansions
-/// from [`ContinuousScale::from_extent`] are not padded again. `judge` checks labels on the
-/// final domain, and ticks carry the step their labels were written for.
+/// from [`ContinuousScale::from_extent`] are not padded again. With one end fixed, the data
+/// extent runs from that end ([`with_fixed_end`]), is fitted the same way, and the fixed end
+/// then replaces the end the fit gave ([`pinned`]); the ticks are chosen on that domain.
+/// `judge` checks labels on the final domain, and ticks carry the step their labels were
+/// written for.
 fn automatic(
     transform: Transform,
-    limits: Option<ContinuousScale>,
+    limits: Option<ContinuousGiven>,
     data: Option<(f64, f64)>,
     auto: AutoLimits,
     target: usize,
     judge: &dyn TickJudge,
 ) -> (ContinuousScale, ContinuousScale, AutoTicks) {
-    if let Some(scale) = limits {
+    if let Some(GivenLimits::Both(scale)) = limits {
         (scale, scale, scale.auto_ticks(target, judge))
+    } else if let Some(GivenLimits::OneEnd(end, value)) = limits {
+        let extent = Some(with_fixed_end(data, end, value));
+        let (scale, unpadded, _) = automatic(transform, None, extent, auto, target, judge);
+        let scale = pinned(scale, end, value);
+        let ticks = scale.auto_ticks(target, judge);
+        (scale, pinned(unpadded, end, value), ticks)
     } else if data.is_none() {
         // The fallback range is final on every axis: never widened with `nice`.
         let scale = ContinuousScale::unit(transform);
@@ -714,18 +772,56 @@ fn automatic(
     }
 }
 
+/// The extent that an axis with its `end` fixed at `value` fits instead of the extent `data`:
+/// from the fixed end to the far end of the data, or the fixed end alone, a single value, when
+/// no data lies beyond it.
+pub(crate) fn with_fixed_end(data: Option<(f64, f64)>, end: LimitEnd, value: f64) -> (f64, f64) {
+    match end {
+        LimitEnd::Low => (value, data.map_or(value, |(_, high)| high.max(value))),
+        LimitEnd::High => (data.map_or(value, |(low, _)| low.min(value)), value),
+    }
+}
+
+/// `scale` with its `end` at `value` and its other end kept. The fit of an extent that starts
+/// at `value` never leaves the other end on the wrong side of it, or too close: the only room it
+/// can lack is past the end of the supported values, and the setters refuse a fixed end without
+/// room up to that end ([`AxesMut::xlim_end`](crate::AxesMut::xlim_end)). So the other end then
+/// moves to the end of the supported values, and the fixed end is always kept.
+pub(crate) fn pinned(scale: ContinuousScale, end: LimitEnd, value: f64) -> ContinuousScale {
+    let transform = scale.transform();
+    let (low, high) = scale.domain();
+    let floor = match transform {
+        Transform::Linear => -MAX_MAGNITUDE,
+        Transform::Log(_) => MIN_LOG_VALUE,
+    };
+    let (kept, widest) = match end {
+        LimitEnd::Low => ((value, high), (value, MAX_MAGNITUDE)),
+        LimitEnd::High => ((low, value), (floor, value)),
+    };
+    ContinuousScale::new(transform, kept.0, kept.1, CONTEXT)
+        .or_else(|_| ContinuousScale::new(transform, widest.0, widest.1, CONTEXT))
+        .unwrap_or(scale)
+}
+
 /// Judges automatic ticks as the axis draws them: labelled by its tick format, at their
-/// positions along the axis, with labels kept apart as its tick room asks.
+/// positions along the axis, with labels kept apart as its tick room asks, in the steps its
+/// values allow.
 struct DrawnTicks<'a> {
     /// The axis's tick format.
     format: &'a TickFormat,
     /// The axis's tick room.
     room: &'a TickRoom<'a>,
+    /// The steps the axis's values allow.
+    steps: TickSteps,
 }
 
 impl TickJudge for DrawnTicks<'_> {
     fn quantum(&self) -> f64 {
         self.format.quantum()
+    }
+
+    fn steps(&self) -> TickSteps {
+        self.steps
     }
 
     fn deferred(&self) -> bool {
@@ -743,8 +839,8 @@ impl TickJudge for DrawnTicks<'_> {
 }
 
 /// The domain and the domain before padding of a continuous axis with explicit ticks and no
-/// explicit limits: the extent of the `data` and the tick positions together, as it is (no
-/// rounding to powers even on log axes), then padded
+/// explicit limits: `extent`, the extent of the data and the tick positions together, as it is
+/// (no rounding to powers even on log axes), then padded
 /// as `auto` says. A linear axis padded with [`Padding::KeepZero`] holds bars,
 /// a histogram or an area, so its extent includes 0 even when the marks have no finite value.
 /// An exact axis is not padded, and an extent that counts as a single value is padded by
@@ -752,11 +848,10 @@ impl TickJudge for DrawnTicks<'_> {
 /// range, which is not padded either.
 fn enclosing(
     transform: Transform,
-    data: Option<(f64, f64)>,
-    given: &ExplicitTicks,
+    extent: Option<(f64, f64)>,
     auto: AutoLimits,
 ) -> (ContinuousScale, ContinuousScale) {
-    let Some((lo, hi)) = union(data, extent(tick_positions(given))) else {
+    let Some((lo, hi)) = extent else {
         let unit = ContinuousScale::unit(transform);
         return (unit, unit);
     };
@@ -1154,6 +1249,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             let axis = ResolvedAxis {
                 ticks: room.category_ticks(category_ticks(&scale, which)),
                 scale: AxisScale::Category(scale),
+                steps: TickSteps::Any,
             };
             return (axis, NormalizedPos::LOW);
         }
@@ -1169,7 +1265,7 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             .flat_map(|mark| mark.numbers(which)),
     );
     let auto = if cells.is_some() {
-        if limits.explicit.is_none() {
+        if !matches!(limits.explicit, Some(GivenLimits::Both(_))) {
             let other: Vec<_> = marks.clone().filter(|mark| !is_cell(mark)).collect();
             let other_data = axis_extent(other.iter().copied(), which, transform);
             data = cells;
@@ -1196,17 +1292,128 @@ pub(crate) fn resolve_axis<'a, 'm: 'a>(
             data.is_some(),
         )
     };
+    let steps = tick_steps(marks, which, &limits);
     let ContinuousAxis {
         scale,
         ticks,
         unpadded_low,
-    } = continuous(limits, data, auto, room);
+    } = continuous(limits, data, auto, room, steps);
     let base = baseline(&scale, unpadded_low);
     let axis = ResolvedAxis {
         scale: AxisScale::Continuous(scale),
         ticks,
+        steps,
     };
     (axis, base)
+}
+
+/// Checks, before a figure is rendered in `context`, that some value along `which` of a
+/// group's `marks` lies at or beyond a limit that `limits` fixes at one end: the values its
+/// automatic end comes from, the data and any explicit tick positions, as [`resolve_axis`]
+/// fits them. When every value lies past the fixed end, the automatic end has nothing to hold
+/// and the limits would be empty: `Error::Style`, as for explicit limits whose lower limit is
+/// not below the upper. No value at all is fine: the automatic end then reaches as far as from
+/// a single value at the fixed end. Other axes always pass.
+pub(crate) fn check_fixed_end<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    which: ValueAxis,
+    limits: AxisLimits<'_>,
+    context: &'static str,
+) -> Result<()> {
+    let axis = match which {
+        ValueAxis::X => "x",
+        ValueAxis::Y => "y",
+    };
+    let past = |end: LimitEnd, fixed: String, nearest: String| {
+        let (shown, side, limit) = match end {
+            LimitEnd::Low => (format!("({fixed}, AUTO)"), "below", "lower"),
+            LimitEnd::High => (format!("(AUTO, {fixed})"), "above", "upper"),
+        };
+        let hint = match (which, end) {
+            (ValueAxis::X, LimitEnd::Low) => {
+                "lower the limit to reach the data, or set both limits with xlim()."
+            }
+            (ValueAxis::X, LimitEnd::High) => {
+                "raise the limit to reach the data, or set both limits with xlim()."
+            }
+            (ValueAxis::Y, LimitEnd::Low) => {
+                "lower the limit to reach the data, or set both limits with ylim()."
+            }
+            (ValueAxis::Y, LimitEnd::High) => {
+                "raise the limit to reach the data, or set both limits with ylim()."
+            }
+        };
+        Error::style(
+            context,
+            format!(
+                "the {axis} limits are {shown}, and every {axis} value lies {side} {fixed}, the nearest at {nearest}; the {limit} limit must leave some data on the plot."
+            ),
+        )
+        .with_hint(hint)
+    };
+    match limits {
+        AxisLimits::Continuous(limits) => {
+            let Some(GivenLimits::OneEnd(end, fixed)) = limits.explicit else {
+                return Ok(());
+            };
+            let data = axis_extent(marks, which, limits.transform);
+            match (end, unrounded_extent(&limits, data)) {
+                (LimitEnd::Low, Some((_, high))) if high < fixed => Err(past(
+                    end,
+                    number(fixed).to_string(),
+                    number(high).to_string(),
+                )),
+                (LimitEnd::High, Some((low, _))) if low > fixed => Err(past(
+                    end,
+                    number(fixed).to_string(),
+                    number(low).to_string(),
+                )),
+                _ => Ok(()),
+            }
+        }
+        AxisLimits::Time(limits) => {
+            let Some(GivenLimits::OneEnd(end, fixed)) = limits.explicit else {
+                return Ok(());
+            };
+            match (end, time_extents(marks, which, limits.ticks).1) {
+                (LimitEnd::Low, Some((_, high))) if high < fixed => {
+                    Err(past(end, fixed.label(), high.label()))
+                }
+                (LimitEnd::High, Some((low, _))) if low > fixed => {
+                    Err(past(end, fixed.label(), low.label()))
+                }
+                _ => Ok(()),
+            }
+        }
+        AxisLimits::Category => Ok(()),
+    }
+}
+
+/// The steps that automatic ticks may take on the continuous axis `which` of a group's
+/// `marks`, with the limits `limits`: whole steps on a linear axis whose automatic limits come
+/// from values that are all integers ([`TickSteps::of`], over [`ResolvedMark::step_values`]),
+/// and any round step otherwise. With both limits explicit no value decides them, so any step
+/// is allowed, as before; with one end fixed, only the values on the automatic side of it
+/// count, both ends included.
+fn tick_steps<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>>,
+    which: ValueAxis,
+    limits: &ContinuousLimits<'_>,
+) -> TickSteps {
+    if limits.transform != Transform::Linear {
+        return TickSteps::Any;
+    }
+    let (low, high) = match limits.explicit {
+        Some(GivenLimits::Both(_)) => return TickSteps::Any,
+        Some(GivenLimits::OneEnd(LimitEnd::Low, low)) => (low, f64::INFINITY),
+        Some(GivenLimits::OneEnd(LimitEnd::High, high)) => (f64::NEG_INFINITY, high),
+        None => (f64::NEG_INFINITY, f64::INFINITY),
+    };
+    TickSteps::of(
+        marks
+            .flat_map(|mark| mark.step_values(which))
+            .filter(|v| (low..=high).contains(v)),
+    )
 }
 
 /// The day an empty time axis spans, in seconds from its origin, 1970-01-01T00:00.
@@ -1342,7 +1549,16 @@ fn time_axis<'a, 'm: 'a>(
 ) -> (ResolvedAxis, NormalizedPos) {
     let given = limits.ticks.explicit();
     let scale = match limits.explicit {
-        Some((low, high)) => time_scale(low, 0.0, seconds_between(low, high), (low, high)),
+        Some(GivenLimits::Both((low, high))) => {
+            time_scale(low, 0.0, seconds_between(low, high), (low, high))
+        }
+        Some(GivenLimits::OneEnd(end, fixed)) => time_end_scale(
+            marks.clone(),
+            (which, role),
+            limits.ticks,
+            (end, fixed),
+            bubbles,
+        ),
         None => {
             let (data, extent) = time_extents(marks.clone(), which, limits.ticks);
             match extent {
@@ -1394,8 +1610,87 @@ fn time_axis<'a, 'm: 'a>(
     let axis = ResolvedAxis {
         scale: AxisScale::Time(scale),
         ticks,
+        steps: TickSteps::Any,
     };
     (axis, NormalizedPos::LOW)
+}
+
+/// The time scale of the axis `which` of a group's `marks`, playing `role`, whose `end` is
+/// fixed at the time `fixed` and whose other end is automatic, as [`time_axis`] and
+/// [`time_cells_scale`] fit an axis without limits but from the fixed end. The mesh cells keep
+/// the exact far end of their times. The other marks and the explicit `ticks`, if set, with
+/// `bubbles` (the extent in seconds from the earliest of all those times that fits the group's
+/// bubbles, if any) reach their own far end, exactly when an axis without limits would keep
+/// their exact extent ([`exact_time_extent`]), and otherwise padded by 5 % of the span from the
+/// fixed end. The automatic end is the further of the two. With no time beyond the fixed end,
+/// it lies [`SINGLE_TIME_REACH`] from it. The seconds count from the earliest of the times and
+/// ticks, as on an axis without limits, or from the low end when there is none.
+fn time_end_scale<'a, 'm: 'a>(
+    marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
+    (which, role): (ValueAxis, AxisRole),
+    ticks: &AxisTicks,
+    (end, fixed): (LimitEnd, Instant),
+    bubbles: Option<(f64, f64)>,
+) -> TimeScale {
+    let beyond = |t: &Instant| match end {
+        LimitEnd::Low => *t > fixed,
+        LimitEnd::High => *t < fixed,
+    };
+    let far_of = |(low, high): InstantRange| match end {
+        LimitEnd::Low => high,
+        LimitEnd::High => low,
+    };
+    let further = |a: Option<Instant>, b: Option<Instant>| match (a, b, end) {
+        (Some(a), Some(b), LimitEnd::Low) => Some(a.max(b)),
+        (Some(a), Some(b), LimitEnd::High) => Some(a.min(b)),
+        (a, b, _) => a.or(b),
+    };
+    let origin = time_extents(marks.clone(), which, ticks)
+        .1
+        .map(|(low, _)| low);
+    let (cells, others): (Vec<_>, Vec<_>) = marks.partition(|mark| holds_cells(mark, which));
+    let cell_far = time_extent(cells.iter().flat_map(|mark| mark.times(which)))
+        .map(far_of)
+        .filter(beyond);
+    let (other_data, other_extent) = time_extents(others.iter().copied(), which, ticks);
+    let bubble_far = bubbles.zip(origin).map(|((from, to), origin)| match end {
+        LimitEnd::Low => shifted_outward(origin, to, true),
+        LimitEnd::High => shifted_outward(origin, from, false),
+    });
+    let other_far = further(other_extent.map(far_of), bubble_far).filter(beyond);
+    let exact = bubble_far.is_none()
+        && (other_data.is_none()
+            || (role == AxisRole::Positions
+                && exact_time_extent(others.iter().copied(), which, true)));
+    let other_far = other_far.map(|far| {
+        if exact {
+            far
+        } else {
+            shifted(
+                fixed,
+                seconds_between(fixed, far) * (1.0 + AUTO_LIMIT_PADDING),
+            )
+        }
+    });
+    let toward = match end {
+        LimitEnd::Low => 1.0,
+        LimitEnd::High => -1.0,
+    };
+    let automatic =
+        further(cell_far, other_far).unwrap_or_else(|| shifted(fixed, toward * SINGLE_TIME_REACH));
+    let (low, high) = match end {
+        LimitEnd::Low => (fixed, automatic),
+        LimitEnd::High => (automatic, fixed),
+    };
+    // The seconds count from the earliest time, as on an axis without limits, so that the
+    // bubble fits, measured from it too, read the scale as they read their own extent.
+    let origin = origin.unwrap_or(low);
+    time_scale(
+        origin,
+        seconds_between(origin, low),
+        seconds_between(origin, high),
+        (low, high),
+    )
 }
 
 /// The time scale from `low` to `high` seconds measured from `origin`, whose earliest and
@@ -2349,6 +2644,28 @@ impl<'a> ResolvedMark<'a> {
         match which {
             ValueAxis::X => self.x_numbers(),
             ValueAxis::Y => self.y_numbers(),
+        }
+    }
+
+    /// The values along `which` whose being integers decides the steps of automatic linear
+    /// ticks ([`TickSteps::of`]): those of [`ResolvedMark::numbers`], the values the automatic
+    /// limits come from, except that a hexbin gives its points, the pairs it counts (both
+    /// coordinates finite), rather than the bounds of its fitted cells, which change with the
+    /// layout.
+    pub fn step_values(&self, which: ValueAxis) -> DomainValues<'_> {
+        match self {
+            ResolvedMark::Hexbin { mark, .. } => {
+                let pairs = mark.x.iter().zip(mark.y.iter());
+                DomainValues::Computed(Box::new(
+                    pairs
+                        .filter(|(x, y)| x.is_finite() && y.is_finite())
+                        .map(move |(&x, &y)| match which {
+                            ValueAxis::X => x,
+                            ValueAxis::Y => y,
+                        }),
+                ))
+            }
+            _ => self.numbers(which),
         }
     }
 
@@ -3890,8 +4207,10 @@ impl<'a> Anchor<'a> {
     /// line has no point inside.
     ///
     /// Only explicit limits can leave a finite point outside the x domain: auto limits always
-    /// contain every finite x value, and a category axis holds every category of its marks. So
-    /// the limits decide the anchor before any layout pass, and it is the same in all of them.
+    /// contain every finite x value, an automatic end every finite x value beyond the fixed
+    /// end, and a category axis holds every category of its marks. So the limits decide the
+    /// anchor before any layout pass, and it is the same in all of them; an automatic end is
+    /// never crossed.
     fn of_line(line: &'a LineMark, limits: &Limits) -> Option<Anchor<'a>> {
         let y = line.y().numbers();
         match line.x() {
@@ -3914,14 +4233,8 @@ impl<'a> Anchor<'a> {
     /// anchors own their coordinates, so they need not borrow the computed curve.
     fn of_numbers(xs: &[f64], y: &[f64], limits: &Limits) -> Option<Anchor<'a>> {
         let range = match limits.x {
-            AxisLimits::Continuous(ContinuousLimits {
-                transform,
-                explicit: Some(scale),
-                ..
-            }) => Some((transform, scale.domain())),
-            AxisLimits::Continuous(ContinuousLimits { explicit: None, .. })
-            | AxisLimits::Category
-            | AxisLimits::Time(_) => None,
+            AxisLimits::Continuous(axis) => axis.bounds().map(|bounds| (axis.transform, bounds)),
+            AxisLimits::Category | AxisLimits::Time(_) => None,
         };
         let inside = |x: f64| range.is_none_or(|(_, (lo, hi))| lo <= x && x <= hi);
         let last = xs
@@ -3969,11 +4282,12 @@ impl<'a> Anchor<'a> {
     /// of `y` are numbers, and a line with times along y has none, so its label goes to the
     /// legend row.
     fn of_times(xs: &[Option<Instant>], y: &[f64], limits: &Limits) -> Option<Anchor<'a>> {
-        let range = match limits.x {
-            AxisLimits::Time(TimeLimits { explicit, .. }) => explicit,
-            AxisLimits::Continuous(_) | AxisLimits::Category => None,
+        let (low, high) = match limits.x {
+            AxisLimits::Time(axis) => axis.bounds(),
+            AxisLimits::Continuous(_) | AxisLimits::Category => (None, None),
         };
-        let inside = |t: Instant| range.is_none_or(|(low, high)| low <= t && t <= high);
+        let inside =
+            |t: Instant| low.is_none_or(|low| low <= t) && high.is_none_or(|high| t <= high);
         let last = xs
             .iter()
             .zip(y)
@@ -3984,8 +4298,8 @@ impl<'a> Anchor<'a> {
             y: y[last],
             end: EndKind::Point,
         };
-        let (Some((_, high)), Some(&Some(next_x)), Some(&next_y)) =
-            (range, xs.get(last + 1), y.get(last + 1))
+        let (Some(high), Some(&Some(next_x)), Some(&next_y)) =
+            (high, xs.get(last + 1), y.get(last + 1))
         else {
             return Some(point);
         };
@@ -4027,26 +4341,25 @@ impl<'a> Anchor<'a> {
         match step.x() {
             AxisData::Numbers(xs) => {
                 let (range, log) = match limits.x {
-                    AxisLimits::Continuous(ContinuousLimits {
-                        transform,
-                        explicit,
-                        ..
-                    }) => (
-                        explicit.map(|scale| scale.domain()),
-                        matches!(transform, Transform::Log(_)),
-                    ),
+                    AxisLimits::Continuous(axis) => {
+                        (axis.bounds(), matches!(axis.transform, Transform::Log(_)))
+                    }
                     AxisLimits::Category | AxisLimits::Time(_) => (None, false),
                 };
-                let origin = range.map_or_else(
-                    || xs.iter().copied().find(|v| v.is_finite()).unwrap_or(1.0),
-                    |(lo, _)| lo,
-                );
+                // A fixed lower limit, or the first finite x below an automatic one.
+                let origin = range
+                    .map(|(lo, _)| lo)
+                    .filter(|lo| lo.is_finite())
+                    .or_else(|| xs.iter().copied().find(|v| v.is_finite()))
+                    .unwrap_or(1.0);
                 let to_axis = |v| if log { log_offset(v, origin) } else { v };
                 let mapped: Vec<_> = xs.iter().map(|&v| to_axis(v)).collect();
                 let line = holds(&mapped, step.y().numbers(), position);
-                // The last hold that is visible: it overlaps the x domain, ends included.
+                // The last hold that is visible: it overlaps the x domain, ends included. An
+                // automatic end stays infinite.
+                let end_on_axis = |v: f64| if v.is_finite() { to_axis(v) } else { v };
                 let (lo, hi) = range
-                    .map(|(lo, hi)| (to_axis(lo), to_axis(hi)))
+                    .map(|(lo, hi)| (end_on_axis(lo), end_on_axis(hi)))
                     .unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
                 let (hold, from, to) = line
                     .iter()
@@ -4102,29 +4415,25 @@ impl<'a> Anchor<'a> {
         times: &[Option<Instant>],
         limits: &Limits,
     ) -> Option<Anchor<'a>> {
-        let range = match limits.x {
-            AxisLimits::Time(TimeLimits { explicit, .. }) => explicit,
-            AxisLimits::Continuous(_) | AxisLimits::Category => None,
+        let (low, high) = match limits.x {
+            AxisLimits::Time(axis) => axis.bounds(),
+            AxisLimits::Continuous(_) | AxisLimits::Category => (None, None),
         };
-        let origin = range.map_or_else(
-            || times.iter().flatten().next().copied(),
-            |(low, _)| Some(low),
-        )?;
+        let origin = low.or_else(|| times.iter().flatten().next().copied())?;
         let mapped: Vec<f64> = times
             .iter()
             .map(|t| t.map_or(f64::NAN, |t| seconds_between(origin, t)))
             .collect();
         let line = holds(&mapped, step.y().numbers(), step.options().position);
-        let (lo, hi) = range.map_or((f64::NEG_INFINITY, f64::INFINITY), |(low, high)| {
-            (seconds_between(origin, low), seconds_between(origin, high))
-        });
+        let lo = low.map_or(f64::NEG_INFINITY, |low| seconds_between(origin, low));
+        let hi = high.map_or(f64::INFINITY, |high| seconds_between(origin, high));
         let (hold, from, to) = line
             .iter()
             .map(|hold| (hold, hold.from.position(&mapped), hold.to.position(&mapped)))
             .rfind(|&(_, from, to)| to >= lo && from <= hi)?;
         let y = step.y().numbers()[hold.point];
-        let (x, end) = match range {
-            Some((_, high)) if to > hi && from <= hi => (AnchorX::Time(high), EndKind::Edge),
+        let (x, end) = match high {
+            Some(high) if to > hi && from <= hi => (AnchorX::Time(high), EndKind::Edge),
             _ => {
                 let x = match hold.to {
                     Edge::At(k) => AnchorX::Time(times[k]?),
@@ -4855,6 +5164,8 @@ fn resolve_panel_marks_from<'a>(
         .collect()
 }
 
+#[cfg(test)]
+mod axis_limits_tests;
 #[cfg(test)]
 mod data_limits_tests;
 #[cfg(test)]
@@ -8310,11 +8621,13 @@ mod tests {
         } else {
             AutoLimits::LogBelowData(padding)
         };
-        let y = continuous(limits, data, auto, room);
+        let steps = tick_steps(marks.iter(), ValueAxis::Y, &limits);
+        let y = continuous(limits, data, auto, room, steps);
         let base = baseline(&y.scale, y.unpadded_low);
         let axis = ResolvedAxis {
             scale: AxisScale::Continuous(y.scale),
             ticks: y.ticks,
+            steps,
         };
         (axis, base)
     }
@@ -8335,6 +8648,7 @@ mod tests {
             return ResolvedAxis {
                 ticks: category_ticks(&scale, ValueAxis::X),
                 scale: AxisScale::Category(scale),
+                steps: TickSteps::Any,
             };
         };
         let data = union(
@@ -8356,10 +8670,12 @@ mod tests {
         } else {
             AutoLimits::Padded(Padding::BothSides)
         };
-        let x = continuous(limits, data, auto, room);
+        let steps = tick_steps(marks.iter(), ValueAxis::X, &limits);
+        let x = continuous(limits, data, auto, room, steps);
         ResolvedAxis {
             scale: AxisScale::Continuous(x.scale),
             ticks: x.ticks,
+            steps,
         }
     }
 
