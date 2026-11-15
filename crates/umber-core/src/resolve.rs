@@ -75,8 +75,8 @@ use crate::time::{
     TimeStep, coarser_ticks, concise_labels, explicit_labels, iso_label, label_step, time_ticks,
 };
 use crate::{
-    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, Marker, NumberStyle, Result,
-    Rgba, ScaleKind, Theme, Tick, Transform, ticks,
+    CategoryScale, ColorSpec, ContinuousScale, Dash, Error, Instant, MAX_MAGNITUDE, MIN_LOG_VALUE,
+    Marker, NumberStyle, Result, Rgba, ScaleKind, Theme, Tick, Transform, ticks,
 };
 
 /// The context of errors that cannot happen here: the model validated every input already.
@@ -775,7 +775,7 @@ fn automatic(
 /// The extent that an axis with its `end` fixed at `value` fits instead of the extent `data`:
 /// from the fixed end to the far end of the data, or the fixed end alone, a single value, when
 /// no data lies beyond it.
-fn with_fixed_end(data: Option<(f64, f64)>, end: LimitEnd, value: f64) -> (f64, f64) {
+pub(crate) fn with_fixed_end(data: Option<(f64, f64)>, end: LimitEnd, value: f64) -> (f64, f64) {
     match end {
         LimitEnd::Low => (value, data.map_or(value, |(_, high)| high.max(value))),
         LimitEnd::High => (data.map_or(value, |(low, _)| low.min(value)), value),
@@ -783,15 +783,24 @@ fn with_fixed_end(data: Option<(f64, f64)>, end: LimitEnd, value: f64) -> (f64, 
 }
 
 /// `scale` with its `end` at `value` and its other end kept. The fit of an extent that starts
-/// at `value` never leaves that end on the wrong side of the other, so the fallback to `scale`
-/// itself only guards the scale's invariants.
-fn pinned(scale: ContinuousScale, end: LimitEnd, value: f64) -> ContinuousScale {
+/// at `value` never leaves the other end on the wrong side of it, or too close: the only room it
+/// can lack is past the end of the supported values, and the setters refuse a fixed end without
+/// room up to that end ([`AxesMut::xlim_end`](crate::AxesMut::xlim_end)). So the other end then
+/// moves to the end of the supported values, and the fixed end is always kept.
+pub(crate) fn pinned(scale: ContinuousScale, end: LimitEnd, value: f64) -> ContinuousScale {
+    let transform = scale.transform();
     let (low, high) = scale.domain();
-    let (low, high) = match end {
-        LimitEnd::Low => (value, high),
-        LimitEnd::High => (low, value),
+    let floor = match transform {
+        Transform::Linear => -MAX_MAGNITUDE,
+        Transform::Log(_) => MIN_LOG_VALUE,
     };
-    ContinuousScale::new(scale.transform(), low, high, CONTEXT).unwrap_or(scale)
+    let (kept, widest) = match end {
+        LimitEnd::Low => ((value, high), (value, MAX_MAGNITUDE)),
+        LimitEnd::High => ((low, value), (floor, value)),
+    };
+    ContinuousScale::new(transform, kept.0, kept.1, CONTEXT)
+        .or_else(|_| ContinuousScale::new(transform, widest.0, widest.1, CONTEXT))
+        .unwrap_or(scale)
 }
 
 /// Judges automatic ticks as the axis draws them: labelled by its tick format, at their
@@ -1543,9 +1552,13 @@ fn time_axis<'a, 'm: 'a>(
         Some(GivenLimits::Both((low, high))) => {
             time_scale(low, 0.0, seconds_between(low, high), (low, high))
         }
-        Some(GivenLimits::OneEnd(end, fixed)) => {
-            time_end_scale(marks.clone(), which, role, limits.ticks, (end, fixed))
-        }
+        Some(GivenLimits::OneEnd(end, fixed)) => time_end_scale(
+            marks.clone(),
+            (which, role),
+            limits.ticks,
+            (end, fixed),
+            bubbles,
+        ),
         None => {
             let (data, extent) = time_extents(marks.clone(), which, limits.ticks);
             match extent {
@@ -1603,50 +1616,68 @@ fn time_axis<'a, 'm: 'a>(
 }
 
 /// The time scale of the axis `which` of a group's `marks`, playing `role`, whose `end` is
-/// fixed at the time `fixed` and whose other end is automatic. It spans from the fixed end to
-/// the far end of the times of the marks and the explicit `ticks`, if set: exactly when an axis
-/// without limits would keep the exact extent ([`exact_time_extent`]) or when every mark that
-/// gives it times holds mesh cells, and otherwise padded by 5 % of that span on the automatic
-/// side. With no time beyond the fixed end, the automatic end lies [`SINGLE_TIME_REACH`] from
-/// it. The seconds count from the low end, as on an axis with both limits.
+/// fixed at the time `fixed` and whose other end is automatic, as [`time_axis`] and
+/// [`time_cells_scale`] fit an axis without limits but from the fixed end. The mesh cells keep
+/// the exact far end of their times. The other marks and the explicit `ticks`, if set, with
+/// `bubbles` (the extent in seconds from the earliest of all those times that fits the group's
+/// bubbles, if any) reach their own far end, exactly when an axis without limits would keep
+/// their exact extent ([`exact_time_extent`]), and otherwise padded by 5 % of the span from the
+/// fixed end. The automatic end is the further of the two. With no time beyond the fixed end,
+/// it lies [`SINGLE_TIME_REACH`] from it. The seconds count from the low end, as on an axis
+/// with both limits.
 fn time_end_scale<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
-    which: ValueAxis,
-    role: AxisRole,
+    (which, role): (ValueAxis, AxisRole),
     ticks: &AxisTicks,
     (end, fixed): (LimitEnd, Instant),
+    bubbles: Option<(f64, f64)>,
 ) -> TimeScale {
-    let (data, extent) = time_extents(marks.clone(), which, ticks);
-    let far = extent
-        .map(|(low, high)| match end {
-            LimitEnd::Low => high,
-            LimitEnd::High => low,
-        })
-        .filter(|&far| match end {
-            LimitEnd::Low => far > fixed,
-            LimitEnd::High => far < fixed,
-        });
+    let beyond = |t: &Instant| match end {
+        LimitEnd::Low => *t > fixed,
+        LimitEnd::High => *t < fixed,
+    };
+    let far_of = |(low, high): InstantRange| match end {
+        LimitEnd::Low => high,
+        LimitEnd::High => low,
+    };
+    let further = |a: Option<Instant>, b: Option<Instant>| match (a, b, end) {
+        (Some(a), Some(b), LimitEnd::Low) => Some(a.max(b)),
+        (Some(a), Some(b), LimitEnd::High) => Some(a.min(b)),
+        (a, b, _) => a.or(b),
+    };
+    let origin = time_extents(marks.clone(), which, ticks)
+        .1
+        .map(|(low, _)| low);
+    let (cells, others): (Vec<_>, Vec<_>) = marks.partition(|mark| holds_cells(mark, which));
+    let cell_far = time_extent(cells.iter().flat_map(|mark| mark.times(which)))
+        .map(far_of)
+        .filter(beyond);
+    let (other_data, other_extent) = time_extents(others.iter().copied(), which, ticks);
+    let bubble_far = bubbles.zip(origin).map(|((from, to), origin)| match end {
+        LimitEnd::Low => shifted_outward(origin, to, true),
+        LimitEnd::High => shifted_outward(origin, from, false),
+    });
+    let other_far = further(other_extent.map(far_of), bubble_far).filter(beyond);
+    let exact = bubble_far.is_none()
+        && (other_data.is_none()
+            || (role == AxisRole::Positions
+                && exact_time_extent(others.iter().copied(), which, true)));
+    let other_far = other_far.map(|far| {
+        if exact {
+            far
+        } else {
+            shifted(
+                fixed,
+                seconds_between(fixed, far) * (1.0 + AUTO_LIMIT_PADDING),
+            )
+        }
+    });
     let toward = match end {
         LimitEnd::Low => 1.0,
         LimitEnd::High => -1.0,
     };
-    let automatic = match far {
-        None => shifted(fixed, toward * SINGLE_TIME_REACH),
-        Some(far) => {
-            let cells_only = marks
-                .clone()
-                .filter(|mark| mark.times(which).next().is_some())
-                .all(|mark| holds_cells(mark, which));
-            let exact = cells_only
-                || (role == AxisRole::Positions && exact_time_extent(marks, which, data.is_some()));
-            if exact {
-                far
-            } else {
-                let span = seconds_between(fixed, far);
-                shifted(fixed, span * (1.0 + AUTO_LIMIT_PADDING))
-            }
-        }
-    };
+    let automatic =
+        further(cell_far, other_far).unwrap_or_else(|| shifted(fixed, toward * SINGLE_TIME_REACH));
     let (low, high) = match end {
         LimitEnd::Low => (fixed, automatic),
         LimitEnd::High => (automatic, fixed),
@@ -2605,15 +2636,22 @@ impl<'a> ResolvedMark<'a> {
     }
 
     /// The values along `which` whose being integers decides the steps of automatic linear
-    /// ticks ([`TickSteps::of`]): those of [`ResolvedMark::numbers`], except that a hexbin gives
-    /// its points rather than the bounds of its fitted cells, which change with the layout.
+    /// ticks ([`TickSteps::of`]): those of [`ResolvedMark::numbers`], the values the automatic
+    /// limits come from, except that a hexbin gives its points, the pairs it counts (both
+    /// coordinates finite), rather than the bounds of its fitted cells, which change with the
+    /// layout.
     pub fn step_values(&self, which: ValueAxis) -> DomainValues<'_> {
-        match (self, which) {
-            (ResolvedMark::Hexbin { mark, .. }, ValueAxis::X) => {
-                DomainValues::Data(mark.x.iter().copied())
-            }
-            (ResolvedMark::Hexbin { mark, .. }, ValueAxis::Y) => {
-                DomainValues::Data(mark.y.iter().copied())
+        match self {
+            ResolvedMark::Hexbin { mark, .. } => {
+                let pairs = mark.x.iter().zip(mark.y.iter());
+                DomainValues::Computed(Box::new(
+                    pairs
+                        .filter(|(x, y)| x.is_finite() && y.is_finite())
+                        .map(move |(&x, &y)| match which {
+                            ValueAxis::X => x,
+                            ValueAxis::Y => y,
+                        }),
+                ))
             }
             _ => self.numbers(which),
         }

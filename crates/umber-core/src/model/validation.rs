@@ -1807,17 +1807,74 @@ pub(super) fn check_limit_end(
             )
             .with_parameter(name))
         }
-        Transform::Linear | Transform::Log(_) => Ok(value),
+        Transform::Linear | Transform::Log(_) => {
+            // The automatic end needs room beyond the fixed one: at least the narrowest range
+            // a scale allows, within the supported values.
+            let floor = match transform {
+                Transform::Linear => -MAX_MAGNITUDE,
+                Transform::Log(_) => MIN_LOG_VALUE,
+            };
+            let room = match end {
+                LimitEnd::Low => ContinuousScale::new(transform, value, MAX_MAGNITUDE, context),
+                LimitEnd::High => ContinuousScale::new(transform, floor, value, context),
+            };
+            match room {
+                Ok(_) => Ok(value),
+                Err(_) => Err(Error::style(
+                    context,
+                    format!(
+                        "{name} is {shown}; it leaves no room for an automatic limit {} it within the supported values.",
+                        match end {
+                            LimitEnd::Low => "above",
+                            LimitEnd::High => "below",
+                        }
+                    ),
+                )
+                .with_parameter(name)
+                .with_hint("set both limits, or move this one away from the end of the range.")),
+            }
+        }
     }
+}
+
+/// Checks one explicit limit of a time axis, `time` at `end`, for the setter `context` of
+/// `axis`, of scale kind `kind`: as [`check_time_axis`], then `Error::Style` naming the
+/// parameter of that end when the time is the last supported one for a lower limit, or the
+/// first for an upper limit, which leaves no room for the automatic end.
+pub(super) fn check_time_limit_end(
+    context: &'static str,
+    axis: SharedAxis,
+    kind: ScaleKind,
+    end: LimitEnd,
+    time: Instant,
+) -> Result<Instant> {
+    check_time_axis(context, axis, kind)?;
+    let at_the_edge = match end {
+        LimitEnd::Low => time >= Instant::MAX,
+        LimitEnd::High => time <= Instant::MIN,
+    };
+    if at_the_edge {
+        return Err(Error::style(
+            context,
+            format!(
+                "{} is {}; it leaves no room for an automatic limit {} it.",
+                end.name(),
+                time.label(),
+                match end {
+                    LimitEnd::Low => "after",
+                    LimitEnd::High => "before",
+                }
+            ),
+        )
+        .with_parameter(end.name())
+        .with_hint("set both limits, or move this one away from the end of the range."));
+    }
+    Ok(time)
 }
 
 /// Checks that the setter `context` of `axis`, of scale kind `kind`, sets the limits of a time
 /// axis: `Error::Usage` unless it is one.
-pub(super) fn check_time_axis(
-    context: &'static str,
-    axis: SharedAxis,
-    kind: ScaleKind,
-) -> Result<()> {
+fn check_time_axis(context: &'static str, axis: SharedAxis, kind: ScaleKind) -> Result<()> {
     match kind {
         ScaleKind::Time => Ok(()),
         ScaleKind::Category => Err(Error::usage(

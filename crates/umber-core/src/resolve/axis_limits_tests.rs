@@ -393,3 +393,172 @@ fn a_grid_names_the_cell_whose_fixed_end_leaves_no_data() {
         "{err}"
     );
 }
+
+#[test]
+fn bar_labels_widen_the_automatic_end_of_a_one_sided_limit() {
+    let f = figure(ScaleKind::Category, ScaleKind::Linear, |axes| {
+        axes.bar(
+            ["a", "b", "c"].map(String::from).to_vec(),
+            &[1.0, 3.0, 2.0],
+            BarOptions {
+                annotation: crate::ValueLabels {
+                    annotate: true,
+                    ..crate::ValueLabels::default()
+                },
+                ..BarOptions::default()
+            },
+        )
+        .unwrap()
+        .ylim_end(LimitEnd::Low, 0.0)
+        .unwrap();
+    });
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+    let (low, high) = plan(&f).y.continuous_scale().domain();
+    assert_eq!(low, 0.0);
+    assert!(high > 3.0 * (1.0 + AUTO_LIMIT_PADDING), "{high}");
+}
+
+#[test]
+fn bubbles_widen_only_the_automatic_end() {
+    let f = figure(ScaleKind::Linear, ScaleKind::Linear, |axes| {
+        axes.bubbles(
+            &[0.0, 5.0, 10.0],
+            &[1.0, 2.0, 3.0],
+            &[400.0, 400.0, 400.0],
+            Default::default(),
+        )
+        .unwrap()
+        .xlim_end(LimitEnd::Low, 0.0)
+        .unwrap();
+    });
+    let (low, high) = plan(&f).x.continuous_scale().domain();
+    // The bubble at the fixed end is clipped; the one at 10 is held whole.
+    assert_eq!(low, 0.0);
+    assert!(high > 10.0 * (1.0 + AUTO_LIMIT_PADDING), "{high}");
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+}
+
+#[test]
+fn a_hexbin_keeps_its_fixed_end_and_whole_cells_at_the_other() {
+    let x: Vec<f64> = (0..20).map(f64::from).collect();
+    let y: Vec<f64> = (0..20).map(|i| f64::from(i % 7)).collect();
+    for end in [LimitEnd::Low, LimitEnd::High] {
+        let f = figure(ScaleKind::Linear, ScaleKind::Linear, |axes| {
+            axes.hexbin(
+                &x,
+                &y,
+                crate::HexbinOptions {
+                    gridsize: 7,
+                    ..crate::HexbinOptions::default()
+                },
+            )
+            .unwrap();
+            match end {
+                LimitEnd::Low => axes.xlim_end(LimitEnd::Low, 3.0).unwrap(),
+                LimitEnd::High => axes.xlim_end(LimitEnd::High, 15.0).unwrap(),
+            };
+        });
+        let (low, high) = plan(&f).x.continuous_scale().domain();
+        // A lattice unit is 19 / 7 along x; the outer cells reach half a unit past their
+        // points.
+        let half = 0.5 * 19.0 / 7.0;
+        match end {
+            LimitEnd::Low => {
+                assert_eq!(low, 3.0);
+                assert!(high >= 19.0 + half - 1e-9, "{high}");
+            }
+            LimitEnd::High => {
+                assert_eq!(high, 15.0);
+                assert!(low <= -half + 1e-9, "{low}");
+            }
+        }
+        assert!(f.to_scene(FontLibrary::global()).is_ok());
+    }
+}
+
+#[test]
+fn a_hexbin_counts_only_its_paired_points_for_steps() {
+    let paired = figure(ScaleKind::Linear, ScaleKind::Linear, |axes| {
+        axes.hexbin(&[0.0, 1.0], &[0.0, 1.0], crate::HexbinOptions::default())
+            .unwrap();
+    });
+    assert_eq!(plan(&paired).x.steps, TickSteps::Whole);
+    let unpaired = figure(ScaleKind::Linear, ScaleKind::Linear, |axes| {
+        axes.hexbin(
+            &[0.0, 1.0, 0.25],
+            &[0.0, 1.0, f64::NAN],
+            crate::HexbinOptions::default(),
+        )
+        .unwrap();
+    });
+    assert_eq!(plan(&unpaired).x.steps, TickSteps::Whole);
+}
+
+#[test]
+fn time_cells_keep_their_exact_end_beside_other_marks_from_a_fixed_end() {
+    let day = |k: i64| Instant::from_micros((20_454 + k) * DAY).unwrap();
+    let build = |fixed: bool| {
+        figure(ScaleKind::Time, ScaleKind::Linear, |axes| {
+            axes.mesh_time(
+                AxisData::Times(vec![Some(day(0)), Some(day(10))]),
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[1.0],
+                crate::MeshOptions::default(),
+            )
+            .unwrap()
+            .line_shared(
+                AxisData::Times(vec![Some(day(2)), Some(day(8))]),
+                AxisData::Numbers(vec![0.25, 0.75]),
+                LineOptions::default(),
+            )
+            .unwrap();
+            if fixed {
+                axes.xlim_time_end(LimitEnd::Low, day(0)).unwrap();
+            }
+        })
+    };
+    let instants = |f: &Figure| match &plan(f).x.scale {
+        AxisScale::Time(scale) => scale.instants(),
+        other => panic!("a time axis, not {other:?}"),
+    };
+    assert_eq!(instants(&build(false)), (day(0), day(10)));
+    assert_eq!(instants(&build(true)), (day(0), day(10)));
+}
+
+#[test]
+fn a_fixed_end_without_room_for_the_other_is_refused() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, log10()).unwrap();
+    for (end, value) in [(LimitEnd::Low, 1e300), (LimitEnd::High, -1e300)] {
+        let err = axes.xlim_end(end, value).unwrap_err();
+        assert!(matches!(err, Error::Style { .. }), "{err}");
+        assert_eq!(err.parameter(), Some(end.name()));
+        assert_eq!(
+            err.hint(),
+            Some("set both limits, or move this one away from the end of the range.")
+        );
+    }
+    assert_eq!(
+        axes.xlim_end(LimitEnd::Low, 1e300).unwrap_err().to_string(),
+        "Axes.xlim(): low is 1e300; it leaves no room for an automatic limit above it within \
+         the supported values."
+    );
+    for (end, value) in [(LimitEnd::Low, 1e300), (LimitEnd::High, 1e-300)] {
+        assert!(axes.ylim_end(end, value).is_err());
+    }
+    // A little room is enough: the fixed end is always kept.
+    axes.xlim_end(LimitEnd::Low, 9.9e299).unwrap();
+    axes.line(
+        AxisData::Numbers(vec![1e300, 1e300]),
+        &[1.0, 2.0],
+        LineOptions::default(),
+    )
+    .unwrap();
+    let (low, high) = plan(&f).x.continuous_scale().domain();
+    assert_eq!((low, high), (9.9e299, crate::MAX_MAGNITUDE));
+    let mut t = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut time = t.add_axes(ScaleKind::Time, ScaleKind::Linear).unwrap();
+    assert!(time.xlim_time_end(LimitEnd::Low, Instant::MAX).is_err());
+    assert!(time.xlim_time_end(LimitEnd::High, Instant::MIN).is_err());
+    assert!(time.xlim_time_end(LimitEnd::High, Instant::MAX).is_ok());
+}

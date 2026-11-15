@@ -55,7 +55,9 @@
 //! them ([`BubbleFit::sufficient_length`]); the pipeline starts from that estimate to find, by
 //! laying the figure out at larger sizes, a figure size that holds them, which its error
 //! names. A layout that cannot hold the fitted limits fails as layouts do. Explicit limits are
-//! never fitted, and the plot clips the bubbles that reach past them.
+//! never fitted, and the plot clips the bubbles that reach past them. With one limit explicit,
+//! the fit starts from that end and widens the other alone: what lies past the fixed end, and
+//! every reach towards it, is clipped.
 //!
 //! Only a fit that does not settle within [`MAX_REFITS`] attempts, or within the rounds of the
 //! layout, still falls back: its axis keeps the limits of the data positions alone, as it would
@@ -71,7 +73,7 @@ use crate::error::{number, quoted};
 use crate::field::Reach;
 use crate::field::barb::{self, Barb};
 use crate::layout::PlotSize;
-use crate::model::{Sample, ShareGroups, SharedValues, VectorField};
+use crate::model::{GivenLimits, LimitEnd, Sample, ShareGroups, SharedValues, VectorField};
 use crate::resolve::{
     self, AxisLimits, AxisScale, ContinuousLimits, ExtentPadding, Limits, Resolved, ResolvedMark,
     TimeLimits, ValueAxis,
@@ -337,11 +339,41 @@ struct BubbleFit {
     /// drawn decide that the bubbles do not fit. The estimate keeps the limits a mapped
     /// outline would otherwise move by a fraction of a point.
     as_drawn: bool,
+    /// The end that a limit fixes, with its value in this fit's units (seconds from the origin
+    /// on a time axis); `None` when both ends are automatic. Bubbles and labels are fitted on
+    /// the automatic side only: their reach towards the fixed end, and those past it, are
+    /// clipped by the plot.
+    fixed: Option<(LimitEnd, f64)>,
     /// Where the fit stands.
     state: State,
 }
 
 impl BubbleFit {
+    /// `bubbles` as a fit with the end `fixed`, if any, sees them: those past the fixed end
+    /// left out, and the others without their reach towards it.
+    fn on_free_side(mut bubbles: Vec<Bubble>, fixed: Option<(LimitEnd, f64)>) -> Vec<Bubble> {
+        let Some((end, at)) = fixed else {
+            return bubbles;
+        };
+        bubbles.retain(|bubble| match end {
+            LimitEnd::Low => bubble.value >= at,
+            LimitEnd::High => bubble.value <= at,
+        });
+        for bubble in &mut bubbles {
+            match end {
+                LimitEnd::Low => {
+                    bubble.low = 0.0;
+                    bubble.drawn.0 = 0.0;
+                }
+                LimitEnd::High => {
+                    bubble.high = 0.0;
+                    bubble.drawn.1 = 0.0;
+                }
+            }
+        }
+        bubbles
+    }
+
     /// The fit of `axis` with `limits`, whose group's members are `members`, each its panel
     /// index, resolved marks and bar label reaches, with the bubbles filled as `fills` says
     /// (see [`Fills`]). `None` when the axis has no drawn bubble nor bar label or its raw
@@ -368,19 +400,33 @@ impl BubbleFit {
                 ReachFrom::Number(_) | ReachFrom::Time(_) => None,
             })
         }));
+        let fixed = match limits.explicit {
+            Some(GivenLimits::OneEnd(end, value)) => Some((end, value)),
+            Some(GivenLimits::Both(_)) | None => None,
+        };
+        let bubbles = Self::on_free_side(bubbles, fixed);
         if bubbles.is_empty() {
             return None;
         }
         let marks = members.flat_map(|(_, marks, _)| marks.iter());
         let data = resolve::axis_extent(marks, axis.which(), limits.transform);
         let raw = resolve::unrounded_extent(limits, data);
+        let raw = match fixed {
+            Some((end, value)) => Some(resolve::with_fixed_end(raw, end, value)),
+            None => raw,
+        };
         let seed = ContinuousScale::from_extent(limits.transform, raw, CONTEXT).ok()?;
+        let seed = match fixed {
+            Some((end, value)) => resolve::pinned(seed, end, value),
+            None => seed,
+        };
         Some(BubbleFit {
             axis,
             seed,
             bubbles,
             on_demand,
             as_drawn: false,
+            fixed,
             state: State::Unfitted,
         })
     }
@@ -414,6 +460,11 @@ impl BubbleFit {
                 ReachFrom::Number(_) | ReachFrom::Time(_) => None,
             })
         }));
+        let fixed = match limits.explicit {
+            Some(GivenLimits::OneEnd(end, time)) => Some((end, seconds_between(origin, time))),
+            Some(GivenLimits::Both(_)) | None => None,
+        };
+        let bubbles = Self::on_free_side(bubbles, fixed);
         if bubbles.is_empty() {
             return None;
         }
@@ -422,17 +473,24 @@ impl BubbleFit {
         let others = marks.filter(|mark| !matches!(mark, ResolvedMark::Mesh { .. }));
         let (_, other) = resolve::time_extents(others, axis.which(), limits.ticks);
         let (first, last) = other.unwrap_or((origin, origin));
-        let (low, high) = if first == last {
-            let at = seconds_between(origin, first);
-            (
-                at - resolve::SINGLE_TIME_REACH,
-                at + resolve::SINGLE_TIME_REACH,
-            )
-        } else {
-            (
-                seconds_between(origin, first),
-                seconds_between(origin, last),
-            )
+        let (first, last) = (
+            seconds_between(origin, first),
+            seconds_between(origin, last),
+        );
+        // From a fixed end, the extent runs to the far end of the others, or reaches as far as
+        // from a single instant when none lies beyond it.
+        let (first, last) = match fixed {
+            Some((end, at)) => resolve::with_fixed_end(Some((first, last)), end, at),
+            None => (first, last),
+        };
+        let (low, high) = match (first == last, fixed) {
+            (false, _) => (first, last),
+            (true, None) => (
+                first - resolve::SINGLE_TIME_REACH,
+                first + resolve::SINGLE_TIME_REACH,
+            ),
+            (true, Some((LimitEnd::Low, _))) => (first, first + resolve::SINGLE_TIME_REACH),
+            (true, Some((LimitEnd::High, _))) => (first - resolve::SINGLE_TIME_REACH, first),
         };
         let seed = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).ok()?;
         Some(BubbleFit {
@@ -441,6 +499,7 @@ impl BubbleFit {
             bubbles,
             on_demand,
             as_drawn: false,
+            fixed,
             state: State::Unfitted,
         })
     }
@@ -534,6 +593,10 @@ impl BubbleFit {
                 Transform::Log(_) => extent.nice(0),
             };
             let domain = rounded.padded(Padding::BothSides);
+            let domain = match self.fixed {
+                Some((end, value)) => resolve::pinned(domain, end, value),
+                None => domain,
+            };
             if self.contains(domain, &lengths) {
                 return true;
             }
@@ -1381,11 +1444,16 @@ impl BubbleFits {
                     let members = (0..marks.len())
                         .filter(|j| keys[*j] == i)
                         .map(|j| (j, marks[j], ends[j].as_slice()));
+                    // Both explicit limits are never fitted; one is fitted on its free side.
                     match limits[i].axis(axis.which()) {
-                        AxisLimits::Continuous(limits) if limits.explicit.is_none() => {
+                        AxisLimits::Continuous(limits)
+                            if !matches!(limits.explicit, Some(GivenLimits::Both(_))) =>
+                        {
                             BubbleFit::new(axis, &limits, members, fills)
                         }
-                        AxisLimits::Time(limits) if limits.explicit.is_none() => {
+                        AxisLimits::Time(limits)
+                            if !matches!(limits.explicit, Some(GivenLimits::Both(_))) =>
+                        {
                             BubbleFit::time(axis, &limits, members, fills)
                         }
                         _ => None,
@@ -1683,6 +1751,7 @@ mod tests {
             bubbles,
             on_demand: false,
             as_drawn: false,
+            fixed: None,
             state: State::Unfitted,
         }
     }

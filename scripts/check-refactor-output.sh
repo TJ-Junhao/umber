@@ -81,6 +81,7 @@ driver_files=(
   crates/umber-core/examples/refactor_outputs.rs
   crates/umber-core/tests/support/corpus/annotation.rs
   crates/umber-core/tests/support/corpus/area.rs
+  crates/umber-core/tests/support/corpus/axis_limits.rs
   crates/umber-core/tests/support/corpus/band.rs
   crates/umber-core/tests/support/corpus/bar_labels.rs
   crates/umber-core/tests/support/corpus/bars.rs

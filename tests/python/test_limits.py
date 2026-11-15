@@ -147,3 +147,29 @@ def test_a_shared_one_sided_limit_conflict_names_both() -> None:
     assert str(caught.value) == (
         "Axes.xlim(): x limits are shared with row 0, col 0, which set (0, AUTO)."
     )
+
+
+def test_value_labels_widen_the_automatic_end() -> None:
+    ax = ub.Figure(5, 4).add_axes(x=ub.Scale.category())
+    ax.bar(["a", "b", "c"], [1, 3, 2], annotate=True).ylim(0, ub.AUTO)
+    assert "3" in texts(ax)
+
+
+def test_a_hexbin_holds_whole_cells_beyond_its_fixed_end() -> None:
+    ax = ub.Figure(6, 4).add_axes()
+    ax.hexbin(list(range(20)), [i % 7 for i in range(20)], gridsize=7).xlim(0, ub.AUTO)
+    assert max(numbers(ax)) >= 20
+
+
+def test_a_limit_without_room_for_the_other_is_refused() -> None:
+    ax = ub.Figure().add_axes()
+    with pytest.raises(ub.StyleError) as caught:
+        ax.ylim(1e300, ub.AUTO)
+    assert str(caught.value) == (
+        "Axes.ylim(): low is 1e300; it leaves no room for an automatic limit above it within "
+        "the supported values."
+    )
+    assert details(caught.value) == (
+        "low",
+        "set both limits, or move this one away from the end of the range.",
+    )

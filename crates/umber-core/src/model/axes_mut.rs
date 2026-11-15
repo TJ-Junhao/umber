@@ -46,7 +46,7 @@ use super::validation::{
     check_time_tick_axis, check_vline_x, check_x_error_bars, check_y_error_bars,
 };
 use super::validation::{
-    check_band_axes, check_limit_end, check_not_two_categories, check_time_axis,
+    check_band_axes, check_limit_end, check_not_two_categories, check_time_limit_end,
 };
 use super::violin::{ViolinGroupMark, ViolinMark, ViolinOptions};
 use crate::{
@@ -370,8 +370,9 @@ impl<'a> AxesMut<'a> {
     /// histograms, areas and stems; lines keep their exact extent; log axes round to a power).
     /// With no data beyond the fixed end, the automatic end is where a single value at the
     /// fixed end would reach. Rendering raises `Error::Style` when every value lies past the
-    /// fixed end. Bubbles, arrows, barbs and value labels do not widen these limits; marks past
-    /// them are clipped.
+    /// fixed end. Bubbles, arrows, barbs and value labels widen the automatic end to hold them,
+    /// as automatic limits do; at the fixed end they are clipped. `Error::Style` also refuses a
+    /// value that leaves no room for the automatic end within the supported values.
     ///
     /// # Examples
     ///
@@ -3001,7 +3002,9 @@ impl<'a> AxesMut<'a> {
     /// # Errors
     ///
     /// Errors leave the axes unchanged: `Error::Usage` unless the x axis is a time axis, then
-    /// the rules of shared limits (see [`AxesMut`]).
+    /// `Error::Style` for a lower limit at [`Instant::MAX`] or an upper one at [`Instant::MIN`],
+    /// which leave no room for the automatic end, then the rules of shared limits (see
+    /// [`AxesMut`]).
     ///
     /// # Examples
     ///
@@ -3017,7 +3020,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn xlim_time_end(&mut self, end: LimitEnd, time: Instant) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.xlim()";
-        check_time_axis(CONTEXT, SharedAxis::X, self.x)?;
+        let time = check_time_limit_end(CONTEXT, SharedAxis::X, self.x, end, time)?;
         let mut settings = (*self.x_settings).clone();
         settings.limits = Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time)));
         self.figure.set_group(
@@ -3049,7 +3052,7 @@ impl<'a> AxesMut<'a> {
     /// ```
     pub fn ylim_time_end(&mut self, end: LimitEnd, time: Instant) -> Result<&mut Self> {
         const CONTEXT: &str = "Axes.ylim()";
-        check_time_axis(CONTEXT, SharedAxis::Y, self.y)?;
+        let time = check_time_limit_end(CONTEXT, SharedAxis::Y, self.y, end, time)?;
         let mut settings = (*self.y_settings).clone();
         settings.limits = Some(ExplicitLimits::Time(GivenLimits::OneEnd(end, time)));
         self.figure.set_group(

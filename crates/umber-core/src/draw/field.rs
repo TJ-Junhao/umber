@@ -346,16 +346,17 @@ pub(crate) enum Spill {
 /// visible, and above the rounding of the frames.
 const HELD_SLACK: f64 = 1e-3;
 
-/// What reaches past the edges of `plot` along the axes that `automatic` names, x then y, on the
-/// axes `resolved`: an arrow or barb of `marks` as it is drawn, the arrows in the `frames` of the
-/// quivers, in order. Automatic limits hold whole shapes, so a layout where this finds one is not
-/// a layout to draw; explicit limits clip them, so those edges do not count.
+/// What reaches past the edges of `plot` at the ends that `automatic` names, low then high of x,
+/// then of y, on the axes `resolved`: an arrow or barb of `marks` as it is drawn, the arrows in
+/// the `frames` of the quivers, in order. Automatic limits hold whole shapes, so a layout where
+/// this finds one is not a layout to draw; explicit limits clip them, so those edges do not
+/// count.
 pub(crate) fn spill(
     marks: &[ResolvedMark<'_>],
     frames: &[ArrowFrame],
     resolved: &Resolved,
     plot: Area,
-    automatic: [bool; 2],
+    automatic: [[bool; 2]; 2],
 ) -> Option<Spill> {
     let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
     let spills = |field: &VectorField, fill: FieldFill<'_>, reach: &dyn Fn(f64, f64) -> Reach| {
@@ -367,11 +368,12 @@ pub(crate) fn spill(
             }
             let at = maps.to_plot(AxisPoint::new(xs[sample.column], ys[sample.row]));
             let reach = reach(sample.u, sample.v);
-            let along_x = at.x - reach.left < plot.x - HELD_SLACK
-                || at.x + reach.right > plot.right() + HELD_SLACK;
-            let along_y = at.y - reach.up < plot.y - HELD_SLACK
-                || at.y + reach.down > plot.bottom() + HELD_SLACK;
-            (automatic[0] && along_x) || (automatic[1] && along_y)
+            let [[left, right], [bottom, top]] = automatic;
+            // The plot's y grows downwards: its top is the high end of the y axis.
+            (left && at.x - reach.left < plot.x - HELD_SLACK)
+                || (right && at.x + reach.right > plot.right() + HELD_SLACK)
+                || (top && at.y - reach.up < plot.y - HELD_SLACK)
+                || (bottom && at.y + reach.down > plot.bottom() + HELD_SLACK)
         })
     };
     let scale = resolved.color.as_ref();
