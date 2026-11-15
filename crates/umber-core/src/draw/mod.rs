@@ -249,13 +249,16 @@ pub(crate) fn drawn_marks(
                 fill_size,
                 ref mapped,
                 width,
+                line_width,
                 ..
             } => {
                 // The scatter's own line, then its own error bars, lie under its markers, all
-                // in its color at full opacity and at the lighter width resolved for them.
+                // in its color at full opacity: the line at its connect width, the bars at the
+                // lighter width resolved for them.
                 let own = (solid(color), width);
                 if let Some(line_mark) = scatter_mark.line() {
-                    line_mark_items(&context, resolved, line_mark, own, &mut items);
+                    let line = (solid(color), line_width);
+                    line_mark_items(&context, resolved, line_mark, line, &mut items);
                 }
                 let bars_start = items.len();
                 for bars in scatter_mark.error_bars() {

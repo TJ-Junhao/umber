@@ -140,7 +140,7 @@ fn the_groups_of_a_grouped_raster_scatter_or_line_share_one_image() {
             Marker::Circle,
             SizeSpec::Auto,
             PointLabels::default(),
-            false,
+            (false, SizeSpec::Auto),
             MarkRender::Raster,
         )
         .unwrap();

@@ -81,7 +81,7 @@ impl Default for LineOptions {
 pub struct AreaOptions {
     /// The legend label; empty for none.
     pub label: String,
-    /// The color of the line, and of the fill at the area opacity.
+    /// The color of the line, and of the fill at the area opacity (a translucent color fills as given).
     pub color: ColorSpec,
     /// The dash style of the line.
     pub dash: Dash,
@@ -127,6 +127,7 @@ impl AreaOptions {
 /// assert!(options.label.is_empty());
 /// assert!(!options.labels.annotate);
 /// assert!(options.x_error.is_none() && options.y_error.is_none() && !options.connect);
+/// assert_eq!(options.connect_width, SizeSpec::Auto);
 ///
 /// let small = ScatterOptions { size: SizeSpec::pt(3.0)?, ..ScatterOptions::default() };
 /// assert_ne!(small, options);
@@ -154,6 +155,9 @@ pub struct ScatterOptions {
     pub y_error: Option<ErrorRange>,
     /// Whether a line joins the points in input order.
     pub connect: bool,
+    /// The stroke width of the line that joins the points. [`SizeSpec::Auto`] is half the width
+    /// of a line of the automatic width; it must stay automatic unless `connect` is set.
+    pub connect_width: SizeSpec,
     /// Whether SVG and PDF output draw the markers, and the line that joins them, as vector
     /// shapes or as one image (see [`MarkRender`]); vector shapes by default. The value labels
     /// and error bars stay vector shapes. With error bars and a joining line, the line and the
@@ -172,6 +176,7 @@ impl Default for ScatterOptions {
             x_error: None,
             y_error: None,
             connect: false,
+            connect_width: SizeSpec::Auto,
             render: MarkRender::Vector,
         }
     }
@@ -677,6 +682,14 @@ impl OwnMarks {
         series: &XySeries,
         options: &ScatterOptions,
     ) -> crate::Result<OwnMarks> {
+        if !options.connect && options.connect_width != SizeSpec::Auto {
+            return Err(crate::Error::usage(
+                context,
+                "connect_width is set, but connect is False, so there is no line to draw.",
+            )
+            .with_parameter("connect_width")
+            .with_hint("pass connect=True, or leave connect_width out."));
+        }
         let count = series.x().len();
         let drawn = |i: usize| point_drawn(series, &options.color, i);
         // The bars of `range`, given as `parameter`, along `axis` of scale kind `kind`, at

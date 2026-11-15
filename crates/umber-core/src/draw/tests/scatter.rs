@@ -60,7 +60,7 @@ fn scatter_drops_points_far_outside() {
 }
 
 #[test]
-fn scatter_alpha_multiplies_the_color_alpha() {
+fn scatter_uses_a_translucent_color_as_given() {
     let theme = Theme::pigment();
     let mut f = Figure::new(6.0, 4.0, theme.clone()).unwrap();
     f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
@@ -86,8 +86,8 @@ fn scatter_alpha_multiplies_the_color_alpha() {
     else {
         panic!("expected one marker batch")
     };
-    // 128 (alpha 0.5) * 0.85.
-    assert_eq!(fill.a, (128.0_f32 * 0.85).round() as u8);
+    // Alpha 0.5 as given, not multiplied by the theme's marker alpha.
+    assert_eq!(fill.a, 128);
 }
 
 #[test]

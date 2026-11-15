@@ -42,7 +42,7 @@ fn grouped_xy_calls_are_atomic() {
                     Marker::Circle,
                     SizeSpec::Auto,
                     umber_core::PointLabels::default(),
-                    false,
+                    (false, SizeSpec::Auto),
                     umber_core::MarkRender::Vector,
                 ),
                 "step" => axes.grouped_step(groups(bad), Step::Post, Dash::Solid, SizeSpec::Auto),

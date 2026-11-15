@@ -22,8 +22,8 @@ ONE_CELL = (1, 1, 0, 0, 0, 0)
 ONLY_CELL = (0, 0, 0, 0, 1, 1)
 NO_SIZE = (0, 0.0)
 NO_POINT_LABELS = (False, None, NO_SIZE, 0)
-# No error bars and no connecting line of a scatter's own: x_error, y_error and connect.
-NO_OWN_MARKS = (None, None, False)
+# No error bars and no connecting line of a scatter's own: x_error, y_error, connect, connect_width.
+NO_OWN_MARKS = (None, None, False, NO_SIZE)
 LINEAR = 0
 OUTLINES = 0
 TIMES_HINT = "use Size.AUTO for the theme's size, or a factor below 1 for a smaller one."

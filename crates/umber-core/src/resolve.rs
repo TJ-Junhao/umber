@@ -1822,9 +1822,13 @@ pub(crate) enum ResolvedMark<'a> {
         /// The mapped values of a color-mapped mark, whose `color` is then the theme's text
         /// color; `None` for one marker color.
         mapped: Option<MappedColors<'a>>,
-        /// The stroke width, as drawn in points, of the scatter's own line and error bars:
+        /// The stroke width, as drawn in points, of the scatter's own error bars:
         /// [`OWN_STROKE_SHARE`] of the width of a line of the automatic width.
         width: f32,
+        /// The stroke width, as drawn in points, of the scatter's own connecting line: the
+        /// scatter's [`connect_width`](crate::ScatterOptions::connect_width), whose automatic width is
+        /// the same [`OWN_STROKE_SHARE`] of the width of a line of the automatic width.
+        line_width: f32,
     },
     /// An area mark.
     Area {
@@ -1942,7 +1946,7 @@ pub(crate) enum ResolvedMark<'a> {
         geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a SpanMark,
-        /// The fill color, before the area opacity.
+        /// The fill color, before the area opacity (a translucent color is used as given).
         color: Rgba,
     },
     /// A vertical reference span.
@@ -1951,7 +1955,7 @@ pub(crate) enum ResolvedMark<'a> {
         geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a SpanMark,
-        /// The fill color, before the area opacity.
+        /// The fill color, before the area opacity (a translucent color is used as given).
         color: Rgba,
     },
     /// A band between two curves.
@@ -1960,7 +1964,7 @@ pub(crate) enum ResolvedMark<'a> {
         geometry: Option<Box<crate::coverage::Geometry>>,
         /// The mark.
         mark: &'a BandMark,
-        /// The fill color, before the area opacity.
+        /// The fill color, before the area opacity (a translucent color is used as given).
         color: Rgba,
     },
     /// A stem mark, drawn from the baseline with a scatter marker at each value.
@@ -2885,7 +2889,9 @@ impl<'a> ResolvedMark<'a> {
     /// scatter's own line leaves its limits as a scatter's.
     pub fn stroke_width(&self) -> Option<f32> {
         match *self {
-            ResolvedMark::Scatter { mark, width, .. } if mark.line().is_some() => Some(width),
+            ResolvedMark::Scatter {
+                mark, line_width, ..
+            } if mark.line().is_some() => Some(line_width),
             _ => self.line_width(),
         }
     }
@@ -4483,6 +4489,12 @@ fn resolve_panel_marks_from<'a>(
                     fill_size: theme.drawn_fill_size(mark.options().size),
                     mapped,
                     width: theme.drawn_line_width(crate::SizeSpec::Auto) * OWN_STROKE_SHARE,
+                    line_width: match mark.options().connect_width {
+                        crate::SizeSpec::Auto => {
+                            theme.drawn_line_width(crate::SizeSpec::Auto) * OWN_STROKE_SHARE
+                        }
+                        spec => theme.drawn_line_width(spec),
+                    },
                 }
             }
             Mark::Bubbles(mark) => {
