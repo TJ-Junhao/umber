@@ -1,6 +1,7 @@
 """Equal aspect: one data unit equally long on both axes, its refusals and its formats."""
 
 import copy
+import math
 from typing import Any
 from xml.etree import ElementTree as ET
 
@@ -160,10 +161,12 @@ def test_in_plot_positions_are_fractions_of_the_smaller_plot() -> None:
 def test_tick_labels_that_grow_keep_the_padding() -> None:
     def build(equal: bool) -> ub.Figure:
         fig = ub.Figure(12, 4, cols=2, legend=ub.Legend.PER_PANEL)
-        left = fig.add_axes(col=0).bubbles([0, 20], [0, 9], [1, 1])
+        # Values at fractions keep the steps of data that are not all integers.
+        left = fig.add_axes(col=0).bubbles([0, 10.5, 20], [0, 4.5, 9], [1, 1, 1])
         if equal:
             left.equal_aspect()
-        fig.add_axes(col=1).line([0, 1], [0, 1]).text("End", at=ub.InPlot(1, 0.5))
+        right = fig.add_axes(col=1).line([0, 0.5, 1], [0, 0.5, 1])
+        right.text("End", at=ub.InPlot(1, 0.5))
         return fig
 
     assert position(build(True), "2.5")[0] >= 12
@@ -270,12 +273,14 @@ def test_padding_counts_towards_the_reach_of_bubbles() -> None:
 def test_a_label_with_no_clear_position_beside_equal_aspect_fails() -> None:
     def render(equal: bool) -> str:
         fig = ub.Figure(4, 1.6, cols=2, legend=ub.Legend.PER_PANEL)
-        left = fig.add_axes(col=0).line([0, 1], [0, 1])
+        # Values at fractions keep the steps of data that are not all integers; the points
+        # with NaN are left out.
+        left = fig.add_axes(col=0).line([0, 0.5, 1], [0, 0.5, 1])
         if equal:
             left.equal_aspect()
         fig.add_axes(col=1).scatter(
-            [0, 50, 50],
-            [0, 8, 8],
+            [0, 50, 50, 25.5, math.nan],
+            [0, 8, 8, math.nan, 4.5],
             annotate=True,
             size=ub.Size.pt(6),
             label_size=ub.Size.pt(18),

@@ -84,6 +84,8 @@
 //! - Values written in a column beside the plot: a forest plot with a titled column, a row of
 //!   values above a matched-fold chart, a column outside a colorbar and a row above a
 //!   twin-axes panel (in `corpus/value_column.rs`).
+//! - Integer ticks on integer data and limits fixed at one end, on linear, log and time axes,
+//!   with their errors (in `corpus/axis_limits.rs`).
 //! - Emphasis: a confusion matrix with a group of classes highlighted on both axes and the
 //!   confusions within it outlined, with cell edges, an explicit outline color, and raster
 //!   cells (in `corpus/emphasis.rs`).
@@ -125,6 +127,7 @@ use umber_core::{
 mod corpus {
     pub mod annotation;
     pub mod area;
+    pub mod axis_limits;
     pub mod band;
     pub mod bar_labels;
     pub mod bars;
@@ -278,6 +281,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::triangles::cases(&lib, &mut sink);
     corpus::tricontour::cases(&lib, &mut sink);
     corpus::raster_marks::cases(&lib, &mut sink);
+    corpus::axis_limits::cases(&lib, &mut sink);
     corpus::translucent_fills::cases(&lib, &mut sink);
     corpus::category_axis::cases(&lib, &mut sink);
 }

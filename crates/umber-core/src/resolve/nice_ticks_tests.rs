@@ -175,7 +175,7 @@ fn single_values_keep_padding_and_whole_step_ticks() {
     let (_, room) = TickRoom::unlimited(5, 5, tick);
     for value in [-1e295, -3.0, -1e-295, 0.0, 1e-295, 1e-290, 3.0, 1e295] {
         for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
-            let axis = continuous(limits, Some((value, value)), auto, &room);
+            let axis = continuous(limits, Some((value, value)), auto, &room, TickSteps::Any);
             let domain = axis.scale.domain();
             assert!(domain.0 < value && value < domain.1, "{value}: {domain:?}");
             let values: Vec<_> = axis
@@ -210,7 +210,7 @@ proptest! {
             let (x, y) = tick_rooms(PlotSize { width: length, height: length }, crate::test_support::tick_font(&theme), spacing);
             for room in [&x, &y] {
                 for auto in [AutoLimits::Exact, AutoLimits::Padded(Padding::BothSides)] {
-                    let axis = continuous(limits, Some((low, high)), auto, room);
+                    let axis = continuous(limits, Some((low, high)), auto, room, TickSteps::Any);
                     let domain = axis.scale.domain();
                     let values: Vec<_> = axis.ticks.iter().map(|tick| domain.0 + tick.pos.get() * (domain.1 - domain.0)).collect();
                     assert_grid(&values, domain);

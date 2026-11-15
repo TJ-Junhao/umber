@@ -24,7 +24,7 @@ MARKER_HINT = "use Marker.CIRCLE, Marker.SQUARE, Marker.TRIANGLE, Marker.DIAMOND
 LEGEND_HINT = "use LegendStyle.HEADER, LegendStyle.DIRECT, LegendStyle.CHIPS or LegendStyle.NONE."
 TEXT_HINT = "pass a str; convert other values with str()."
 TOO_LONG_HINT = "shorten the text; it would not fit the figure."
-NUMBER_HINT = "pass a number such as 1.5."
+LIMIT_HINT = "pass a number such as 1.5, or ub.AUTO for an automatic limit."
 LINE_GAP = "use NaN to leave a gap in the line."
 X_SCALE_HINT = "pass x=Scale.linear() or x=Scale.log() to Figure.add_axes()."
 CATEGORY_X_HINT = "pass x=Scale.category() to Figure.add_axes()."
@@ -274,9 +274,9 @@ def test_limits_must_be_numbers(name: str, low: object, high: object, parameter:
         _method(_axes(), name)(low, high)
     value = low if parameter == "low" else high
     assert str(caught.value) == (
-        f"Axes.{name}(): {parameter} is {_type_name(value)}; {parameter} must be a float."
+        f"Axes.{name}(): {parameter} is {_type_name(value)}; {parameter} must be a float or AUTO."
     )
-    assert details(caught.value) == (parameter, NUMBER_HINT)
+    assert details(caught.value) == (parameter, LIMIT_HINT)
 
 
 def test_limits_on_a_category_axis_are_refused() -> None:

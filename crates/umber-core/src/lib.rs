@@ -51,7 +51,8 @@
 //!   grid: [`Grid`] with its limit [`MAX_GRID`], [`Share`], [`LegendMode`], [`GridIndex`],
 //!   [`Placement`], [`CellRange`] and [`Cell`]; [`Axes`] (the getters of its cells, scales,
 //!   texts, limits, ticks and marks), [`AxesMut`] (text, limit and tick setters and mark
-//!   methods), [`ExplicitTicks`], the [`TickHighlight`] of a category axis, [`AxisData`],
+//!   methods), the [`LimitEnd`] that a one-sided limit fixes, [`ExplicitTicks`], the
+//!   [`TickHighlight`] of a category axis, [`AxisData`],
 //!   [`LineOptions`],
 //!   [`ScatterOptions`] with the [`ErrorRange`] of its points' error bars, the [`ScatterGroup`]
 //!   of a grouped scatter, [`BubbleOptions`], [`AreaOptions`], [`StepOptions`] with its [`Step`]
@@ -192,6 +193,7 @@ pub use cmap::Cmap;
 pub use color::{Alpha, ColorSpec, Rgba};
 pub use downsample::m4_indices;
 pub use error::{Error, ErrorMessage, Result};
+pub use figure::LimitEnd;
 pub use figure::StackedAreaMark;
 pub use figure::pdf_pages;
 pub use figure::{

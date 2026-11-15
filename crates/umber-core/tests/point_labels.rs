@@ -1218,7 +1218,8 @@ fn annotate_false_changes_nothing() {
         axes(&mut f)
             .scatter(
                 nums(&[1.0, 2.0]),
-                &[3.0, 4.0],
+                // No tick of these y limits reads "3", which would be the label of 3.
+                &[3.0, 104.0],
                 ScatterOptions {
                     labels,
                     ..ScatterOptions::default()

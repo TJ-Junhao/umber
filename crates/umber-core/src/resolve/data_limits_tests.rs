@@ -152,6 +152,7 @@ fn single_tick_labels_describe_their_own_value() {
     let judge = DrawnTicks {
         format: &TickFormat::AUTO,
         room: &room,
+        steps: TickSteps::Any,
     };
     for (low, high, label) in [(-0.0004, 0.0004, "0"), (0.00151, 0.00169, "0.0016")] {
         let scale = ContinuousScale::new(Transform::Linear, low, high, CONTEXT).unwrap();
@@ -183,6 +184,7 @@ fn fixed_decimals_choose_exactly_representable_steps() {
         let judge = DrawnTicks {
             format: &format,
             room: &room,
+            steps: TickSteps::Any,
         };
         let ticks = scale.auto_ticks(5, &judge);
         assert!(ticks.ticks.len() >= 2);
@@ -219,7 +221,7 @@ proptest! {
         for spacing in [TickSpacing::Target, TickSpacing::LabelsApart] {
             let (x, y) = tick_rooms(PlotSize { width: length, height: length }, crate::test_support::tick_font(&theme), spacing);
             for room in [&x, &y] {
-                let judge = DrawnTicks { format: &TickFormat::AUTO, room };
+                let judge = DrawnTicks { format: &TickFormat::AUTO, room, steps: TickSteps::Any };
                 let (scale, _, ticks) = automatic(Transform::Linear, None, data, AutoLimits::Padded(Padding::BothSides), room.target, &judge);
                 prop_assert_eq!(scale.domain(), expected);
                 let values: Vec<_> = ticks.ticks.iter().map(|tick| tick.value).collect();
@@ -231,7 +233,7 @@ proptest! {
                     prop_assert!(expected.0 <= values[0] && values[0] <= expected.1);
                     if expected.0 <= 0.0 && expected.1 >= 0.0 { prop_assert_eq!(values[0], 0.0); }
                     // A single label is justified only when no whole-step pair fits this room.
-                    for pair in scale.tick_pairs(&TickFormat::AUTO) {
+                    for pair in scale.tick_pairs(&TickFormat::AUTO, TickSteps::Any) {
                         prop_assert!(room.slack(&positioned(&scale, pair)) < 0.0);
                     }
                 }

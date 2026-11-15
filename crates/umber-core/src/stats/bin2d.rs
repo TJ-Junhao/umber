@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::binning::BinCount;
-use crate::{ContinuousScale, MAX_MAGNITUDE, MIN_LOG_VALUE, Transform};
+use crate::{ContinuousScale, LimitEnd, MAX_MAGNITUDE, MIN_LOG_VALUE, Transform};
 
 #[cfg(test)]
 thread_local! {
@@ -244,6 +244,25 @@ pub(crate) fn hex_vertices([x, y]: [f64; 2]) -> [[f64; 2]; 6] {
     ]
 }
 
+/// The window of one axis that a lattice of hexagons is fitted into.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Window {
+    /// Automatic limits: the window holds whole cells and the group's domain.
+    Automatic,
+    /// Explicit limits, the lower first, kept as given.
+    Fixed(f64, f64),
+    /// One explicit limit, kept as given; the other end holds whole cells and the group's
+    /// domain on its side.
+    End(LimitEnd, f64),
+}
+
+impl Window {
+    /// Whether both ends are explicit.
+    pub(crate) fn is_fixed(self) -> bool {
+        matches!(self, Window::Fixed(..))
+    }
+}
+
 impl HexBins {
     /// Data-coordinate metrics shared by both lattice constructors.
     fn coordinates(
@@ -293,7 +312,7 @@ impl HexBins {
         gridsize: BinCount,
         scales: [ContinuousScale; 2],
         aspect: f64,
-        limits: [Option<(f64, f64)>; 2],
+        windows: [Window; 2],
     ) -> Result<Self, LatticeTooLarge> {
         let Some(mut coordinates) =
             Self::coordinates(x, y, gridsize, scales.map(|s| s.transform()))
@@ -310,11 +329,11 @@ impl HexBins {
         let relative: [f64; 2] =
             std::array::from_fn(|i| span(coordinates[i].scale) / span(scales[i]));
         coordinates[1].length *= relative[1] / relative[0] / aspect;
-        if limits[0].is_some() && limits[1].is_none() {
+        if windows[0].is_fixed() && !windows[1].is_fixed() {
             // Reserve the end caps before fixing rows; a window shorter than one cell
             // is rejected by fitting, rather than changing its assignments on every pass.
             coordinates[1].length = (coordinates[1].length - 2.0).max(0.1);
-        } else if limits[0].is_none() && limits[1].is_some() {
+        } else if !windows[0].is_fixed() && windows[1].is_fixed() {
             // The automatic x domain must also leave room for both column end caps.
             coordinates[1].length += 2.0 * relative[1] / aspect;
         }
@@ -412,12 +431,15 @@ impl HexBins {
         }
     }
 
-    /// Fits a fixed lattice around the current group domain, retaining explicit windows.
+    /// Fits a fixed lattice around the current group domain, retaining explicit windows: the
+    /// explicit ends of `windows` stay as given, and the other ends hold whole cells and the
+    /// domain of `scales`, with the room that keeps the cells regular on plots of `aspect`
+    /// added on their sides. An axis with both limits explicit sets the length of the other.
     pub fn fit_on_axes(
         &mut self,
         aspect: f64,
         scales: [ContinuousScale; 2],
-        limits: [Option<(f64, f64)>; 2],
+        windows: [Window; 2],
         context: &'static str,
     ) -> crate::Result<()> {
         let Self::Occupied(cells) = self else {
@@ -427,72 +449,65 @@ impl HexBins {
         let mut bounds = cells.bounds;
         for i in 0..2 {
             let (lo, hi) = scales[i].domain();
-            if limits[i].is_none() {
-                bounds[2 * i] = bounds[2 * i].min(c[i].at(lo));
-                bounds[2 * i + 1] = bounds[2 * i + 1].max(c[i].at(hi));
+            let (low, high) = (2 * i, 2 * i + 1);
+            match windows[i] {
+                Window::Fixed(..) => {}
+                Window::Automatic => {
+                    bounds[low] = bounds[low].min(c[i].at(lo));
+                    bounds[high] = bounds[high].max(c[i].at(hi));
+                }
+                Window::End(LimitEnd::Low, at) => {
+                    bounds[low] = c[i].at(at);
+                    bounds[high] = bounds[high].max(c[i].at(hi));
+                }
+                Window::End(LimitEnd::High, at) => {
+                    bounds[low] = bounds[low].min(c[i].at(lo));
+                    bounds[high] = c[i].at(at);
+                }
             }
         }
-        match limits {
-            [Some(x), Some(y)] => {
-                cells.domains = [[x.0, x.1], [y.0, y.1]];
+        match windows {
+            [Window::Fixed(x0, x1), Window::Fixed(y0, y1)] => {
+                cells.domains = [[x0, x1], [y0, y1]];
             }
-            [Some((lo, hi)), None] => {
+            [Window::Fixed(lo, hi), other] => {
                 let height = (c[0].at(hi) - c[0].at(lo)) / aspect;
-                if height < cells.bounds[3] - cells.bounds[2] - 1e-9 {
-                    return Err(window_error(
-                        context,
-                        "set ylim(), or choose a larger gridsize.",
-                    ));
-                }
-                let mid = (cells.bounds[2] + cells.bounds[3]) / 2.0;
-                cells.domains = [
-                    [lo, hi],
-                    [
-                        c[1].value(mid - height / 2.0),
-                        c[1].value(mid + height / 2.0),
-                    ],
-                ];
+                let across = cells.across(1, other, height).ok_or_else(|| {
+                    window_error(context, "set ylim(), or choose a larger gridsize.")
+                })?;
+                cells.domains = [[lo, hi], across];
             }
-            [None, Some((lo, hi))] => {
+            [other, Window::Fixed(lo, hi)] => {
                 let width = (c[1].at(hi) - c[1].at(lo)) * aspect;
-                if width < cells.bounds[1] - cells.bounds[0] - 1e-9 {
-                    return Err(window_error(
-                        context,
-                        "set xlim(), or choose a larger gridsize.",
-                    ));
-                }
-                let mid = (cells.bounds[0] + cells.bounds[1]) / 2.0;
-                cells.domains = [
-                    [c[0].value(mid - width / 2.0), c[0].value(mid + width / 2.0)],
-                    [lo, hi],
-                ];
+                let across = cells.across(0, other, width).ok_or_else(|| {
+                    window_error(context, "set xlim(), or choose a larger gridsize.")
+                })?;
+                cells.domains = [across, [lo, hi]];
             }
-            [None, None] => cells.fit_bounds(bounds, aspect),
+            [x, y] => cells.fit_bounds_in(bounds, aspect, [x, y]),
         }
         Ok(())
     }
 }
 
 impl HexBins {
-    /// Fits a lattice counted on the equal scales of `scales` ([`HexBins::on_axes`]): an axis
-    /// with explicit limits keeps them, and an automatic axis holds whole cells and its domain.
-    /// The plot takes its shape from these limits, so nothing is added to give it a shape.
-    pub fn fit_equal_aspect(
-        &mut self,
-        scales: [ContinuousScale; 2],
-        limits: [Option<(f64, f64)>; 2],
-    ) {
+    /// Fits a lattice counted on the equal scales of `scales` ([`HexBins::on_axes`]): an
+    /// explicit end of `windows` stays as given, and an automatic end holds whole cells and
+    /// its domain. The plot takes its shape from these limits, so nothing is added to give it a
+    /// shape.
+    pub fn fit_equal_aspect(&mut self, scales: [ContinuousScale; 2], windows: [Window; 2]) {
         if let Self::Occupied(cells) = self {
             let c = cells.coordinates;
             let bounds = cells.bounds;
             cells.domains = std::array::from_fn(|i| {
-                let (lo, hi) = limits[i].unwrap_or(scales[i].domain());
-                match limits[i] {
-                    Some(_) => [lo, hi],
-                    None => [
-                        c[i].value(bounds[2 * i]).min(lo),
-                        c[i].value(bounds[2 * i + 1]).max(hi),
-                    ],
+                let (lo, hi) = scales[i].domain();
+                let low = c[i].value(bounds[2 * i]).min(lo);
+                let high = c[i].value(bounds[2 * i + 1]).max(hi);
+                match windows[i] {
+                    Window::Fixed(lo, hi) => [lo, hi],
+                    Window::Automatic => [low, high],
+                    Window::End(LimitEnd::Low, at) => [at, high],
+                    Window::End(LimitEnd::High, at) => [low, at],
                 }
             });
         }
@@ -511,23 +526,62 @@ fn window_error(context: &'static str, hint: &'static str) -> crate::Error {
 
 impl HexCells {
     /// Fits the least symmetric extra room around bounds expressed in lattice units.
-    fn fit_bounds(&mut self, [mut left, mut right, mut bottom, mut top]: [f64; 4], aspect: f64) {
-        let width = right - left;
-        let height = top - bottom;
-        if width / height < aspect {
-            let extra = (height * aspect - width) / 2.0;
-            left -= extra;
-            right += extra;
+    fn fit_bounds(&mut self, bounds: [f64; 4], aspect: f64) {
+        self.fit_bounds_in(bounds, aspect, [Window::Automatic; 2]);
+    }
+
+    /// Fits the least extra room around `bounds`, expressed in lattice units, that makes their
+    /// width `aspect` times their height: on both sides of an automatic axis, and on the
+    /// automatic side of an axis with one explicit end, which stays as given.
+    fn fit_bounds_in(&mut self, bounds: [f64; 4], aspect: f64, windows: [Window; 2]) {
+        let [left, right, bottom, top] = bounds;
+        let (width, height) = (right - left, top - bottom);
+        let (extra_x, extra_y) = if width / height < aspect {
+            (height * aspect - width, 0.0)
         } else {
-            let extra = (width / aspect - height) / 2.0;
-            bottom -= extra;
-            top += extra;
-        }
+            (0.0, width / aspect - height)
+        };
         let c = self.coordinates;
+        let widened = |i: usize, (low, high): (f64, f64), extra: f64| -> [f64; 2] {
+            match windows[i] {
+                Window::End(LimitEnd::Low, at) => [at, c[i].value(high + extra)],
+                Window::End(LimitEnd::High, at) => [c[i].value(low - extra), at],
+                Window::Automatic | Window::Fixed(..) => [
+                    c[i].value(low - extra / 2.0),
+                    c[i].value(high + extra / 2.0),
+                ],
+            }
+        };
         self.domains = [
-            [c[0].value(left), c[0].value(right)],
-            [c[1].value(bottom), c[1].value(top)],
+            widened(0, (left, right), extra_x),
+            widened(1, (bottom, top), extra_y),
         ];
+    }
+
+    /// The domain along `axis`, `length` lattice units long, that holds every cell under its
+    /// `window`: centred on the cells when automatic, or from an explicit end, which stays as
+    /// given, cells past it being cut. `None` when the cells do not fit that length.
+    fn across(&self, axis: usize, window: Window, length: f64) -> Option<[f64; 2]> {
+        let c = self.coordinates[axis];
+        let (low, high) = (self.bounds[2 * axis], self.bounds[2 * axis + 1]);
+        let (need, domain) = match window {
+            Window::End(LimitEnd::Low, at) => {
+                let base = c.at(at);
+                (high - base, [at, c.value(base + length)])
+            }
+            Window::End(LimitEnd::High, at) => {
+                let base = c.at(at);
+                (base - low, [c.value(base - length), at])
+            }
+            Window::Automatic | Window::Fixed(..) => {
+                let mid = (low + high) / 2.0;
+                (
+                    high - low,
+                    [c.value(mid - length / 2.0), c.value(mid + length / 2.0)],
+                )
+            }
+        };
+        (length >= need - 1e-9).then_some(domain)
     }
 
     /// The six vertices, in data coordinates, of the cell at lattice `position`, in the order
@@ -542,6 +596,11 @@ impl HexCells {
 mod tests {
     use super::*;
 
+    /// The window of explicit limits `limits`, or an automatic one.
+    fn window(limits: Option<(f64, f64)>) -> Window {
+        limits.map_or(Window::Automatic, |(lo, hi)| Window::Fixed(lo, hi))
+    }
+
     fn window_bins(limits: [Option<(f64, f64)>; 2]) -> (HexBins, [ContinuousScale; 2]) {
         let scales = [(-2.0, 4.0), (-1.0, 5.0)]
             .map(|(lo, hi)| ContinuousScale::new(Transform::Linear, lo, hi, "hexbin").unwrap());
@@ -551,7 +610,7 @@ mod tests {
             BinCount::new(10).unwrap(),
             scales,
             1.0,
-            limits,
+            limits.map(window),
         )
         .unwrap();
         (bins, scales)
@@ -565,7 +624,8 @@ mod tests {
             let HexBins::Occupied(before) = bins.clone() else {
                 panic!("nonempty cells");
             };
-            bins.fit_on_axes(1.2, scales, limits, "hexbin").unwrap();
+            bins.fit_on_axes(1.2, scales, limits.map(window), "hexbin")
+                .unwrap();
             let HexBins::Occupied(after) = bins else {
                 panic!("nonempty cells");
             };
@@ -595,7 +655,7 @@ mod tests {
         let (mut bins, scales) = window_bins(limits);
         let before = bins.clone();
         let error = bins
-            .fit_on_axes(0.01, scales, limits, "hexbin")
+            .fit_on_axes(0.01, scales, limits.map(window), "hexbin")
             .unwrap_err();
         assert_eq!(error.parameter(), Some("gridsize"));
         assert!(

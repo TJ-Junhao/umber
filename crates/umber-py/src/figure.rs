@@ -43,7 +43,7 @@ use umber_core::{
     CmapChoice, HexbinOptions, Hist2dOptions, MeshOptions, ScaleKind, Transform, ViolinOptions,
 };
 use umber_core::{ContourLevels, ContourOptions, ContourStyle, QuiverOptions};
-use umber_core::{ErrorRange, ScatterGroup};
+use umber_core::{ErrorRange, LimitEnd, ScatterGroup};
 use umber_core::{StreamStarts, StreamplotOptions};
 use umber_core::{TriValues, Triangles, TripcolorOptions, TriplotOptions};
 
@@ -141,6 +141,11 @@ fn xy_groups(
             ))
         })
         .collect()
+}
+
+/// The end of an axis that a one-sided limit fixes: the upper when `high` is true.
+fn limit_end(high: bool) -> LimitEnd {
+    if high { LimitEnd::High } else { LimitEnd::Low }
 }
 
 /// The vectors of a field from its flat `u` and `v`, a grid when `grid` says so.
@@ -715,6 +720,22 @@ impl Figure {
     fn ylim(&mut self, row: AxesRow, col: i64, low: f64, high: f64) -> PyResult<()> {
         self.axes(row, col)?
             .ylim(low, high)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Fixes one x limit, the upper when `high` is true and the lower otherwise, at `value`.
+    fn xlim_end(&mut self, row: AxesRow, col: i64, high: bool, value: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .xlim_end(limit_end(high), value)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Fixes one y limit, the upper when `high` is true and the lower otherwise, at `value`.
+    fn ylim_end(&mut self, row: AxesRow, col: i64, high: bool, value: f64) -> PyResult<()> {
+        self.axes(row, col)?
+            .ylim_end(limit_end(high), value)
             .map(drop)
             .map_err(core_error)
     }
@@ -2014,6 +2035,28 @@ impl Figure {
         let high = time_from_micros(CONTEXT, "high", high).map_err(core_error)?;
         self.axes(row, col)?
             .ylim_time(low, high)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Fixes one limit of a time x axis, the upper when `high` is true and the lower
+    /// otherwise, at the time `time`, in microseconds.
+    fn xlim_time_end(&mut self, row: AxesRow, col: i64, high: bool, time: i64) -> PyResult<()> {
+        let end = limit_end(high);
+        let time = time_from_micros("Axes.xlim()", end.name(), time).map_err(core_error)?;
+        self.axes(row, col)?
+            .xlim_time_end(end, time)
+            .map(drop)
+            .map_err(core_error)
+    }
+
+    /// Fixes one limit of a time y axis, the upper when `high` is true and the lower
+    /// otherwise, at the time `time`, in microseconds.
+    fn ylim_time_end(&mut self, row: AxesRow, col: i64, high: bool, time: i64) -> PyResult<()> {
+        let end = limit_end(high);
+        let time = time_from_micros("Axes.ylim()", end.name(), time).map_err(core_error)?;
+        self.axes(row, col)?
+            .ylim_time_end(end, time)
             .map(drop)
             .map_err(core_error)
     }

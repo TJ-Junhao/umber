@@ -379,6 +379,8 @@ AXES_CALLS: dict[str, Callable[[_umber.Figure, int, int], object]] = {
     "ylabel": lambda f, r, c: f.ylabel(r, c, "t", NO_SIZE),
     "xlim": lambda f, r, c: f.xlim(r, c, 0.0, 1.0),
     "ylim": lambda f, r, c: f.ylim(r, c, 0.0, 1.0),
+    "xlim_end": lambda f, r, c: f.xlim_end(r, c, False, 0.0),
+    "ylim_end": lambda f, r, c: f.ylim_end(r, c, True, 1.0),
     "xticks": lambda f, r, c: f.xticks(r, c, floats(0, 1)),
     "yticks": lambda f, r, c: f.yticks(r, c, floats(0, 1)),
     "xticks_labeled": lambda f, r, c: f.xticks_labeled(r, c, floats(0, 1), ["zero", "one"]),
