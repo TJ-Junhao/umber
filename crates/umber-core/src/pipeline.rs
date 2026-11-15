@@ -895,7 +895,12 @@ fn plan(
     let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
         let mut solution = match rooms {
             Rooms::Solved | Rooms::Reference { .. } => solve_rooms(resolved, bands)?,
-            Rooms::Given(reference) | Rooms::Provisional(reference) => reference.solution.clone(),
+            Rooms::Given(reference) | Rooms::Provisional(reference) => {
+                // The reference's headers start at its own y tick labels; these may differ.
+                let mut solution = reference.solution.clone();
+                layout::rehead(&inputs, bands, &mut solution)?;
+                solution
+            }
         };
         // Every solve ends here, so whatever reads a plot below reads the final rectangle.
         for (i, slot) in solution.panels.iter_mut().enumerate() {
@@ -1509,13 +1514,9 @@ fn plan(
         }
     }
 
-    // Titles and subtitles too wide for their settled header boxes shrink. The boxes do not
-    // depend on the headers' heights, so the plots, solved again with the same ticks for the
-    // shorter headers, keep their widths and the rooms the titles were fitted to; they only grow
-    // taller, which leaves the tick labels chosen for them more room.
-    if layout::fit_panel_headers(&inputs, &mut bands, &solution.panels)? {
-        solution = solve(&resolved, &bands)?;
-    }
+    // The titles and subtitles take the sizes the final solve fitted them to, whose height it
+    // reserved.
+    layout::apply_panel_fit(&inputs, &mut bands, solution.fit)?;
 
     // Check only final domains: shared data, cells and bubble fitting can widen them, and
     // provisional layouts may deliberately omit automatic x ticks.

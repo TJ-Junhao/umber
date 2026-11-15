@@ -1291,3 +1291,96 @@ fn a_single_panel_header_moves_in_with_a_plot_inset_by_x_tick_labels() {
         }
     }
 }
+
+#[test]
+fn headers_over_equal_aspect_plots_start_at_their_own_y_axis_label() {
+    // The rooms come from the same figure without equal aspect, whose y tick labels differ;
+    // the header still starts where this figure's y axis label does.
+    for cols in [1, 2] {
+        let mut f = Figure::with_grid(
+            6.0 * cols as f64,
+            4.0,
+            Theme::pigment(),
+            Grid::new(1, cols).unwrap(),
+        )
+        .unwrap();
+        for col in 0..cols {
+            f.add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap()
+            .xlim(0.0, 20.0)
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .title("T")
+            .ylabel("Y")
+            .equal_aspect()
+            .unwrap();
+        }
+        f.to_scene(FontLibrary::global()).unwrap();
+        for (_, layout) in try_plan_panels(&f, FontLibrary::global()).unwrap() {
+            let label = layout.ylabel.as_ref().unwrap();
+            assert_near(label.x, tick_column_left(&layout));
+            assert_near(layout.title.as_ref().unwrap().first().x, label.x);
+        }
+    }
+}
+
+/// A 3.5 in wide figure `height` pt tall whose wide first x tick label insets the plot, with a
+/// header legend at `position` of eight entries.
+fn inset_legend(height: f64, position: crate::LegendPosition) -> Figure {
+    let mut f = Figure::new(3.5, height / 72.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.title("Days")
+        .ylabel("Share")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec!["W".repeat(10), "1".into()])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
+        .unwrap()
+        .legend_at(crate::LegendStyle::Header, position, crate::SizeSpec::Auto)
+        .unwrap();
+    for i in 0..8 {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("RRR{i}"),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_short_figure_with_an_inset_legend_names_its_height_not_a_colorbar() {
+    for (height, position) in [
+        (119.0, crate::LegendPosition::TopLeft),
+        (121.0, crate::LegendPosition::Bottom),
+    ] {
+        let error = inset_legend(height, position)
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(!message.contains("colorbar"), "{message}");
+        let needed: f64 = message
+            .split_once("at least ")
+            .and_then(|(_, rest)| rest.split_once(" pt"))
+            .and_then(|(number, _)| number.parse().ok())
+            .unwrap_or_else(|| panic!("{message}"));
+        inset_legend(needed, position)
+            .to_scene(FontLibrary::global())
+            .unwrap();
+    }
+}

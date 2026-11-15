@@ -1152,3 +1152,60 @@ fn shrunk_titles_over_plots_with_equal_aspect_keep_their_room() {
         assert!(layout.header_bottom <= layout.plot.y + 1e-9);
     }
 }
+
+const QUARTERLY: &str = "Quarterly revenue by region and sales channel";
+
+/// A `width` in by 1 in figure of `cols` panels without ticks, each titled with three lines of
+/// [`QUARTERLY`] at `size`.
+fn short_titled(width: f64, cols: i64, size: SizeSpec) -> Figure {
+    let title = [QUARTERLY; 3].join("\n");
+    let mut f =
+        Figure::with_grid(width, 1.0, Theme::pigment(), Grid::new(1, cols).unwrap()).unwrap();
+    for col in 0..cols {
+        f.add_axes_at(
+            Placement {
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            ScaleKind::Linear,
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .title_sized(&title, size);
+    }
+    f
+}
+
+#[test]
+fn titles_shrink_before_the_height_is_checked() {
+    // At its own size the title of three lines is too tall for a 1 in figure, but the size it
+    // shrinks to for the width leaves the plot room: the height is checked for that size.
+    for (width, cols) in [(3.5, 1), (7.0, 2)] {
+        let f = short_titled(width, cols, SizeSpec::Auto);
+        f.to_scene(FontLibrary::global()).unwrap();
+        let layouts = planned(&f);
+        let size = size_of(layouts[0].title.as_ref());
+        assert!(size < 15.0, "{size}");
+        for layout in &layouts {
+            assert_eq!(size_of(layout.title.as_ref()), size);
+            assert!(layout.header_bottom <= layout.plot.y + 1e-9);
+        }
+        // The same size given explicitly lays out the same.
+        let given = short_titled(width, cols, SizeSpec::pt(f64::from(size)).unwrap());
+        let explicit = planned(&given);
+        assert_eq!(layouts[0].plot, explicit[0].plot);
+        // At the theme's size it does not fit.
+        let error = short_titled(width, cols, SizeSpec::times(1.0).unwrap())
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("tall") || message.contains("vertically"),
+            "{message}"
+        );
+    }
+}

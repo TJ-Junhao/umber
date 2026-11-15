@@ -59,6 +59,7 @@ use super::panel::{
     HeaderBox, HeaderText, PanelBands, PanelSlot, PanelSpan, TextContainer, TextKind, end_label_cap,
 };
 use super::program;
+use super::shrink::PanelFit;
 use super::{
     AXIS_LABEL_GAP, Area, END_LABEL_SHARE, Frame, LEGEND_HINT, Layout, LayoutInput, MIN_PLOT,
     PADDING, PlotSize, TextBlock, X_LABEL_EDGE_GAP, initial_plot_size, solve_single, widest,
@@ -116,6 +117,9 @@ pub(crate) struct GridSolution {
     pub panels: Vec<PanelSlot>,
     /// Shared bars paired with the panel providing their group's color scale.
     pub colorbars: Vec<(usize, super::PlacedColorbar)>,
+    /// The sizes the panel titles and subtitles take in their header boxes, whose heights the
+    /// rows reserve (see [`super::shrink`]).
+    pub fit: PanelFit,
 }
 
 impl GridInput<'_> {
@@ -234,6 +238,38 @@ impl Across {
         };
         Across { plot, header }
     }
+}
+
+/// Fits the headers of `solution`, a solve of the reference layout of a figure with equal
+/// aspect, to the panels of `inputs` as measured in `bands` (in the same order): each Cartesian
+/// panel's header box starts again at the left edge of its own content for its room, as its y
+/// axis label does, and never left of its frame or the canvas padding; and the titles and
+/// subtitles are fitted to those boxes, never larger than in the reference, whose rows reserve
+/// their height.
+///
+/// # Errors
+///
+/// As [`super::shrink::fit_panel_headers`].
+pub(crate) fn rehead(
+    inputs: &[LayoutInput<'_>],
+    bands: &[PanelBands],
+    solution: &mut GridSolution,
+) -> Result<()> {
+    for (i, (input, slot)) in inputs.iter().zip(&mut solution.panels).enumerate() {
+        let own = match input.axes {
+            crate::model::Layer::Primary(crate::Panel::Pie(_)) => continue,
+            crate::model::Layer::Primary(crate::Panel::Cartesian { .. }) => &bands[i],
+            crate::model::Layer::Twin { parent, .. } => &bands[parent],
+        };
+        slot.header.left = own.content_left(slot.room.x).max(slot.frame.x.max(PADDING));
+    }
+    let rooms: Vec<f64> = solution
+        .panels
+        .iter()
+        .map(|slot| slot.header.right - slot.header.left)
+        .collect();
+    solution.fit = super::shrink::fit_panel_headers(inputs, bands, &rooms, solution.fit)?;
+    Ok(())
 }
 
 /// The shared colorbar reserve after each column, shared by bars ending there.
@@ -422,6 +458,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             width: input.width,
             height: input.height,
         };
+        let mut fit = PanelFit::default();
         let panels = input
             .panels
             .iter()
@@ -429,6 +466,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             .map(|(panel, bands)| {
                 solve_single(panel, bands, canvas, input.top, input.caption).map(|single| {
                     let plot = single.plot;
+                    fit = single.fit;
                     PanelSlot {
                         plot,
                         aligned: plot,
@@ -452,6 +490,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         return Ok(GridSolution {
             panels,
             colorbars: Vec::new(),
+            fit,
         });
     }
     let cells: Vec<CellRange> = input.panels.iter().map(|p| p.axes.cells()).collect();
@@ -483,10 +522,34 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         .enumerate()
         .map(|(i, c)| Across::of(input, bands, &placed, i, *c))
         .collect();
+    // The titles fit the header boxes before the rows reserve their height. A pie's header box
+    // is its whole cell (see [`pie_slot`]).
+    let rooms: Vec<f64> = spans
+        .iter()
+        .zip(&cells)
+        .zip(input.panels)
+        .map(|((across, cells), panel)| {
+            let (left, right) = if is_pie(panel) {
+                pie_columns(input, &columns, &placed, *cells)
+            } else {
+                across.header
+            };
+            right - left
+        })
+        .collect();
+    let natural = bands;
+    let (fitted, fit) = super::shrink::fitted(input.panels, bands, &rooms)?;
+    let bands = fitted.as_ref();
     let rows = Rows::measure(input, &cells, bands, &spans);
-    let rows = rows
-        .place(input)
-        .map_err(|error| rows_too_short(input, &cells, bands, &spans, error))?;
+    let rows = rows.place(input).map_err(|error| {
+        // The height named holds the titles at their own size: the size they shrink to for
+        // the widths depends on the ticks, which another height can change.
+        let error = Rows::measure(input, &cells, natural, &spans)
+            .place(input)
+            .err()
+            .unwrap_or(error);
+        rows_too_short(input, &cells, natural, &spans, error)
+    })?;
     let panels = cells
         .iter()
         .zip(bands)
@@ -575,7 +638,11 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             Ok((shared.source, bar))
         })
         .collect::<Result<_>>()?;
-    Ok(GridSolution { panels, colorbars })
+    Ok(GridSolution {
+        panels,
+        colorbars,
+        fit,
+    })
 }
 
 /// The column bands of a grid, as measured, before x tick labels grow any of them.

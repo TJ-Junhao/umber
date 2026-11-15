@@ -325,7 +325,7 @@ ax.legend(ub.LegendStyle.HEADER, position=ub.LegendPosition.RIGHT)
 ax.legend(ub.LegendStyle.HEADER, position=ub.AUTO)  # 恢复 theme 的 BOTTOM
 ```
 
-对单 panel figure 和 `Legend.PER_PANEL`，`LegendPosition.TOP_LEFT`（默认）和 `TOP_RIGHT` 将 legend 横排在 panel title 下方；`RIGHT` 放在 plot 右侧纵排；`BOTTOM` 横排在 x axis title 下方；`BEST` 在 plot 内选择遮挡数据最少的位置。panel legend 的位置不跟随标题对齐。省略 `position` 或传入 `ub.AUTO` 会清除之前的覆盖值，使用 theme 的位置，并不等于 `BEST`。`LegendStyle.DIRECT` 只接受默认的 `position=ub.AUTO`，因为标签固定在曲线末端。`LegendStyle.NONE` 隐藏 legend。
+对单 panel figure 和 `Legend.PER_PANEL`，`LegendPosition.TOP_LEFT`（默认）和 `TOP_RIGHT` 将 legend 横排在 panel title 下方；`RIGHT` 放在 plot 右侧纵排；`BOTTOM` 横排在 x axis title 下方；`TOP_LEFT` 和 `BOTTOM` 的横排与 panel title 一样，从 y 轴标签和 y tick 标签的左边缘开始；`BEST` 在 plot 内选择遮挡数据最少的位置。panel legend 的位置不跟随标题对齐。省略 `position` 或传入 `ub.AUTO` 会清除之前的覆盖值，使用 theme 的位置，并不等于 `BEST`。`LegendStyle.DIRECT` 只接受默认的 `position=ub.AUTO`，因为标签固定在曲线末端。`LegendStyle.NONE` 隐藏 legend。
 
 标题、副标题、坐标轴标签、legend、colorbar 标签、文字、标注、柱上数值和饼图标签都接受 `size=`。`ub.Size.AUTO` 是主题的字号，`ub.Size.times(1.5)` 按比例缩放并跟随主题的字体缩放，`ub.Size.pt(14)` 是以 pt 为单位的固定字号。刻度标签按轴设置字号：`ax.xtick_labels(size=...)` 和 `ax.ytick_labels(size=...)`。
 

@@ -9,6 +9,9 @@ caption-grid-bottom-legend-pigment
 equal-aspect-grid-graphite
 equal-aspect-grid-midnight
 equal-aspect-grid-pigment
+equal-aspect-tall-graphite
+equal-aspect-tall-midnight
+equal-aspect-tall-pigment
 error-bars-graphite
 error-bars-midnight
 error-bars-pigment

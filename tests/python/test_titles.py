@@ -442,3 +442,52 @@ def test_figure_texts_stay_at_the_figure_margin() -> None:
     texts = _texts(fig)
     for text in ("Weather", "Two stations", "Survey", "Share of days (%)"):
         assert float(texts[text].attrib["x"]) == pytest.approx(12, abs=0.01)
+
+
+@pytest.mark.parametrize(("width", "cols"), [(3.5, 1), (7, 2)])
+def test_titles_shrink_before_the_height_is_checked(width: float, cols: int) -> None:
+    text = "Quarterly revenue by region and sales channel"
+    fig = ub.Figure(width, 1, cols=cols)
+    for col in range(cols):
+        fig.add_axes(col=col).xticks([]).yticks([]).title("\n".join([text] * 3))
+    assert fig.to_svg()
+    assert _size(_texts(fig)[text]) < 15
+
+
+@pytest.mark.parametrize("cols", [1, 2])
+def test_headers_over_equal_aspect_plots_start_at_the_y_axis_label(cols: int) -> None:
+    fig = ub.Figure(6 * cols, 4, cols=cols)
+    for col in range(cols):
+        ax = fig.add_axes(col=col).xlim(0, 20).ylim(0, 1)
+        ax.title(f"T{col}").ylabel(f"Y{col}").equal_aspect()
+    texts = _texts(fig)
+    for col in range(cols):
+        assert float(texts[f"T{col}"].attrib["x"]) == pytest.approx(
+            float(texts[f"Y{col}"].attrib["x"]), abs=0.01
+        )
+
+
+def _inset_legend(height: float, position: ub.LegendPosition) -> ub.Figure:
+    fig = ub.Figure(3.5, height / 72)
+    ax = fig.add_axes().title("Days").ylabel("Share").xlim(0, 1).ylim(0, 1)
+    ax.xticks_labeled([0, 1], ["W" * 10, "1"])
+    ax.yticks_labeled([0, 1], ["0", "1"]).legend(ub.LegendStyle.HEADER, position=position)
+    for i in range(8):
+        ax.line([0, 1], [0, 1], label=f"RRR{i}")
+    return fig
+
+
+@pytest.mark.parametrize(
+    ("height", "position"),
+    [(119, ub.LegendPosition.TOP_LEFT), (121, ub.LegendPosition.BOTTOM)],
+)
+def test_a_short_figure_with_an_inset_legend_names_its_height(
+    height: float, position: ub.LegendPosition
+) -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        _inset_legend(height, position).to_svg()
+    message = str(caught.value)
+    assert "colorbar" not in message
+    found = re.search(r"at least (\d+) pt", message)
+    assert found is not None, message
+    assert _inset_legend(int(found[1]), position).to_svg()

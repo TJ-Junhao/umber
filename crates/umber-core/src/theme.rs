@@ -136,14 +136,16 @@ pub enum LegendStyle {
 /// ```
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LegendPosition {
-    /// A row under the panel title, left-aligned.
+    /// A row under the panel title, starting with it at the left edge of the panel's content,
+    /// where the y axis label and the y tick labels start.
     #[default]
     TopLeft,
     /// A row under the panel title, aligned to the plot's right edge.
     TopRight,
     /// A vertical list to the right of the plot.
     Right,
-    /// A row below the x tick labels and x axis title.
+    /// A row below the x tick labels and x axis title, starting with the panel title at the
+    /// left edge of the panel's content.
     Bottom,
     /// A vertical list inside the plot, covering the least drawn data.
     Best,

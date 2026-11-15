@@ -5600,7 +5600,8 @@ A column inside the plot at the position covering the least drawn data.
 LegendPosition.BOTTOM
 ```
 
-A row below the x tick labels and x axis title.
+A row below the x tick labels and x axis title, starting with the panel title at the
+left edge of the panel's content.
 
 ### `umber.LegendPosition.RIGHT`
 
@@ -5616,7 +5617,8 @@ A column to the right of the plot.
 LegendPosition.TOP_LEFT
 ```
 
-A row under the panel title, aligned to the plot's left edge (the default).
+A row under the panel title, starting with it at the left edge of the panel's content,
+where the y axis label and the y tick labels start (the default).
 
 ### `umber.LegendPosition.TOP_RIGHT`
 
