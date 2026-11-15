@@ -76,8 +76,20 @@ def _definition(
     raise ValueError(f"Cannot find the source definition of {module}.{name}")
 
 
-def _public_members(package: Path, name: str) -> list[tuple[str, ast.stmt, str]]:
-    """List source-defined public members, including inherited ones, in name order."""
+def _is_overload(node: ast.stmt) -> bool:
+    """Whether ``node`` is one ``@overload`` signature of a function."""
+    return isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+        ast.unparse(decorator) in ("overload", "typing.overload")
+        for decorator in node.decorator_list
+    )
+
+
+def _public_members(package: Path, name: str) -> list[tuple[str, list[ast.stmt], str]]:
+    """List source-defined public members, including inherited ones, in name order.
+
+    Each member comes with the nodes its signatures are shown from: its ``@overload`` signatures
+    when it has them, otherwise its definition. The docstring is the definition's.
+    """
     classes: dict[tuple[str, str], ast.ClassDef] = {}
 
     def lineage(module: str, class_name: str) -> list[tuple[str, str]]:
@@ -117,18 +129,24 @@ def _public_members(package: Path, name: str) -> list[tuple[str, ast.stmt, str]]
         return result
 
     members: dict[str, tuple[ast.stmt, str]] = {}
+    overloads: dict[str, list[ast.stmt]] = {}
     for key in lineage("umber", name):
         for index, member in enumerate(classes[key].body):
             member_name = _name(member)
-            if member_name and not member_name.startswith("_"):
-                members.setdefault(member_name, (member, _doc(classes[key].body, index)))
-    result: list[tuple[str, ast.stmt, str]] = []
+            if not member_name or member_name.startswith("_"):
+                continue
+            if _is_overload(member):
+                if member_name not in members:
+                    overloads.setdefault(member_name, []).append(member)
+                continue
+            members.setdefault(member_name, (member, _doc(classes[key].body, index)))
+    result: list[tuple[str, list[ast.stmt], str]] = []
     for member_name, (member, doc) in sorted(members.items()):
         if not doc.strip():
             raise ValueError(
                 f"{name}.{member_name} has no docstring; every public member needs one."
             )
-        result.append((member_name, member, doc))
+        result.append((member_name, overloads.get(member_name, [member]), doc))
     return result
 
 
@@ -178,8 +196,8 @@ def _markdown_doc(doc: str) -> str:
     return "\n\n".join(parts)
 
 
-def _section(name: str, node: ast.stmt, doc: str, *, level: int) -> str:
-    signature = _signature(name, node)
+def _section(name: str, nodes: list[ast.stmt], doc: str, *, level: int) -> str:
+    signature = "\n".join(_signature(name, node) for node in nodes)
     return f"{'#' * level} `umber.{name}`\n\n```text\n{signature}\n```\n\n{_markdown_doc(doc)}\n"
 
 
@@ -200,10 +218,10 @@ def _reference(package: Path) -> str:
             )
             continue
         _, node, doc = _definition(package, "umber", name)
-        sections.append(_section(name, node, doc, level=2))
+        sections.append(_section(name, [node], doc, level=2))
         if isinstance(node, ast.ClassDef):
-            for member_name, member, member_doc in _public_members(package, name):
-                sections.append(_section(f"{name}.{member_name}", member, member_doc, level=3))
+            for member_name, nodes, member_doc in _public_members(package, name):
+                sections.append(_section(f"{name}.{member_name}", nodes, member_doc, level=3))
     return "\n".join(sections)
 
 

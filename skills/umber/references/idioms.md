@@ -30,6 +30,21 @@ ax.text("busy", ("Tue", 5.5), align=ub.Align.CENTER)
 svg = ax.figure.to_svg()
 ```
 
+## Category axes: dividers and names of several lines
+
+To divide two neighbouring categories, such as the years before and after a change, use `ax.vline(ub.Between("2013", "2014"))` (`ax.hline(...)` on a category y axis), not `xtick_highlight()` or a line at a category's centre: the line sits halfway between the two centres and takes the options of any reference line. `ax.vspan(ub.Between("2009", "2010"), ub.Between("2013", "2014"))` shades the categories between two dividers whole. The names must be neighbouring categories of the axis; that is checked when the figure is rendered.
+
+A category name may hold `"\n"`: `"2026\n(to Oct)"` is drawn as two lines under its tick (right-aligned beside it on a y axis), and the axis takes the room of the tallest label. The name with the line break is the category, so pass the same string to every mark, `vline()`, `text()` and `xtick_highlight()`.
+
+```python
+years = ["2012", "2013", "2014", "2015\n(to Oct)"]
+ax = ub.Figure(6, 4).add_axes(x=ub.Scale.category())
+ax.bar(years, [3.0, 4.0, 6.0, 5.0])
+ax.vline(ub.Between("2013", "2014"), dash=ub.Dash.DASHED, label="New policy")
+ax.vspan(ub.Between("2013", "2014"), ub.Between("2014", "2015\n(to Oct)"))
+svg = ax.figure.to_svg()
+```
+
 ## AUTO, never None
 
 Omit an optional argument to use its documented default. Where automatic selection is supported, the signature names the exact value: `ub.AUTO`, `ub.Color.AUTO`, `ub.Size.AUTO` or `ub.TickFormat.AUTO`. They are not interchangeable (`color=ub.AUTO` is a `TypeError`), and `None` is never accepted.

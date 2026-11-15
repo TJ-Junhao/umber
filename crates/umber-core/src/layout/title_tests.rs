@@ -568,7 +568,7 @@ fn axis_title_limits_follow_placement_with_ticks() {
                 let left = if axis == "y" && !right {
                     at.y_tick_labels
                         .iter()
-                        .map(|tick| tick.x)
+                        .map(|tick| tick.first().x)
                         .fold(f64::INFINITY, f64::min)
                 } else {
                     at.plot.x

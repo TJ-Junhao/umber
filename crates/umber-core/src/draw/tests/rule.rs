@@ -353,6 +353,101 @@ fn a_vline_on_a_category_axis_sits_at_the_band_centre() {
     assert_near(rules[1], plot.x + 0.5 / 4.0 * plot.width);
 }
 
+/// The scene items of the strokes and fills of the marks group of `figure`, in order.
+fn strokes_and_fills(figure: &Figure) -> (Vec<Item>, Vec<Item>) {
+    let items = items(figure);
+    let strokes = items
+        .iter()
+        .filter(|item| matches!(item, Item::Stroke { .. }))
+        .cloned()
+        .collect();
+    let fills = items
+        .iter()
+        .filter(|item| matches!(item, Item::Fill { .. }))
+        .cloned()
+        .collect();
+    (strokes, fills)
+}
+
+fn between(first: &str, second: &str) -> crate::Between {
+    crate::Between::new(first, second).unwrap()
+}
+
+#[test]
+fn a_line_between_categories_divides_their_bands_and_a_span_covers_them_whole() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let categories = |names: &[&str]| {
+        crate::model::AxisData::Categories(names.iter().map(|n| (*n).to_owned()).collect())
+    };
+    f.add_axes(ScaleKind::Category, ScaleKind::Linear)
+        .unwrap()
+        .vline_between(between("Q3", "Q2"), RuleOptions::default())
+        .unwrap()
+        .vspan_between(
+            between("Q1", "Q2"),
+            between("Q3", "Q4"),
+            SpanOptions::default(),
+        )
+        .unwrap()
+        .line(
+            categories(&["Q1", "Q2", "Q3", "Q4"]),
+            &[1.0, 2.0, 3.0, 4.0],
+            LineOptions::default(),
+        )
+        .unwrap();
+    let plot = plot_of(&f);
+    let (strokes, fills) = strokes_and_fills(&f);
+    // The data line, then the reference line above it.
+    let rule = strokes.last().unwrap();
+    let ((x0, y0), (x1, y1)) = ends(rule);
+    assert_near(x0, plot.x + 2.0 / 4.0 * plot.width);
+    assert_near(x1, x0);
+    assert_near(y0, plot.y);
+    assert!(y1 > y0, "{y0} {y1}");
+    let span = fills.iter().find(|item| corners(item).len() == 4).unwrap();
+    let (left, _, right, _) = rect(span);
+    assert_near(left, plot.x + 1.0 / 4.0 * plot.width);
+    assert_near(right, plot.x + 3.0 / 4.0 * plot.width);
+}
+
+#[test]
+fn a_line_between_categories_on_a_category_y_axis_runs_across_the_plot() {
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let rows =
+        crate::model::AxisData::Categories(vec!["North".into(), "South".into(), "East".into()]);
+    f.add_axes(ScaleKind::Linear, ScaleKind::Category)
+        .unwrap()
+        .scatter_shared(
+            nums(&[1.0, 2.0, 3.0]),
+            rows,
+            crate::model::ScatterOptions::default(),
+        )
+        .unwrap()
+        .hline_between(between("North", "South"), RuleOptions::default())
+        .unwrap()
+        .hspan_between(
+            between("North", "South"),
+            between("South", "East"),
+            SpanOptions::default(),
+        )
+        .unwrap();
+    let plot = plot_of(&f);
+    let (strokes, fills) = strokes_and_fills(&f);
+    let rule = strokes.last().unwrap();
+    let ((x0, y0), (x1, y1)) = ends(rule);
+    // The first category is at the top.
+    assert_near(y0, plot.y + plot.height / 3.0);
+    assert_near(y1, y0);
+    assert_near(x0, plot.x);
+    assert_near(x1, plot.right());
+    let span = fills.iter().find(|item| corners(item).len() == 4).unwrap();
+    let (left, top, right, bottom) = rect(span);
+    assert_near(top, plot.y + plot.height / 3.0);
+    assert_near(bottom, plot.y + 2.0 * plot.height / 3.0);
+    assert_near(left, plot.x);
+    assert_near(right, plot.right());
+}
+
 #[test]
 fn rules_and_spans_on_log_axes_are_placed_in_log_space() {
     let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();

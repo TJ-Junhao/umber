@@ -115,7 +115,7 @@ pub(crate) fn chrome(theme: &Theme, layout: &Layout) -> Item {
     for (labels, colors) in ticks {
         debug_assert_eq!(labels.len(), colors.len(), "one color per tick label");
         for (label, &color) in labels.iter().zip(colors) {
-            items.push(text(label, color));
+            items.extend(block_items(label, color));
         }
     }
     if let Some(title) = &layout.title {

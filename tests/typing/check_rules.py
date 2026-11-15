@@ -23,12 +23,30 @@ cats.hline(3.0).hspan(1.0, 2.0)
 chained: ub.Axes[float, float] = numeric.hline(1).vline(1).hspan(1, 2).vspan(1, 2).line(t, t)
 chained_cats: ub.Axes[str, float] = cats.hline(1).vline("a").hspan(1, 2).scatter(names, t)
 
-# Negative: vspan needs a numeric x axis, so it is refused on a category axis.
-cats.vspan("a", "b")  # type: ignore[misc]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+# Positive: Between places lines and span ends between categories of a category axis.
+rows = ub.Figure().add_axes(y=ub.Scale.category())
+divider = ub.Between("Q1", "Q2")
+by_category: ub.Axes[str, float] = cats.vline(divider, dash=ub.Dash.DASHED).vspan(divider, divider)
+by_row: ub.Axes[float, str] = rows.hline(divider, label="Split").hspan(divider, divider)
+
+# Negative: Between needs a category axis along its line.
+numeric.vline(divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+numeric.hline(divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+numeric.vspan(divider, divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+cats.hline(divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+rows.vspan(divider, divider)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+
+# Negative: a category y axis takes no number, and a span's ends are both Between.
+rows.hline(2.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+cats.vspan(divider, "Q3")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+ub.Between("Q1", 2)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+
+# Negative: vspan on a category axis takes Between ends, not names.
+cats.vspan("a", "b")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 
 # Negative: x of a vline matches the x axis.
 numeric.vline("Q1")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
-cats.vline(1.0)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
+cats.vline(1.0)  # type: ignore[call-overload]  # pyright: ignore[reportCallIssue, reportArgumentType]
 
 # Negative: values are numbers.
 numeric.hline("2")  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]

@@ -549,8 +549,8 @@ fn errors_carry_their_parameter_and_hint() {
             on_axes(cat, linear, |a| {
                 a.vspan(0.0, 1.0, SpanOptions::default()).map(|_| ())
             }),
-            None,
-            Some("vspan needs a numeric x axis; use vline on a category."),
+            Some("low"),
+            Some("pass Between(a, b), with a and b two neighbouring categories."),
         ),
         (
             "vline, zero on a log axis",

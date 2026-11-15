@@ -11,13 +11,14 @@ raises ``DataError``, naming the first offending element where there is one. Int
 import datetime
 import math
 import numbers
-from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Set
+from functools import partial
 from typing import Any, Final, cast
 
 import numpy as np
 import numpy.typing as npt
 
-from umber._args import checked_text, is_text_or_buffer, short_repr, type_name
+from umber._args import category_name, checked_text, is_text_or_buffer, short_repr, type_name
 from umber._errors import DataError, UmberError, at_row, new_error
 
 type FloatArray = npt.NDArray[np.float64]
@@ -486,8 +487,7 @@ def _names(
     data: _Data,
     *,
     mixed: bool,
-    one_line: str,
-    check_length: bool = True,
+    check: Callable[[str, str], str],
 ) -> list[str]:
     if isinstance(data, np.ndarray):
         _check_one_dimensional(context, name, data)
@@ -504,17 +504,7 @@ def _names(
         if not isinstance(value, str):
             raise _name_error(context, name, index, value, mixed=mixed)
         try:
-            result.append(
-                checked_text(
-                    context,
-                    name,
-                    f"{name}[{index}]",
-                    value,
-                    DataError,
-                    one_line=one_line,
-                    check_length=check_length,
-                )
-            )
+            result.append(check(f"{name}[{index}]", value))
         except UmberError as error:
             at_row(error, index)
             raise
@@ -580,10 +570,11 @@ def names(
     Sequences of ``str`` (``str`` subclasses become ``str``), NumPy string or object arrays
     and pandas or polars Series of strings are accepted. Lone surrogates, line breaks, other
     control characters and line or paragraph separators are refused: names are one line. The
-    ``MAX_TEXT_LENGTH`` cap is applied here unless the native call checks it instead.
+    ``MAX_TEXT_LENGTH`` cap is applied here unless the native call checks it instead. The
+    categories of a category axis take line breaks: convert them with ``axis_names()``.
 
     Args:
-        context: The API call, such as ``"Axes.bar()"``.
+        context: The API call, such as ``"PieAxes.pie()"``.
         name: The parameter name.
         values: The data passed.
         one_line: What the names are, in the plural, for the message on a line break:
@@ -602,11 +593,45 @@ def names(
 
     Example:
         >>> from umber._values import names
-        >>> names("Axes.bar()", "categories", ("North", "South"))
+        >>> names("PieAxes.pie()", "categories", ("North", "South"))
         ['North', 'South']
     """
     data = _data(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
-    return _names(context, name, data, mixed=False, one_line=one_line, check_length=check_length)
+
+    def check(label: str, value: str) -> str:
+        return checked_text(
+            context, name, label, value, DataError, one_line=one_line, check_length=check_length
+        )
+
+    return _names(context, name, data, mixed=False, check=check)
+
+
+def axis_names(context: str, name: str, values: object) -> list[str]:
+    r"""Convert the names of the categories of a category axis to a ``list`` of ``str``.
+
+    As ``names()``, except that a name may hold ``"\n"``: the categories are the axis's tick
+    labels, which break into lines there.
+
+    Args:
+        context: The API call, such as ``"Axes.bar()"``.
+        name: The parameter name.
+        values: The data passed.
+
+    Returns:
+        The names; empty data gives an empty list.
+
+    Raises:
+        TypeError: As for ``names()``.
+        DataError: As for ``names()``, except for a line break.
+        StyleError: A name is longer than ``MAX_TEXT_LENGTH`` characters.
+
+    Example:
+        >>> from umber._values import axis_names
+        >>> axis_names("Axes.bar()", "categories", ("2025", "2026\n(to Oct)"))
+        ['2025', '2026\n(to Oct)']
+    """
+    data = _data(context, name, values, str_hint=_NAMES_HINT, masked_hint=_MASKED_NAMES_HINT)
+    return _names(context, name, data, mixed=False, check=partial(category_name, context, name))
 
 
 def axis_values(context: str, name: str, values: object) -> FloatArray | list[str]:
@@ -638,7 +663,7 @@ def axis_values(context: str, name: str, values: object) -> FloatArray | list[st
     """
     data = _data(context, name, values, str_hint=_AXIS_HINT, masked_hint=_MASKED_HINT)
     if _starts_with_name(data):
-        return _names(context, name, data, mixed=True, one_line="category names")
+        return _names(context, name, data, mixed=True, check=partial(category_name, context, name))
     return _floats(context, name, data, mixed=True)
 
 

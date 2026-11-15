@@ -182,8 +182,9 @@ pub(crate) struct TextExtent<'a> {
 }
 
 /// The distance between the baselines of consecutive lines of a text, as a multiple of its
-/// font size. Titles, subtitles and the text of [`AxesMut::text`](crate::AxesMut::text) and
-/// [`AxesMut::annotate`](crate::AxesMut::annotate) break into lines at `"\n"`.
+/// font size. Titles, subtitles, the text of [`AxesMut::text`](crate::AxesMut::text) and
+/// [`AxesMut::annotate`](crate::AxesMut::annotate) and the tick labels of category axes break into
+/// lines at `"\n"`.
 pub(crate) const LINE_PITCH: f64 = 1.2;
 
 /// Measured text of one or more lines, split at `"\n"`, and placed: the first line where a
@@ -306,10 +307,12 @@ pub(crate) struct Layout {
     pub xlabel: Option<Label>,
     /// The y axis label, if not empty.
     pub ylabel: Option<Label>,
-    /// The x tick labels.
-    pub x_tick_labels: Vec<Label>,
-    /// The y tick labels, to the left of the plot area.
-    pub y_tick_labels: Vec<Label>,
+    /// The x tick labels, each line centered under its tick: only the categories of a category
+    /// axis have more than one line.
+    pub x_tick_labels: Vec<TextBlock>,
+    /// The y tick labels, to the left of the plot area, each line right-aligned beside its tick
+    /// and the block of lines centered on it.
+    pub y_tick_labels: Vec<TextBlock>,
     /// The color of each x tick label, by its index in `x_tick_labels`: the highlight color for
     /// a highlighted category ([`AxesMut::xtick_highlight`](crate::AxesMut::xtick_highlight)),
     /// the theme's muted color otherwise.
@@ -373,6 +376,7 @@ impl Layout {
         let edge = self
             .y_tick_labels
             .iter()
+            .flat_map(TextBlock::lines)
             .filter(|label| label.x < self.plot.x)
             .map(|label| label.x + label.width())
             .fold(self.frame.x, f64::max);
@@ -597,6 +601,7 @@ impl<'a> LabelCache<'a> {
     /// # Errors
     ///
     /// As [`measure`].
+    #[cfg(test)]
     fn with_label<T>(
         &self,
         text: &str,
@@ -641,6 +646,7 @@ impl<'a> LabelCache<'a> {
     /// # Errors
     ///
     /// As [`measure`].
+    #[cfg(test)]
     fn measure(&self, text: &str, style: TextStyle) -> Result<Label> {
         self.with_label(text, style, Label::clone)
     }
@@ -663,17 +669,18 @@ impl<'a> LabelCache<'a> {
     }
 
     /// The labels of `ticks` in `style`, each with its tick's position; the label of a
-    /// category of `highlight` in the [`highlighted_style`] of `style`.
+    /// category of `highlight` in the [`highlighted_style`] of `style`. A label breaks into
+    /// lines at `"\n"`, which only the names of categories hold.
     ///
     /// # Errors
     ///
-    /// As [`measure`], for the first label that cannot be laid out.
+    /// As [`SceneFonts::check_block`], for the first label that cannot be laid out.
     fn ticks(
         &self,
         ticks: &[AxisTick],
         style: TextStyle,
         highlight: &TickHighlight,
-    ) -> Result<Vec<(NormalizedPos, Label)>> {
+    ) -> Result<Vec<(NormalizedPos, TextBlock)>> {
         ticks
             .iter()
             .map(|tick| {
@@ -682,9 +689,26 @@ impl<'a> LabelCache<'a> {
                 } else {
                     style
                 };
-                Ok((tick.pos, self.measure(&tick.label, style)?))
+                Ok((tick.pos, self.block(&tick.label, style)?))
             })
             .collect()
+    }
+
+    /// The block of `text` in `style`, one label per line of it, each measured once.
+    ///
+    /// # Errors
+    ///
+    /// As [`SceneFonts::check_block`].
+    fn block(&self, text: &str, style: TextStyle) -> Result<TextBlock> {
+        let checked = self.lib.check_block(text, &style)?;
+        let mut lines = text.split('\n');
+        let label = |line: &str| self.with_checked_label(line, &checked, Label::clone);
+        let first = label(lines.next().unwrap_or_default());
+        Ok(TextBlock {
+            text: text.to_owned(),
+            first,
+            rest: lines.map(label).collect(),
+        })
     }
 }
 
@@ -830,8 +854,8 @@ enum LabelExtent {
     /// Side by side under the plot: each label takes its own width, at least that of a
     /// tabular digit, which every automatic label holds; this is that width.
     Width(f64),
-    /// One above the other left of the plot: each label takes one line, this high (ascent and
-    /// descent).
+    /// One above the other left of the plot: each label takes this height (ascent and descent)
+    /// for its first line, and [`LINE_PITCH`] sizes for each further one.
     Line(f64),
 }
 
@@ -934,7 +958,7 @@ impl<'a> TickFont<'a> {
         };
         let bold = self
             .lib
-            .check(first, &highlighted_style(self.style.style()))?;
+            .check_block(first, &highlighted_style(self.style.style()))?;
         Ok(TickFont {
             highlight: Some((highlight, bold)),
             ..self
@@ -1010,16 +1034,22 @@ impl<'a> TickRoom<'a> {
         TICK_LABEL_GAP * f64::from(self.tick.style.style().size)
     }
 
-    /// The width of `label`.
+    /// The width of `label`: of its widest line, for a category name that `"\n"` breaks into
+    /// lines.
     fn width(&self, label: &str) -> f64 {
         if let Some(&width) = self.widths.borrow().get(label) {
             return width;
         }
         let style = self.tick.style_of(label);
-        let width = self.labels.map_or_else(
-            || measure_checked(self.tick.lib, label, style).width(),
-            |labels| labels.checked_width(label, style),
-        );
+        let width = label
+            .split('\n')
+            .map(|line| {
+                self.labels.map_or_else(
+                    || measure_checked(self.tick.lib, line, style).width(),
+                    |labels| labels.checked_width(line, style),
+                )
+            })
+            .fold(0.0, f64::max);
         self.widths.borrow_mut().insert(label.to_owned(), width);
         width
     }
@@ -1066,11 +1096,19 @@ impl<'a> TickRoom<'a> {
         }
     }
 
-    /// Label spacing independent of the search mode and tick count limit.
+    /// Label spacing independent of the search mode and tick count limit. Each label takes its
+    /// whole block: the width of its widest line on the x axis, and on the y axis the height of
+    /// all its lines, [`LINE_PITCH`] sizes apart.
     fn label_slack(&self, ticks: &[AxisTick]) -> f64 {
         let extents: Vec<f64> = match self.extent {
             LabelExtent::Width(_) => ticks.iter().map(|tick| self.width(&tick.label)).collect(),
-            LabelExtent::Line(line) => vec![line; ticks.len()],
+            LabelExtent::Line(line) => {
+                let pitch = LINE_PITCH * f64::from(self.tick.style.style().size);
+                ticks
+                    .iter()
+                    .map(|tick| line + tick.label.matches('\n').count() as f64 * pitch)
+                    .collect()
+            }
         };
         let gap = self.gap();
         ticks
@@ -1480,7 +1518,7 @@ fn solve_single(
 }
 
 /// The widest of `labels`, the first of equally wide ones; `None` when there are none.
-fn widest(labels: &[(NormalizedPos, Label)]) -> Option<&Label> {
+fn widest(labels: &[(NormalizedPos, TextBlock)]) -> Option<&TextBlock> {
     labels
         .iter()
         .map(|(_, label)| label)
@@ -1504,7 +1542,7 @@ fn widest(labels: &[(NormalizedPos, Label)]) -> Option<&Label> {
 fn no_room_for_plot(
     context: &'static str,
     frame: Frame,
-    y_labels: &[(NormalizedPos, Label)],
+    y_labels: &[(NormalizedPos, TextBlock)],
     room: &inset::Room,
     direct: f64,
     label_width: f64,
@@ -1605,7 +1643,7 @@ fn figure_too_small(
 /// The error for the y tick `label`, the widest, that leaves no room for the plot area: y tick
 /// labels up to `y_room` wide would. The widths are in whole points, as in
 /// [`x_labels_overflow`].
-fn y_labels_leave_no_room(context: &'static str, label: &Label, y_room: f64) -> Error {
+fn y_labels_leave_no_room(context: &'static str, label: &TextBlock, y_room: f64) -> Error {
     let (width, fits) = widths(label.width(), y_room);
     Error::style(
         context,
@@ -1623,7 +1661,7 @@ fn y_labels_leave_no_room(context: &'static str, label: &Label, y_room: f64) -> 
 /// rounded up, and at least one point more than that, so the two never look equal.
 fn x_labels_overflow(
     context: &'static str,
-    labels: &[(NormalizedPos, Label)],
+    labels: &[(NormalizedPos, TextBlock)],
     room: &inset::Room,
     spans: &[inset::TickSpan],
     colorbar_width: f64,
@@ -1639,7 +1677,7 @@ fn x_labels_overflow(
 /// [`x_labels_overflow`].
 fn x_labels_wider_than(
     context: &'static str,
-    labels: &[(NormalizedPos, Label)],
+    labels: &[(NormalizedPos, TextBlock)],
     fits: f64,
 ) -> Error {
     // Without labels the room's own edges fit: layout checks that first.
@@ -1746,9 +1784,13 @@ mod tests {
         assert_eq!(a.plot.right(), b.plot.right());
         // Outside: labels are right-aligned 6 pt left of the plot area.
         for label in &b.y_tick_labels {
-            assert!((label.x + label.width() - (b.plot.x - 6.0)).abs() < 1e-6);
+            assert!((label.first().x + label.width() - (b.plot.x - 6.0)).abs() < 1e-6);
         }
-        let widest = b.y_tick_labels.iter().map(Label::width).fold(0.0, f64::max);
+        let widest = b
+            .y_tick_labels
+            .iter()
+            .map(TextBlock::width)
+            .fold(0.0, f64::max);
         assert!((b.plot.x - (PADDING + widest + 6.0)).abs() < 1e-9);
     }
 
@@ -1773,12 +1815,12 @@ mod tests {
             assert_eq!(labels.first(), Some(&"0"));
             assert_eq!(labels.last(), Some(&"100"));
             for label in &layout.y_tick_labels {
-                assert!((label.x + label.width() - (layout.plot.x - 6.0)).abs() < 1e-6);
+                assert!((label.first().x + label.width() - (layout.plot.x - 6.0)).abs() < 1e-6);
             }
             let widest = layout
                 .y_tick_labels
                 .iter()
-                .map(Label::width)
+                .map(TextBlock::width)
                 .fold(0.0, f64::max);
             assert!((layout.plot.x - (PADDING + widest + 6.0)).abs() < 1e-9);
         }
@@ -2009,7 +2051,7 @@ mod tests {
                 assert_eq!(resolved.y.ticks.first().map(|t| t.pos.get()), Some(0.0));
                 assert_eq!(resolved.y.ticks.last().map(|t| t.pos.get()), Some(1.0));
                 for pair in labels.windows(2) {
-                    let gap = (pair[0].y - pair[1].y).abs();
+                    let gap = (pair[0].first().y - pair[1].first().y).abs();
                     assert!(
                         gap >= min_gap,
                         "base {base}: {:?} and {:?} are {gap} pt apart",
@@ -2034,9 +2076,9 @@ mod tests {
         let (_, layout) = plan_of(&f);
         let plot = layout.plot;
         let tick = layout.x_tick_labels.first().unwrap();
-        assert!(tick.y > plot.bottom());
+        assert!(tick.first().y > plot.bottom());
         let xlabel = layout.xlabel.as_ref().unwrap();
-        assert!(xlabel.y > tick.y);
+        assert!(xlabel.y > tick.first().y);
         assert!((xlabel.x + xlabel.width() / 2.0 - (plot.x + plot.width / 2.0)).abs() < 1e-9);
         let ylabel = layout.ylabel.as_ref().unwrap();
         assert!(ylabel.y < plot.y);
@@ -2077,7 +2119,7 @@ mod tests {
         let widest = long
             .y_tick_labels
             .iter()
-            .map(Label::width)
+            .map(TextBlock::width)
             .fold(0.0, f64::max);
         assert!((long.plot.x - (PADDING + widest + Y_LABEL_GAP)).abs() < 1e-9);
         assert!(long.plot.x > short.plot.x + 20.0);
@@ -2086,7 +2128,7 @@ mod tests {
         let last = long.x_tick_labels.last().unwrap();
         assert!(long.plot.right() < short.plot.right() - 1.0);
         assert!(
-            (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+            (last.first().x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
             "{last:?}"
         );
         // A suffix from the tick format is measured the same way.
@@ -2125,9 +2167,9 @@ mod tests {
         let width = f.width_in() * 72.0;
         assert!(!layout.x_tick_labels.is_empty());
         for label in &layout.x_tick_labels {
-            assert!(label.x >= X_LABEL_EDGE_GAP - 1e-9, "{label:?}");
+            assert!(label.first().x >= X_LABEL_EDGE_GAP - 1e-9, "{label:?}");
             assert!(
-                label.x + label.width() <= width - X_LABEL_EDGE_GAP + 1e-9,
+                label.first().x + label.width() <= width - X_LABEL_EDGE_GAP + 1e-9,
                 "{label:?}"
             );
         }
@@ -2138,8 +2180,8 @@ mod tests {
                 .iter()
                 .find(|t| {
                     t.text == label.text
-                        && (f64::from(t.origin.x) - label.x).abs() < 1e-3
-                        && (f64::from(t.origin.y) - label.y).abs() < 1e-3
+                        && (f64::from(t.origin.x) - label.first().x).abs() < 1e-3
+                        && (f64::from(t.origin.y) - label.first().y).abs() < 1e-3
                 })
                 .unwrap_or_else(|| panic!("{label:?} is not drawn"));
             let (left, right) = (
@@ -2186,13 +2228,13 @@ mod tests {
             // labels' column.
             let last = wide.x_tick_labels.last().unwrap();
             assert!(
-                (last.x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+                (last.first().x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-9,
                 "{last:?}"
             );
             assert!(wide.plot.right() < narrow.plot.right() - 1.0);
             assert_eq!(wide.plot.x, narrow.plot.x);
             // The labels stay centered on their ticks.
-            assert!((last.x + last.width() / 2.0 - wide.plot.right()).abs() < 1e-9);
+            assert!((last.first().x + last.width() / 2.0 - wide.plot.right()).abs() < 1e-9);
         }
     }
 
@@ -2203,12 +2245,12 @@ mod tests {
             let widest = layout
                 .y_tick_labels
                 .iter()
-                .map(Label::width)
+                .map(TextBlock::width)
                 .fold(0.0, f64::max);
             // "24" reaches past the plot's right edge by half its width, less than the padding
             // minus the edge gap, so the plot keeps its full width.
             let last = layout.x_tick_labels.last().unwrap();
-            assert!(last.x + last.width() > layout.plot.right());
+            assert!(last.first().x + last.width() > layout.plot.right());
             assert_eq!(layout.plot.right(), 6.0 * 72.0 - PADDING);
             assert_eq!(layout.plot.x, PADDING + widest + Y_LABEL_GAP);
         }
@@ -2237,7 +2279,7 @@ mod tests {
             let last = layout.x_tick_labels.last().unwrap();
             assert!(last.text.ends_with(" thousand units"));
             assert!(
-                (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+                (last.first().x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
                 "{last:?}"
             );
         }
@@ -2265,7 +2307,7 @@ mod tests {
             assert!(layout.plot.right() < 6.0 * 72.0 - PADDING - 1.0);
             let last = layout.x_tick_labels.last().unwrap();
             assert!(
-                (last.x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+                (last.first().x + last.width() - (6.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
                 "{last:?}"
             );
         }
@@ -2317,9 +2359,12 @@ mod tests {
         ] {
             let layout = assert_x_labels_inside(&f);
             let (first, last) = (&layout.x_tick_labels[0], &layout.x_tick_labels[1]);
-            assert!((first.x - X_LABEL_EDGE_GAP).abs() < 1e-6, "{first:?}");
             assert!(
-                (last.x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-6,
+                (first.first().x - X_LABEL_EDGE_GAP).abs() < 1e-6,
+                "{first:?}"
+            );
+            assert!(
+                (last.first().x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-6,
                 "{last:?}"
             );
         }
@@ -2387,7 +2432,7 @@ mod tests {
         let last = layout.x_tick_labels.last().unwrap();
         assert!((last.width() - 214.2).abs() < 1e-3, "{last:?}");
         assert!(
-            (last.x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+            (last.first().x + last.width() - (width - X_LABEL_EDGE_GAP)).abs() < 1e-9,
             "{last:?}"
         );
         let cap = END_LABEL_SHARE * (width - 2.0 * PADDING);
@@ -2615,7 +2660,7 @@ mod tests {
         let layout = plan_of(&f).1;
         let fonts = crate::test_support::figure_fonts(f.theme());
         let label = &layout.y_tick_labels[0];
-        let bottom = label.y + metrics(&fonts, &label.style).unwrap().1;
+        let bottom = label.first().y + metrics(&fonts, &label.first().style).unwrap().1;
         let entry = &layout.legend.entries()[0];
         let top = entry.label.y - metrics(&fonts, &entry.label.style).unwrap().0;
         assert!(
@@ -2629,10 +2674,13 @@ mod tests {
         let f = bottom_without_x_labels(4.0);
         let layout = plan_of(&f).1;
         let label = &layout.y_tick_labels[0];
-        let bottom = label.y
-            + metrics(&crate::test_support::figure_fonts(f.theme()), &label.style)
-                .unwrap()
-                .1;
+        let bottom = label.first().y
+            + metrics(
+                &crate::test_support::figure_fonts(f.theme()),
+                &label.first().style,
+            )
+            .unwrap()
+            .1;
         let required = bottom + placement::BOTTOM_GAP + layout.legend.height() + PADDING;
         assert!(
             required <= f.height_in() * 72.0 + 1e-9,
@@ -2683,7 +2731,7 @@ mod tests {
         assert!(layout.plot.width >= MIN_PLOT, "{:?}", layout.plot);
         let end = layout.x_tick_labels.first().unwrap();
         assert!(
-            (end.x + end.width() - (2.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
+            (end.first().x + end.width() - (2.0 * 72.0 - X_LABEL_EDGE_GAP)).abs() < 1e-9,
             "{end:?}"
         );
     }
@@ -2703,7 +2751,7 @@ mod tests {
             let widest = layout
                 .y_tick_labels
                 .iter()
-                .map(Label::width)
+                .map(TextBlock::width)
                 .fold(0.0, f64::max);
             assert!(widest > 150.0, "{widest}");
             assert_eq!(layout.plot.x, PADDING + widest + Y_LABEL_GAP);

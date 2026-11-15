@@ -271,10 +271,10 @@ fn error_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     );
     let mut f = figure(6.0, 4.0, Theme::pigment(), ScaleKind::Category, linear());
     push(
-        "category line break",
+        "category tab",
         axes(&mut f)
             .line(
-                AxisData::Categories(vec!["North".into(), "South\nEast".into()]),
+                AxisData::Categories(vec!["North".into(), "South\tEast".into()]),
                 &[1.0, 2.0],
                 LineOptions::default(),
             )

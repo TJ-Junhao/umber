@@ -57,7 +57,8 @@ _SURROGATE_HINT: Final = (
     'remove the character, or replace it: value.encode("utf-8", "replace").decode().'
 )
 _LINE_BREAK_HINT: Final = (
-    "line breaks are supported in titles, subtitles, captions, text() and annotate()."
+    "line breaks are supported in titles, subtitles, captions, text(), annotate() and the "
+    "categories of a category axis."
 )
 _SEPARATORS: Final = "\u2028\u2029"
 # What a refused character is, after its code point, where its code point alone does not say.
@@ -314,6 +315,41 @@ def checked_text(
         )
         hint = _ONE_LINE_HINTS.get(character, _CHARACTER_HINT)
         raise new_error(invalid, context, message, parameter=name, hint=hint)
+    return plain
+
+
+def category_name(context: str, name: str, label: str, value: str) -> str:
+    r"""Apply the rules of a category name to a string and return it as a plain ``str``.
+
+    The categories of a category axis are its tick labels, which ``"\n"`` breaks into lines,
+    so a category name may hold line breaks and no other control character.
+
+    Args:
+        context: The API call, such as ``"Axes.bar()"``.
+        name: The parameter the name belongs to.
+        label: How the message names the string: the parameter, or an element such as
+            ``"categories[2]"``.
+        value: The name, possibly of a ``str`` subclass.
+
+    Returns:
+        The name as a plain ``str``.
+
+    Raises:
+        StyleError: The name exceeds ``MAX_TEXT_LENGTH``.
+        DataError: The name holds a lone surrogate, a control character other than ``"\n"``
+            (U+0000 to U+001F, U+007F to U+009F) or a line or paragraph separator.
+
+    Example:
+        >>> from umber._args import category_name
+        >>> category_name("Axes.bar()", "categories", "categories[0]", "2026\n(to Oct)")
+        '2026\n(to Oct)'
+    """
+    plain = _plain(context, name, label, value, DataError, True)
+    found = _LINES_REFUSED.search(plain)
+    if found is not None:
+        hint = _LINES_HINTS.get(found.group(), _CHARACTER_HINT)
+        message = _character_message(label, found)
+        raise new_error(DataError, context, message, parameter=name, hint=hint)
     return plain
 
 

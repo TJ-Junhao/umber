@@ -80,7 +80,7 @@ fig.save_pdf("temperature.pdf")
 | 误差棒 | `ax.y_error_bars(x, low, high)`、`ax.x_error_bars(y, low, high)`；属于某个 series 的误差棒和连线用 `ax.scatter(x, y, y_error=(low, high), connect=True)`，自动取该 series 的颜色；`connect_width=ub.Size.pt(2)` 设置连线宽度 |
 | 区间带 | `ax.band(x, low, high)` |
 | 杆状图 | `ax.stem(x, y)` |
-| 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)` |
+| 参考线和参考区间 | `ax.hline(y)`、`ax.vline(x)`、`ax.hspan(low, high)`、`ax.vspan(low, high)`；类别之间用 `ax.vline(ub.Between(a, b))` |
 | 热力图 | `ax.heatmap(x_categories, y_categories, values, annotate=True)` |
 | 网格色块图 | `ax.mesh(x_edges, y_edges, values)` |
 | 等值线图 | `ax.contour(x, y, z, style=ub.Contour.FILLED)`；也可用 `Contour.LINES`（默认）或 `Contour.BOTH` |
@@ -91,7 +91,7 @@ fig.save_pdf("temperature.pdf")
 | 饼图、环形图 | `ub.pie(categories, values, hole=0.5, annotate=True)` 或 `fig.add_pie_axes().pie(...)` |
 | 文字、标注 | `ax.text("Note", (x, y))`、`ax.annotate("Peak", (x, y), offset=(24, 12))` |
 
-柱状图、箱线图、小提琴图、带状散点图和蜂群图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。事件图在类别 y 轴上逐行绘制。热力图要求两条轴都是类别轴；要标出其中一组类别，`ax.xtick_highlight(group)` 和 `ax.ytick_highlight(group)` 以主题的强调色加粗这些类别的刻度标签，`heatmap(..., outline=mask)` 则以同一颜色为布尔掩码选中的单元格描边。类别轴的自动刻度标签从第 0 个类别起，使用 1、2、5、10、20、50、…… 中能让相邻刻度标签保持与数值轴相同最小间距的最小步长；共享轴显示相同的刻度标签。第 0 个类别始终显示刻度标签，因此首个刻度标签宽于可用空间时，仍会报刻度标签放不下的错误。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
+柱状图、箱线图、小提琴图、带状散点图和蜂群图需要一条类别轴。在类别 x 轴（`fig.add_axes(x=ub.Scale.category())`）上它们是竖直的；在类别 y 轴（`fig.add_axes(y=ub.Scale.category())`）上它们是水平的，以数值对类别画散点即为点图（dot plot）。事件图在类别 y 轴上逐行绘制。热力图要求两条轴都是类别轴；要标出其中一组类别，`ax.xtick_highlight(group)` 和 `ax.ytick_highlight(group)` 以主题的强调色加粗这些类别的刻度标签，`heatmap(..., outline=mask)` 则以同一颜色为布尔掩码选中的单元格描边。类别轴的自动刻度标签从第 0 个类别起，使用 1、2、5、10、20、50、…… 中能让相邻刻度标签保持与数值轴相同最小间距的最小步长；共享轴显示相同的刻度标签。第 0 个类别始终显示刻度标签，因此首个刻度标签宽于可用空间时，仍会报刻度标签放不下的错误。类别名可以包含 `"\n"`，刻度标签会在此处分行，每行在刻度下方居中（在 y 轴上则在刻度旁右对齐）；坐标轴按最高的刻度标签预留空间。`ax.vline(ub.Between("2013", "2014"))` 在两个相邻类别正中间画一条分隔线，类别 y 轴上用 `ax.hline(ub.Between(...))`；`ax.vspan(ub.Between("2009", "2010"), ub.Between("2013", "2014"))` 给两条分隔线之间的类别整体加底色。对数轴用 `ub.Scale.log()`，时间轴用 `ub.Scale.time()`。坐标范围、刻度和刻度标签格式分别用 `xlim`、`ylim`、`xticks`、`xticks_labeled`、`ytick_format(ub.TickFormat.percent())` 及另一轴上的对应方法设置。
 
 柱状图、直方图、面积图和杆状图在零点绘制 baseline（零点不在范围内时绘制在下界）；其他图表不绘制 baseline。每个 axes 可用 `ax.baseline(shown=True)` 或 `ax.baseline(shown=False)` 覆盖此规则；`ax.baseline(shown=ub.AUTO)` 恢复默认规则。
 
@@ -309,7 +309,7 @@ ax.text("Target", (days[0], 32.0), color=ub.Color.GRAY)
 
 ## 标题与 legend
 
-`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。`fig.caption(text)` 在整张图下方添加一条说明，例如脚注，布局会为它预留空间。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题、副标题或 caption 分成多行，每行按标题的对齐方式对齐；其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
+`fig.title(text)` 和 `fig.subtitle(text)` 设置整个 grid 上方的文字；`ax.title(text)` 和 `ax.subtitle(text)` 只属于一个 panel。每个方法都返回原对象，支持链式调用；空字符串可移除文字。`fig.caption(text)` 在整张图下方添加一条说明，例如脚注，布局会为它预留空间。figure title 的字号是 panel title 的 1.5 倍。`"\n"` 把标题、副标题或 caption 分成多行，每行按标题的对齐方式对齐；除类别名外，其他标签只能是一行，在不支持的地方写入换行或其他控制字符，调用时就会报错。标题、副标题或坐标轴标签比可用空间宽时，渲染时抛出 `StyleError`，并给出所需宽度；请加宽图片或降低字体缩放。
 
 `Theme.with_title_align(ub.Align.LEFT)` 设置标题对齐方式，也可使用 `CENTER` 和 `RIGHT`。subtitle 跟随对应 title 对齐。多 panel figure 的 merged legend 固定放在 figure title 和 subtitle 下方，跟随它们对齐，没有独立的位置设置。若要按 panel 放置 legend，请使用 `Legend.PER_PANEL`。
 

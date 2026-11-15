@@ -42,7 +42,9 @@ pub use crate::model::{
     ArrowKey, ArrowLength, BarbOptions, BarbsMark, Direction, FieldForm, FieldVectors, Pivot,
     QuiverMark, QuiverOptions, VectorField,
 };
-pub use crate::model::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub use crate::model::{
+    AxisValue, Between, HLineMark, RuleOptions, RulePosition, SpanMark, SpanOptions, VLineMark,
+};
 pub use crate::model::{BandMark, BandOptions};
 pub use crate::model::{
     Bandwidth, Bins, EcdfMark, EcdfOptions, GroupedHistOptions, GroupedKdeOptions, HistGroupMark,

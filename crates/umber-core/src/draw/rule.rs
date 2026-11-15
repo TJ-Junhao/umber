@@ -19,9 +19,10 @@ use super::MarkContext;
 use super::chrome::segment;
 use super::fill::{AREA_ALPHA, fill_color};
 use super::line::line_style;
-use super::mapping::{AxisMap, PlotPoint, axis_position, axis_time, axis_value};
+use super::mapping::{AxisMap, PlotPoint, axis_time, axis_value, between_position, rule_position};
 use crate::geometry::Path;
-use crate::resolve::{Resolved, ResolvedMark, ValueAxis};
+use crate::model::SpanMark;
+use crate::resolve::{Resolved, ResolvedAxis, ResolvedMark, ValueAxis};
 use crate::scene::{FillRule, Item, LineCap, Paint, Rect};
 use crate::{Dash, Rgba};
 
@@ -46,9 +47,10 @@ impl Along {
     /// The fraction of the plot area, from its start on the other axis (left, or top), that a
     /// mark of this kind covers across it: all of it, except for a vertical mark on a chart with
     /// its values on y, which stops at the baseline when that sits at the y axis's lower limit.
-    /// A mark whose value lies on the value axis runs along the baseline and covers it all. The
-    /// model refuses horizontal marks beside a category y axis, the one chart with its baseline
-    /// on x, so no mark there would stop at the baseline.
+    /// A mark whose value lies on the value axis runs along the baseline and covers it all. A
+    /// horizontal mark beside a category y axis, the one chart with its baseline on x, covers
+    /// the whole width too; the layers are clipped left of the baseline (see
+    /// [`baseline_clip`]).
     fn reach(self, context: &MarkContext<'_>, resolved: &Resolved) -> f64 {
         match (self, context.baseline.axis) {
             (Along::Y, _) | (Along::X, ValueAxis::X) => 1.0,
@@ -147,28 +149,13 @@ pub(super) fn span_layer(
     for mark in marks {
         match *mark {
             ResolvedMark::HSpan { mark, color, .. } => {
-                let ends = mark.bounds().iter().map(|&v| axis_value(&resolved.y, v));
-                let times = mark
-                    .time_bounds()
-                    .iter()
-                    .map(|&t| axis_time(&resolved.y, t));
-                span_item(context, Along::Y, ends.chain(times), 1.0, color, &mut layer);
+                let ends = span_ends(mark, &resolved.y);
+                span_item(context, Along::Y, ends, 1.0, color, &mut layer);
             }
             ResolvedMark::VSpan { mark, color, .. } => {
-                let ends = mark.bounds().iter().map(|&v| axis_value(&resolved.x, v));
-                let times = mark
-                    .time_bounds()
-                    .iter()
-                    .map(|&t| axis_time(&resolved.x, t));
+                let ends = span_ends(mark, &resolved.x);
                 let reach = Along::X.reach(context, resolved);
-                span_item(
-                    context,
-                    Along::X,
-                    ends.chain(times),
-                    reach,
-                    color,
-                    &mut layer,
-                );
+                span_item(context, Along::X, ends, reach, color, &mut layer);
             }
             ResolvedMark::Line { .. }
             | ResolvedMark::Scatter { .. }
@@ -222,14 +209,14 @@ pub(super) fn rule_layer(
             ResolvedMark::HLine {
                 mark, color, width, ..
             } => {
-                let at = axis_position(&resolved.y, mark.y());
+                let at = rule_position(&resolved.y, mark.y());
                 let style = rule_style(width, color, mark.options().dash);
                 rule_item(context, Along::Y, at, 1.0, &style, &mut layer);
             }
             ResolvedMark::VLine {
                 mark, color, width, ..
             } => {
-                let at = axis_position(&resolved.x, mark.x());
+                let at = rule_position(&resolved.x, mark.x());
                 let style = rule_style(width, color, mark.options().dash);
                 let reach = Along::X.reach(context, resolved);
                 rule_item(context, Along::X, at, reach, &style, &mut layer);
@@ -269,6 +256,19 @@ pub(super) fn rule_layer(
         }
     }
     push_layer(items, clip, layer);
+}
+
+/// The axis-space ends of the span `mark` along `axis`, low first: its numbers, its times or its
+/// points between categories, whichever it has.
+fn span_ends(mark: &SpanMark, axis: &ResolvedAxis) -> impl Iterator<Item = f64> {
+    let numbers = mark.bounds().iter().map(|&v| axis_value(axis, v));
+    let times = mark.time_bounds().iter().map(|&t| axis_time(axis, t));
+    let between = mark
+        .between()
+        .into_iter()
+        .flatten()
+        .map(|between| between_position(axis, between));
+    numbers.chain(times).chain(between)
 }
 
 /// The stroke of a reference line of `color` and `dash`, `width` pt wide. A line runs exactly

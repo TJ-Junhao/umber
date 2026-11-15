@@ -42,9 +42,9 @@ from umber._enums import (
 from umber._errors import DataError, StyleError, UmberError, UsageError
 from umber._figure import Figure
 from umber._font import Font
-from umber._in_plot import InPlot
 from umber._pdf import save_pdf, to_pdf
 from umber._pie import PieAxes
+from umber._position import Between, InPlot
 from umber._quick import bar, hist, line, pie, scatter
 from umber._scale import Scale
 from umber._series import Distribution, Series
@@ -71,6 +71,7 @@ __all__ = [
     "Align",
     "Auto",
     "Axes",
+    "Between",
     "Cell",
     "Series",
     "Cmap",
@@ -141,6 +142,7 @@ _report_package_as_module(
     Align,
     Auto,
     Axes,
+    Between,
     Cell,
     Series,
     Cmap,

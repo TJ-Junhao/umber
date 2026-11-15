@@ -246,7 +246,13 @@ fn single_bottom_wraps_and_reserves_the_inner_canvas_width() {
                 bottom.frame.bottom() - 12.0,
             );
             let axis_bottom = bottom.xlabel.as_ref().map_or_else(
-                || bottom.x_tick_labels.iter().map(|l| l.y).fold(0.0, f64::max),
+                || {
+                    bottom
+                        .x_tick_labels
+                        .iter()
+                        .map(|l| l.first().y)
+                        .fold(0.0, f64::max)
+                },
                 |l| l.y,
             );
             assert!(first.swatch.center_y - bottom.legend.height() / 2.0 > axis_bottom + 8.0);

@@ -1839,24 +1839,42 @@ pub(crate) fn check_text(
         .map_err(|error| error.with_parameter(parameter))
 }
 
-/// Checks the names in `names`, the data of the Python parameter `parameter` shown as
-/// `{parameter}[i]` in the message, for characters a one-line name may not hold (see
-/// [`Lines`]): `Error::Data` under `context` for the first name that holds one.
+/// Checks the category names in `names`, the data of the Python parameter `parameter` shown as
+/// `{parameter}[i]` in the message, for characters they may not hold (see [`Lines`]):
+/// `Error::Data` under `context` for the first name that holds one. The categories of an axis
+/// are drawn as its tick labels, which `"\n"` breaks into lines.
 pub(super) fn check_names(
     context: &'static str,
     parameter: &'static str,
     names: &[String],
 ) -> Result<()> {
+    check_names_of(context, parameter, names, Lines::Many)
+}
+
+/// As [`check_names`], for the categories of a pie, which name its slices in the legend and are
+/// one line.
+pub(super) fn check_slice_names(
+    context: &'static str,
+    parameter: &'static str,
+    names: &[String],
+) -> Result<()> {
+    check_names_of(context, parameter, names, Lines::One("category names"))
+}
+
+/// Checks each of `names` for characters text of `lines` may not hold, as [`check_names`].
+fn check_names_of(
+    context: &'static str,
+    parameter: &'static str,
+    names: &[String],
+    lines: Lines,
+) -> Result<()> {
     for (i, name) in names.iter().enumerate() {
-        CATEGORY_NAMES
+        lines
             .check_data(context, &format!("{parameter}[{i}]"), name)
             .map_err(|error| error.with_parameter(parameter))?;
     }
     Ok(())
 }
-
-/// Category names are one line.
-const CATEGORY_NAMES: Lines = Lines::One("category names");
 
 /// The transform of `axis`, of scale kind `kind`, for the tick setter `context`, or
 /// `Error::Usage` on a category axis, whose ticks are its categories. `what` names what the
@@ -2023,6 +2041,59 @@ pub(super) fn check_numeric_x(context: &'static str, kind: ScaleKind) -> Result<
     )
     .with_parameter("x")
     .with_hint("use a linear or log x axis."))
+}
+
+/// The `Error::Usage` for a reference line or span given a number as `parameter` along `axis`, a
+/// category axis, where reference marks sit between two categories instead.
+pub(super) fn between_needed(
+    context: &'static str,
+    axis: SharedAxis,
+    parameter: &'static str,
+) -> Error {
+    Error::usage(
+        context,
+        format!(
+            "{parameter} is a number but the {} axis is a category axis; place it between two \
+             categories instead.",
+            axis.name()
+        ),
+    )
+    .with_parameter(parameter)
+    .with_hint("pass Between(a, b), with a and b two neighbouring categories.")
+}
+
+/// Checks that `axis`, of scale kind `kind`, is a category axis, which a reference line or span
+/// placed between two categories (a [`Between`](super::Between) given as `parameter`) needs:
+/// `Error::Usage` naming `parameter` on a linear, log or time axis, which has no categories.
+pub(super) fn check_between_axis(
+    context: &'static str,
+    axis: SharedAxis,
+    parameter: &'static str,
+    kind: ScaleKind,
+) -> Result<()> {
+    let scale = match kind {
+        ScaleKind::Category => return Ok(()),
+        ScaleKind::Linear => "linear",
+        ScaleKind::Log { .. } => "log",
+        ScaleKind::Time => "time",
+    };
+    let name = axis.name();
+    Err(Error::usage(
+        context,
+        format!(
+            "{parameter} is a point between categories but the {name} axis is a {scale} axis; \
+             Between needs a category axis."
+        ),
+    )
+    .with_parameter(parameter)
+    .with_hint(match axis {
+        SharedAxis::X => {
+            "pass a value of the x axis, or pass x=Scale.category() to Figure.add_axes()."
+        }
+        SharedAxis::Y => {
+            "pass a value of the y axis, or pass y=Scale.category() to Figure.add_axes()."
+        }
+    }))
 }
 
 /// For the mark method `context`, which draws on a numeric y axis and also on a category y

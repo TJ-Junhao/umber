@@ -285,7 +285,7 @@ impl Pie {
             return Err(Error::data(CONTEXT, format!("categories has {} entries and values has {}; both must have the same nonzero length.", categories.len(), values.len()))
                 .with_parameter("values").with_hint("pass one nonnegative value per category, with at least one positive value."));
         }
-        super::validation::check_names(CONTEXT, "categories", &categories)?;
+        super::validation::check_slice_names(CONTEXT, "categories", &categories)?;
         let mut seen = std::collections::HashSet::new();
         for (i, name) in categories.iter().enumerate() {
             if name.is_empty() {

@@ -20,7 +20,7 @@ rng = np.random.default_rng(0)
 | Points sized by a value | `ax.bubbles(x, y, sizes)`: areas relative to the largest size |
 | Discrete samples | `ax.stem(x, y)` |
 | Uncertainty | `ax.y_error_bars(x, low, high)`, `ax.x_error_bars(y, low, high)` |
-| Reference lines and regions | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)` |
+| Reference lines and regions | `ax.hline(y)`, `ax.vline(x)`, `ax.hspan(low, high)`, `ax.vspan(low, high)`; between categories `ax.vline(ub.Between(a, b))` |
 
 ```python
 fig = ub.Figure(6, 4)
@@ -133,7 +133,7 @@ svg = ax.figure.to_svg()
 
 ## Words on the chart
 
-`ax.text(text, (x, y))` places text at a data position; `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a few points away with an arrow. They never change the limits. `"\n"` starts a new line here and in titles, subtitles and captions; every other text is one line.
+`ax.text(text, (x, y))` places text at a data position; `ax.annotate(text, (x, y), offset=(dx, dy))` writes it a few points away with an arrow. They never change the limits. `"\n"` starts a new line here, in titles, subtitles and captions, and in the names of the categories of a category axis; every other text is one line.
 
 ```python
 ax = ub.Figure(6, 4).add_axes()

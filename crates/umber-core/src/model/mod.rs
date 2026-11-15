@@ -91,7 +91,9 @@ pub use mark::{
 pub(crate) use mesh::Edges;
 pub use mesh::{HexbinMark, HexbinOptions, Hist2dMark, Hist2dOptions, MeshMark, MeshOptions};
 pub use render::{MarkRender, Render};
-pub use rule::{AxisValue, HLineMark, RuleOptions, SpanMark, SpanOptions, VLineMark};
+pub use rule::{
+    AxisValue, Between, HLineMark, RuleOptions, RulePosition, SpanMark, SpanOptions, VLineMark,
+};
 pub(crate) use share::{ShareGroups, label_visibility};
 pub use stacked_area::StackedAreaMark;
 pub use stem::{StemMark, StemOptions};
@@ -444,8 +446,10 @@ mod tests {
             a.step(cats(), &[1.0], StepOptions::default()),
             "Axes.step()",
         );
-        assert_category_y(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
-        assert_category_y(a.hspan(0.0, 1.0, SpanOptions::default()), "Axes.hspan()");
+        // A reference line or span on a category y axis needs a numeric x axis, as horizontal
+        // bars do.
+        assert_category_x(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
+        assert_category_x(a.hspan(0.0, 1.0, SpanOptions::default()), "Axes.hspan()");
         assert_category_y(
             a.band(&[1.0], &[0.0], &[1.0], BandOptions::default()),
             "Axes.band()",
@@ -575,7 +579,21 @@ mod tests {
             "Axes.area()",
         );
         assert_category_y(a.hist(&[1.0], HistOptions::default()), "Axes.hist()");
-        assert_category_y(a.hline(1.0, RuleOptions::default()), "Axes.hline()");
+        // A reference line there sits between two categories, not at a number.
+        let err = a.hline(1.0, RuleOptions::default()).unwrap_err();
+        assert!(matches!(err, Error::Usage { .. }), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "Axes.hline(): y is a number but the y axis is a category axis; place it between two \
+             categories instead."
+        );
+        assert_eq!(
+            (err.parameter(), err.hint()),
+            (
+                Some("y"),
+                Some("pass Between(a, b), with a and b two neighbouring categories.")
+            )
+        );
         assert_eq!(a.marks().len(), 11);
 
         // On a log x axis the values of horizontal bars must be positive.

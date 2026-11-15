@@ -237,7 +237,7 @@ fn clip_widening_stops_at_the_y_labels_and_the_canvas() {
         assert!(!layout.y_tick_labels.is_empty());
         for label in &layout.y_tick_labels {
             assert!(
-                label.x + label.width() <= left + 1e-3,
+                label.first().x + label.width() <= left + 1e-3,
                 "{width}: {}",
                 label.text
             );

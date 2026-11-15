@@ -734,6 +734,20 @@ impl SceneFonts<'_> {
         Ok(checked)
     }
 
+    /// `style` checked against these fonts for setting `text`, which `"\n"` breaks into lines
+    /// that are each set on their own, as the name of a category on a category axis is.
+    ///
+    /// # Errors
+    ///
+    /// As [`SceneFonts::check`], except that a line break is allowed.
+    pub(crate) fn check_block(&self, text: &str, style: &TextStyle) -> Result<CheckedStyle> {
+        let checked = self
+            .primary(style)
+            .map_err(|unavailable| self.error(unavailable, Some(text)))?;
+        self.check_lines(&format!("the text {}", quoted(text)), text, Lines::Many)?;
+        Ok(checked)
+    }
+
     /// Checks that `text`, named `subject` in the message, holds only the characters text of
     /// `lines` may hold: `Error::Style` in the context of these fonts otherwise.
     ///

@@ -55,6 +55,9 @@
 //!   pie, in each title alignment, and the errors of a caption (in `corpus/caption.rs`).
 //! - Text at positions in the plot, in each corner and pinned to an annotation's arrow (in
 //!   `corpus/in_plot.rs`).
+//! - Dividers between categories, spans covering whole categories and category names of
+//!   several lines, on either category axis and on a grid with a shared axis (in
+//!   `corpus/category_axis.rs`).
 //! - Equal aspect: a circle on a wide figure, a circle of points with a colorbar on a tall
 //!   figure, and a grid of which one panel has the setting (in `corpus/equal_aspect.rs`).
 //! - Vector fields: a grid quiver with a key, scattered points with `ColorBy` and a colorbar,
@@ -130,6 +133,7 @@ mod corpus {
     pub mod bubbles;
     pub mod by;
     pub mod caption;
+    pub mod category_axis;
     pub mod category_labels;
     pub mod cmap;
     pub mod color_by;
@@ -275,6 +279,7 @@ pub fn generate(mut sink: impl FnMut(Output)) {
     corpus::tricontour::cases(&lib, &mut sink);
     corpus::raster_marks::cases(&lib, &mut sink);
     corpus::translucent_fills::cases(&lib, &mut sink);
+    corpus::category_axis::cases(&lib, &mut sink);
 }
 
 fn emit_scene(name: &str, scene: &Scene, sink: &mut impl FnMut(Output)) {
@@ -1851,6 +1856,19 @@ mod record {
         }
     }
 
+    /// Where a reference line sits as the records write it: a value as [`axis_value`] writes
+    /// it, and a point between categories as `between(first,second)` of its two names as text.
+    fn rule_position(v: &umber_core::RulePosition) -> String {
+        match v {
+            umber_core::RulePosition::At(value) => axis_value(value),
+            umber_core::RulePosition::Between(between) => format!(
+                "between({},{})",
+                text(between.first()),
+                text(between.second())
+            ),
+        }
+    }
+
     /// Times as the records write them: each as its microseconds, `nat` for a missing one.
     pub fn times(v: &[Option<umber_core::Instant>]) -> String {
         let items: Vec<String> = v
@@ -1921,29 +1939,29 @@ mod record {
             ),
             Mark::HLine(rule) => format!(
                 "hline y={} label={} color={} dash={}",
-                axis_value(rule.y()),
+                rule_position(rule.y()),
                 text(&rule.options().label),
                 color_spec(rule.options().color),
                 dash(rule.options().dash)
             ),
             Mark::VLine(rule) => format!(
                 "vline x={} label={} color={} dash={}",
-                axis_value(rule.x()),
+                rule_position(rule.x()),
                 text(&rule.options().label),
                 color_spec(rule.options().color),
                 dash(rule.options().dash)
             ),
             Mark::HSpan(span) => format!(
                 "hspan low={} high={} label={} color={}",
-                axis_value(&span.low()),
-                axis_value(&span.high()),
+                rule_position(&span.low()),
+                rule_position(&span.high()),
                 text(&span.options().label),
                 color_spec(span.options().color)
             ),
             Mark::VSpan(span) => format!(
                 "vspan low={} high={} label={} color={}",
-                axis_value(&span.low()),
-                axis_value(&span.high()),
+                rule_position(&span.low()),
+                rule_position(&span.high()),
                 text(&span.options().label),
                 color_spec(span.options().color)
             ),

@@ -63,6 +63,7 @@ __all__ = [
     "kde_curve",
     "ecdf_steps",
     "check_alpha",
+    "check_between",
     "check_in_plot",
     "check_log_base",
     "check_palette_index",
@@ -144,6 +145,7 @@ def check_log_base(base: float) -> None: ...
 type _SizeArg = tuple[int, float]
 
 def check_in_plot(x: float, y: float) -> None: ...
+def check_between(first: str, second: str) -> None: ...
 def check_size_times(factor: float) -> None: ...
 def check_size_points(points: float) -> None: ...
 
@@ -603,6 +605,44 @@ class Figure:
     ) -> None: ...
     def vspan(
         self, row: int | TwinAxes, col: int, low: float, high: float, label: str, color: _ColorArg
+    ) -> None: ...
+    def vline_between(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        x: tuple[str, str],
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def hline_between(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        y: tuple[str, str],
+        label: str,
+        color: _ColorArg,
+        dash: int,
+        width: _SizeArg,
+    ) -> None: ...
+    def vspan_between(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        low: tuple[str, str],
+        high: tuple[str, str],
+        label: str,
+        color: _ColorArg,
+    ) -> None: ...
+    def hspan_between(
+        self,
+        row: int | TwinAxes,
+        col: int,
+        low: tuple[str, str],
+        high: tuple[str, str],
+        label: str,
+        color: _ColorArg,
     ) -> None: ...
     def band(
         self,
