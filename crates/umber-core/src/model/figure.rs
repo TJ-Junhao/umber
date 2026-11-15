@@ -190,8 +190,12 @@ impl Figure {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
-    /// padding, and if the text holds a control character other than `"\n"` or a line or
+    /// The title starts at the figure's left padding. A title wider than the figure inside its
+    /// padding shrinks, in steps of 0.5 pt, to the largest size at which every line fits, but
+    /// not below the theme's panel title size.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is still wider than the figure inside
+    /// its padding, and if the text holds a control character other than `"\n"` or a line or
     /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
@@ -212,6 +216,9 @@ impl Figure {
     ///
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// The subtitle starts at the figure's left padding. It is set at the theme's axis label
+    /// size, the least a header text shrinks to, so it does not shrink.
     ///
     /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
     /// padding, and if the text holds a control character other than `"\n"` or a line or
@@ -1159,9 +1166,12 @@ impl Figure {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
+    /// With `SizeSpec::Auto`, a title wider than the figure inside its padding shrinks as
+    /// [`Figure::title`] describes; an explicit size is kept.
+    ///
     /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
-    /// padding, and if the text holds a control character other than `"\n"` or a line or
-    /// paragraph separator (U+2028, U+2029).
+    /// padding at the size it is set at, and if the text holds a control character other than
+    /// `"\n"` or a line or paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -1182,6 +1192,9 @@ impl Figure {
     ///
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
+    ///
+    /// The size is kept: a subtitle without one is set at the theme's axis label size, the
+    /// least a header text shrinks to.
     ///
     /// Rendering returns `Error::Style` if the widest line is wider than the figure inside its
     /// padding, and if the text holds a control character other than `"\n"` or a line or

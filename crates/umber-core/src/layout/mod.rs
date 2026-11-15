@@ -4,8 +4,9 @@
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least [`MIN_PLOT`]
-//! by [`MIN_PLOT`] and lies on the canvas. Titles, subtitles and axis labels that do not fit
-//! their horizontal extent fail layout with `Error::Style` rather than being clipped.
+//! by [`MIN_PLOT`] and lies on the canvas. Titles without an explicit size shrink to fit their
+//! horizontal extent, down to a floor ([`shrink`]); titles, subtitles and axis labels that still
+//! do not fit fail layout with `Error::Style` rather than being clipped.
 //! A figure whose y tick labels and padding leave the plot less than [`MIN_PLOT`] wide fails the
 //! layout with `Error::Style`. Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas
 //! edges; x tick labels that would need a larger plot inset than [`END_LABEL_SHARE`] allows, or
@@ -33,6 +34,7 @@ mod panel;
 pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
+mod shrink;
 #[cfg(test)]
 mod title_tests;
 pub(crate) mod twin;
@@ -41,10 +43,11 @@ mod value_column;
 pub(crate) use aspect::{check_equal_aspect_size, fit_equal_aspect};
 pub(crate) use caption::FigureCaption;
 pub(crate) use colorbar::{ColorbarSide, MeasuredColorbar, PlacedColorbar, SharedColorbar};
-pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid};
+pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, rehead, solve_grid};
 pub(crate) use inset::CONTAINMENT_TOLERANCE;
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
+pub(crate) use shrink::{PanelFit, apply_panel_fit};
 pub(crate) use value_column::{ColumnInput, ColumnSide, PlacedColumn};
 
 use std::cell::RefCell;
@@ -1254,12 +1257,25 @@ fn figure_height_hint(
     }
 }
 
+/// The plot of a figure of one cell, and where its panel's header starts across.
+#[derive(Debug, Clone, Copy)]
+struct SinglePlot {
+    /// The plot area.
+    plot: Area,
+    /// The left edge of the header box: the left edge of the panel's content.
+    header_left: f64,
+    /// The sizes the panel's title and subtitle take in the header box.
+    fit: shrink::PanelFit,
+}
+
 /// The plot area of the only panel of a figure of one cell, `input`, in `frame`, the whole
-/// canvas, for the texts measured in `bands`.
+/// canvas, for the texts measured in `bands`, and the left edge of its header.
 ///
 /// The header is stacked from the top padding, and the plot starts below it, the y label and
-/// the rise of the top y tick label. The plot starts right of the y tick labels and ends left
-/// of the room direct labels reserve. The x tick labels are centered on their ticks; they may
+/// the rise of the top y tick label. It starts at the left padding, where the y axis label and
+/// the y tick label column start, and moves in with them when x tick labels inset the plot; its
+/// legend rows then wrap within the narrower header. The plot starts right of the y tick labels
+/// and ends left of the room direct labels reserve. The x tick labels are centered on their ticks; they may
 /// reach into the outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge. Where one
 /// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
 /// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
@@ -1291,7 +1307,9 @@ fn figure_height_hint(
 ///   for a legend beside or inside it included (see [`placement::least_plot_height`]), and the
 ///   hint names
 ///   the figure header, when present, the header parts the axes have and any Bottom legend (see
-///   [`figure_too_short`]).
+///   [`figure_too_short`]). The titles are fitted to the header's width before the height is
+///   checked, but the height named holds them at their own size, since the size they shrink to
+///   depends on the ticks, which another height can change.
 ///
 /// `caption` is the height under `frame` that the figure caption takes; the errors name the
 /// figure's height with it.
@@ -1301,14 +1319,10 @@ fn solve_single(
     frame: Frame,
     top: f64,
     caption: f64,
-) -> Result<Area> {
+) -> Result<SinglePlot> {
     let LayoutInput {
         legend, context, ..
     } = *input;
-    let mut plot_top = bands.heading.bottom(top)
-        + bands.top_label_band()
-        + bands.value_row()
-        + bands.top_label_rise();
     let cap = panel::end_label_cap(frame.width);
     // The widest y tick label and its gap are added to the padding one at a time, not as the
     // one sum `bands.y_tick_column`, which can round differently.
@@ -1392,43 +1406,66 @@ fn solve_single(
             ));
         }
     };
-    // Everything under the plot: the x tick labels, the x label and the bottom padding.
-    if legend.position == crate::LegendPosition::TopRight {
-        plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
-    }
+    // The header starts where the panel's content does: at the left padding, moved in with the
+    // plot when x tick labels inset it. Its legend rows wrap within it, and its titles shrink
+    // to fit it before the height is checked.
+    let header_left = frame.x + PADDING + (plot_left - left);
+    let header_right = frame.right() - PADDING;
+    let moved_in = header_left > frame.x + PADDING;
+    let (fitted, fit) = shrink::fitted(
+        std::slice::from_ref(input),
+        std::slice::from_ref(bands),
+        &[header_right - header_left],
+    )?;
+    let natural = bands;
+    let bands = &fitted[0];
+    // Everything above the plot, for `bands` with or without the colorbar.
+    let plot_top_of = |bands: &panel::PanelBands| {
+        if legend.position == crate::LegendPosition::TopRight {
+            top + bands.above_with_row(&legend.header_within(plot_left, plot_right))
+        } else if moved_in {
+            bands.above_from(top, &legend.header_within(header_left, header_right))
+        } else {
+            bands.heading.bottom(top)
+                + bands.top_label_band()
+                + bands.value_row()
+                + bands.top_label_rise()
+        }
+    };
+    let plot_top = plot_top_of(bands);
+    let bottom_legend = if moved_in {
+        legend.bottom_reserve(header_left, header_right)
+    } else {
+        bands.bottom_legend
+    };
     let axis_below =
-        if bands.bottom_legend > 0.0 || bands.bottom_colorbar > 0.0 || bands.right_colorbar > 0.0 {
+        if bottom_legend > 0.0 || bands.bottom_colorbar > 0.0 || bands.right_colorbar > 0.0 {
             bands.axis_below()
         } else {
             // Keep the original single-panel extent when no bottom legend needs the label drop.
             bands.x_band + bands.x_title_band
         };
-    let below = axis_below + PADDING + bands.bottom_legend + bands.bottom_colorbar;
+    let below = axis_below + PADDING + bottom_legend + bands.bottom_colorbar;
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
         // The height named in the errors leaves room for a legend beside or inside the plot too.
         let least = placement::least_plot_height(legend);
+        let has_colorbar = bands.right_colorbar > 0.0 || bands.bottom_colorbar > 0.0;
         let without = bands.without_colorbar(cap);
-        let plain_top = if legend.position == crate::LegendPosition::TopRight {
-            top + without.above_with_row(&legend.header_within(plot_left, plot_right))
-        } else {
-            without.heading.bottom(top)
-                + without.top_label_band()
-                + without.value_row()
-                + without.label_rise
-        };
+        let plain_top = plot_top_of(&without);
         let plain_below = PADDING
-            + without.bottom_legend
-            + if without.bottom_legend > 0.0 {
+            + bottom_legend
+            + if bottom_legend > 0.0 {
                 without.axis_below()
             } else {
                 without.x_band + without.x_title_band
             };
         let plain_height = frame.bottom() - plain_below - plain_top;
         let colorbar_band = (plot_top - plain_top) + (below - plain_below);
-        // The colorbar is the cause only when the plot without it leaves its legend room.
-        if colorbar_band > 0.0 && plain_height >= least {
+        // The colorbar is the cause only when there is one and the plot without it leaves its
+        // legend room.
+        if has_colorbar && colorbar_band > 0.0 && plain_height >= least {
             return Err(colorbar::room_error(
                 context,
                 colorbar_band,
@@ -1481,10 +1518,12 @@ fn solve_single(
             )
             .with_hint("make the figure taller, or use a smaller text size."));
         }
+        // The height named holds the titles at their own size: the size they shrink to for the
+        // width depends on the ticks, which another height can change.
         return Err(figure_too_short(
             context,
             frame.height + caption,
-            plot_top - frame.y + least + below + caption,
+            plot_top_of(natural) - frame.y + least + below + caption,
             bands
                 .heading
                 .height_hint(top > frame.y + PADDING, bands.bottom_legend > 0.0),
@@ -1514,7 +1553,11 @@ fn solve_single(
             bands.colorbar_tick_width(),
         ));
     }
-    Ok(plot)
+    Ok(SinglePlot {
+        plot,
+        header_left,
+        fit,
+    })
 }
 
 /// The widest of `labels`, the first of equally wide ones; `None` when there are none.
@@ -3121,6 +3164,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_height_named_for_a_shrunk_title_suffices() {
+        // At a font scale of 4 the title shrinks to the room its ticks leave, which differ
+        // between the short figure and the height named; that height holds the title at its
+        // own size, so the figure renders there.
+        let build = |height: f64| {
+            let theme = Theme::pigment().with_font_scale(4.0).unwrap();
+            let mut f = Figure::new(5.320_892_378_790_234_5, height, theme).unwrap();
+            f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+                .unwrap()
+                .title("Station output")
+                .yticks(&[])
+                .unwrap()
+                .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+                .unwrap();
+            f
+        };
+        let error = crate::pipeline::try_plan_figure(&build(0.05), (0, 0), lib()).unwrap_err();
+        let needed = named_height(&error).unwrap();
+        crate::pipeline::try_plan_figure(&build(needed / 72.0), (0, 0), lib()).unwrap();
     }
 
     proptest::proptest! {

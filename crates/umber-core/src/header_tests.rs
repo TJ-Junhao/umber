@@ -792,17 +792,23 @@ fn merged_rows_wrap_and_align_independently_in_both_styles() {
             {
                 assert_eq!(label.x, align.position(label.width(), PADDING, right));
             }
+            // A panel's header is aligned from the left edge of its y tick labels to the right
+            // edge of its plot.
             let panel = &planned.panels[0].1;
+            let left = panel
+                .y_tick_labels
+                .iter()
+                .map(|label| label.first().x)
+                .fold(f64::INFINITY, f64::min);
+            assert!(left < panel.plot.x);
             for label in panel
                 .title
                 .iter()
                 .chain(&panel.subtitle)
                 .flat_map(|block| block.lines())
             {
-                assert_eq!(
-                    label.x,
-                    align.position(label.width(), panel.plot.x, panel.plot.right())
-                );
+                let x = align.position(label.width(), left, panel.plot.right());
+                assert!((label.x - x).abs() < 1e-9, "{} != {x}", label.x);
             }
         }
     }
@@ -954,14 +960,22 @@ fn per_panel_legends_do_not_follow_title_alignment() {
             .unwrap();
             assert!(planned.header.legend.is_empty());
             let p = &planned.panels[0].1;
+            // On a grid the header runs from the left edge of the y tick labels to the plot's
+            // right edge.
             let (left, right) = if cols == 1 {
                 (PADDING, f.width_in() * 72.0 - PADDING)
             } else {
-                (p.plot.x, p.plot.right())
+                let left = p
+                    .y_tick_labels
+                    .iter()
+                    .map(|label| label.first().x)
+                    .fold(f64::INFINITY, f64::min);
+                (left, p.plot.right())
             };
-            assert_eq!(p.legend.entries()[0].swatch.x, left);
+            assert!((p.legend.entries()[0].swatch.x - left).abs() < 1e-9);
             let title = p.title.as_ref().unwrap().first();
-            assert_eq!(title.x, align.position(title.width(), left, right));
+            let x = align.position(title.width(), left, right);
+            assert!((title.x - x).abs() < 1e-9, "{} != {x}", title.x);
         }
     }
 }
@@ -1033,4 +1047,406 @@ fn figure_titles_are_independent_cloneable_and_can_be_cleared() {
     assert_ne!(empty.to_scene(&lib).unwrap(), blank);
     empty.title("");
     assert_eq!(empty.to_scene(&lib).unwrap(), blank);
+}
+
+/// The left edge of the y tick label column of `layout`: where its widest label starts.
+fn tick_column_left(layout: &crate::layout::Layout) -> f64 {
+    layout
+        .y_tick_labels
+        .iter()
+        .flat_map(crate::layout::TextBlock::lines)
+        .map(|label| label.x)
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Asserts that `a` and `b` agree to within rounding.
+#[track_caller]
+fn assert_near(a: f64, b: f64) {
+    assert!((a - b).abs() < 1e-9, "{a} != {b}");
+}
+
+/// A `width` by 4 in figure of `cols` panels with per-panel header legends, each titled,
+/// subtitled and with a labelled line; `setup` finishes the panel in each column.
+fn headed_grid(
+    theme: Theme,
+    width: f64,
+    cols: i64,
+    setup: impl Fn(i64, &mut crate::AxesMut<'_>),
+) -> Figure {
+    let grid = Grid::new(1, cols)
+        .unwrap()
+        .with_legend(crate::LegendMode::PerPanel);
+    let mut f = Figure::with_grid(width, 4.0, theme, grid).unwrap();
+    for col in 0..cols {
+        let mut axes = f
+            .add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.title("Days")
+            .subtitle("By type")
+            .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+            .unwrap()
+            .line(
+                AxisData::Numbers(vec![0.0, 1.0]),
+                &[10.0, 2000.0],
+                LineOptions {
+                    label: "Sunny".into(),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        setup(col, &mut axes);
+    }
+    f
+}
+
+#[test]
+fn panel_headers_start_where_the_panel_content_starts() {
+    // A panel's title, subtitle and header legend start at its y axis label, which starts
+    // its y tick label column; without a label, at the column; without either, at the plot.
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        for align in [Align::Left, Align::Center] {
+            let theme = theme.with_title_align(align).unwrap();
+            let f = headed_grid(theme, 10.0, 3, |col, axes| match col {
+                0 => {
+                    axes.ylabel("Share of days (%)");
+                }
+                1 => {}
+                _ => {
+                    axes.yticks(&[]).unwrap();
+                }
+            });
+            let planned = try_plan_panels(&f, FontLibrary::global()).unwrap();
+            for (col, (_, layout)) in planned.iter().enumerate() {
+                let left = match col {
+                    0 => {
+                        let label = layout.ylabel.as_ref().unwrap();
+                        assert_near(label.x, tick_column_left(layout));
+                        label.x
+                    }
+                    1 => tick_column_left(layout),
+                    _ => {
+                        assert!(layout.y_tick_labels.is_empty());
+                        layout.plot.x
+                    }
+                };
+                if col < 2 {
+                    assert!(left < layout.plot.x - 6.0);
+                }
+                let right = layout.plot.right();
+                for block in [&layout.title, &layout.subtitle] {
+                    let line = block.as_ref().unwrap().first();
+                    assert_near(line.x, align.position(line.width(), left, right));
+                }
+                // The legend row starts there whatever the title alignment.
+                assert_near(layout.legend.entries()[0].swatch.x, left);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_twin_panel_header_starts_at_the_left_y_tick_labels() {
+    let f = headed_grid(Theme::pigment(), 9.0, 2, |col, axes| {
+        if col == 1 {
+            axes.twin_y(ScaleKind::Linear)
+                .unwrap()
+                .ylabel("Right")
+                .line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[0.0, 1.0],
+                    LineOptions::default(),
+                )
+                .unwrap();
+        }
+    });
+    let planned = try_plan_panels(&f, FontLibrary::global()).unwrap();
+    let (_, panel) = &planned[1];
+    let title = panel.title.as_ref().unwrap().first();
+    assert_near(title.x, tick_column_left(panel));
+    assert_near(panel.legend.entries()[0].swatch.x, tick_column_left(panel));
+}
+
+#[test]
+fn figure_texts_stay_at_the_figure_margin() {
+    // The figure title, subtitle, caption and merged legend start at the left padding, which
+    // is where the panels of the first column start their content.
+    let mut f = figure(Theme::pigment());
+    f.title("Weather")
+        .subtitle("Two stations")
+        .caption("Source: survey");
+    f.axes_at_mut(GridIndex::Auto, GridIndex::At(0))
+        .unwrap()
+        .ylabel("Share of days (%)");
+    let lib = FontLibrary::global();
+    let groups = ShareGroups::new(&f);
+    let fonts = layout::figure_fonts(lib, f.theme()).unwrap();
+    let planned = plan(
+        &f,
+        &panels(&f, &groups, &fonts).unwrap(),
+        &groups,
+        &fonts,
+        "Figure.to_scene()",
+        &layout::LabelCache::new(&fonts),
+        crate::pipeline::Rooms::Solved,
+    )
+    .unwrap();
+    let header = &planned.header;
+    for block in [&header.title, &header.subtitle, &header.caption.text] {
+        assert_eq!(block.as_ref().unwrap().first().x, PADDING);
+    }
+    assert_eq!(header.legend.entries()[0].swatch.x, PADDING);
+    let first = &planned.panels[0].1;
+    assert_near(first.ylabel.as_ref().unwrap().x, PADDING);
+    assert_near(first.title.as_ref().unwrap().first().x, PADDING);
+}
+
+#[test]
+fn a_pie_header_keeps_the_left_edge_of_its_cell() {
+    let mut f = Figure::with_grid(9.0, 4.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    f.add_axes_at(
+        Placement {
+            col: GridIndex::At(0),
+            ..Placement::default()
+        },
+        ScaleKind::Linear,
+        ScaleKind::Linear,
+    )
+    .unwrap()
+    .title("Days")
+    .ylabel("Share of days (%)");
+    f.add_pie_axes_at(Placement {
+        col: GridIndex::At(1),
+        ..Placement::default()
+    })
+    .unwrap()
+    .title("Orders")
+    .pie(
+        vec!["A".into(), "B".into()],
+        &[1.0, 2.0],
+        crate::PieOptions::default(),
+    )
+    .unwrap();
+    let planned = try_plan_panels(&f, FontLibrary::global()).unwrap();
+    let (_, pie) = &planned[1];
+    assert_eq!(pie.title.as_ref().unwrap().first().x, pie.plot.x);
+}
+
+#[test]
+fn a_single_panel_header_moves_in_with_a_plot_inset_by_x_tick_labels() {
+    for legend in [
+        crate::LegendPosition::TopLeft,
+        crate::LegendPosition::Bottom,
+    ] {
+        let build = |inset: bool| {
+            let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+            let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+            let first = if inset { "W".repeat(10) } else { "0".into() };
+            axes.title("Days")
+                .ylabel("Share")
+                .legend_at(crate::LegendStyle::Header, legend, crate::SizeSpec::Auto)
+                .unwrap()
+                .xlim(0.0, 1.0)
+                .unwrap()
+                .xticks_labeled(&[0.0, 1.0], vec![first, "1".into()])
+                .unwrap()
+                .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
+                .unwrap();
+            for i in 0..8 {
+                axes.line(
+                    AxisData::Numbers(vec![0.0, 1.0]),
+                    &[0.0, 1.0],
+                    LineOptions {
+                        label: format!("Station {i}"),
+                        ..LineOptions::default()
+                    },
+                )
+                .unwrap();
+            }
+            f
+        };
+        // Without an inset the header starts at the padding, as the y axis label does.
+        let (_, plain) = &try_plan_panels(&build(false), FontLibrary::global()).unwrap()[0];
+        assert_eq!(plain.title.as_ref().unwrap().first().x, PADDING);
+        assert_near(plain.ylabel.as_ref().unwrap().x, PADDING);
+        // A wide first x tick label moves the plot, its y labels and the header in.
+        let f = build(true);
+        f.to_scene(FontLibrary::global()).unwrap();
+        let (_, moved) = &try_plan_panels(&f, FontLibrary::global()).unwrap()[0];
+        let label = moved.ylabel.as_ref().unwrap();
+        assert!(label.x > PADDING + 1.0, "{}", label.x);
+        assert_near(moved.title.as_ref().unwrap().first().x, label.x);
+        let entries = moved.legend.entries();
+        assert_near(entries[0].swatch.x, label.x);
+        let right = 6.0 * 72.0 - PADDING;
+        for entry in entries {
+            assert!(entry.swatch.x >= label.x - 1e-9);
+            assert!(entry.label.x + entry.label.width() <= right + 1e-9);
+        }
+    }
+}
+
+#[test]
+fn headers_over_equal_aspect_plots_start_at_their_own_y_axis_label() {
+    // The rooms come from the same figure without equal aspect, whose y tick labels differ;
+    // the header still starts where this figure's y axis label does.
+    for cols in [1, 2] {
+        let mut f = Figure::with_grid(
+            6.0 * cols as f64,
+            4.0,
+            Theme::pigment(),
+            Grid::new(1, cols).unwrap(),
+        )
+        .unwrap();
+        for col in 0..cols {
+            f.add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap()
+            .xlim(0.0, 20.0)
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .title("T")
+            .ylabel("Y")
+            .equal_aspect()
+            .unwrap();
+        }
+        f.to_scene(FontLibrary::global()).unwrap();
+        for (_, layout) in try_plan_panels(&f, FontLibrary::global()).unwrap() {
+            let label = layout.ylabel.as_ref().unwrap();
+            assert_near(label.x, tick_column_left(&layout));
+            assert_near(layout.title.as_ref().unwrap().first().x, label.x);
+        }
+    }
+}
+
+/// A 3.5 in wide figure `height` pt tall whose wide first x tick label insets the plot, with a
+/// header legend at `position` of eight entries.
+fn inset_legend(height: f64, position: crate::LegendPosition) -> Figure {
+    let mut f = Figure::new(3.5, height / 72.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.title("Days")
+        .ylabel("Share")
+        .xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec!["W".repeat(10), "1".into()])
+        .unwrap()
+        .yticks_labeled(&[0.0, 1.0], vec!["0".into(), "1".into()])
+        .unwrap()
+        .legend_at(crate::LegendStyle::Header, position, crate::SizeSpec::Auto)
+        .unwrap();
+    for i in 0..8 {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 1.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("RRR{i}"),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f
+}
+
+#[test]
+fn a_short_figure_with_an_inset_legend_names_its_height_not_a_colorbar() {
+    for (height, position) in [
+        (119.0, crate::LegendPosition::TopLeft),
+        (121.0, crate::LegendPosition::Bottom),
+    ] {
+        let error = inset_legend(height, position)
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(!message.contains("colorbar"), "{message}");
+        let needed: f64 = message
+            .split_once("at least ")
+            .and_then(|(_, rest)| rest.split_once(" pt"))
+            .and_then(|(number, _)| number.parse().ok())
+            .unwrap_or_else(|| panic!("{message}"));
+        inset_legend(needed, position)
+            .to_scene(FontLibrary::global())
+            .unwrap();
+    }
+}
+
+#[test]
+fn an_equal_aspect_header_moves_in_only_to_its_y_axis_label() {
+    // The plot moves right in its room for its wider y tick labels; the header starts with
+    // the y axis label, at the padding, not that far further in.
+    let mut f = Figure::new(3.5, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 20.0)
+        .unwrap()
+        .ylim(-1.0, 9.0)
+        .unwrap()
+        .title("T")
+        .ylabel("Y")
+        .equal_aspect()
+        .unwrap();
+    f.to_scene(FontLibrary::global()).unwrap();
+    let (_, layout) = &try_plan_panels(&f, FontLibrary::global()).unwrap()[0];
+    let label = layout.ylabel.as_ref().unwrap();
+    assert_near(layout.title.as_ref().unwrap().first().x, label.x);
+}
+
+#[test]
+fn an_equal_aspect_header_legend_keeps_the_rows_it_reserved() {
+    // The legend row wraps within the reference's header box, whose height the rows reserve,
+    // so it ends above the y axis label.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.xlim(0.0, 20.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .title("T")
+        .ylabel("Y axis label (units)")
+        .equal_aspect()
+        .unwrap()
+        .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+        .unwrap();
+    for i in 0..3 {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 20.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("{}{i}", "R".repeat(18)),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f.to_scene(FontLibrary::global()).unwrap();
+    let (_, layout) = &try_plan_panels(&f, FontLibrary::global()).unwrap()[0];
+    let label = layout.ylabel.as_ref().unwrap();
+    assert!(
+        layout.header_bottom <= label.y - 0.5 * f64::from(label.style.size) + 1e-9,
+        "{} {}",
+        layout.header_bottom,
+        label.y
+    );
+    let last = layout
+        .legend
+        .entries()
+        .iter()
+        .map(|entry| entry.label.y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(last < label.y - 8.0, "{last} {}", label.y);
 }

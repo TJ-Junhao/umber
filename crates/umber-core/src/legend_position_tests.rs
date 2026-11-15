@@ -192,8 +192,15 @@ fn right_and_bottom_reserve_room_and_keep_plots_aligned() {
             ls[0].legend.entries()[0].swatch.x,
             ls[0].plot.right() + 12.0,
         );
+        // A bottom row starts with the header, at the left edge of the y tick labels.
         let entry = &ls[1].legend.entries()[0];
-        near(entry.chip.map_or(entry.swatch.x, |c| c.x), ls[1].plot.x);
+        let content_left = ls[1]
+            .y_tick_labels
+            .iter()
+            .map(|label| label.first().x)
+            .fold(f64::INFINITY, f64::min);
+        assert!(content_left < ls[1].plot.x);
+        near(entry.chip.map_or(entry.swatch.x, |c| c.x), content_left);
         let label = ls[1].xlabel.as_ref().unwrap();
         assert!(ls[1].legend.entries()[0].swatch.center_y > label.y + 8.0);
     }

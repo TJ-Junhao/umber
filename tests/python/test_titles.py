@@ -13,6 +13,9 @@ from umber import _umber
 from umber._errors import details
 from umber._theme import native
 
+SHRUNK_HINT = 'make the figure wider, shorten the {name}, or break it into lines with "\\n".'
+LONG = "Quarterly revenue by region and sales channel"
+
 
 def _texts(figure: ub.Figure) -> dict[str, ET.Element]:
     root = ET.fromstring(figure.to_svg(text=ub.SvgText.EDITABLE))
@@ -172,11 +175,13 @@ def test_long_title_reproduction_raises_at_render(render: str, kind: str) -> Non
         ax.title(text, size=ub.Size.pt(18))
         container = "panel"
         hint = "make the figure wider or pass a smaller size=."
+        at = ""
     else:
         text = "A very long figure title that certainly cannot fit in six inches of width at all"
         fig.title(text)
         container = "figure"
-        hint = "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        hint = SHRUNK_HINT.format(name="title")
+        at = " at 15 pt, the smallest size it shrinks to"
     call = cast(Callable[[], bytes | str], getattr(fig, render))
     with pytest.raises(ub.StyleError) as caught:
         call()
@@ -184,7 +189,7 @@ def test_long_title_reproduction_raises_at_render(render: str, kind: str) -> Non
     match = re.fullmatch(
         re.escape(f"Figure.{render}(): the title {shown} is ")
         + r"(\d+)"
-        + re.escape(f" pt wide; the {container} has 408 pt."),
+        + re.escape(f" pt wide{at}; the {container} has 408 pt."),
         str(caught.value),
     )
     assert match is not None
@@ -234,12 +239,19 @@ def test_titles_fit_their_own_room(
     assert str(caught.value).startswith(
         f'Figure.{render}(): {prefix}the {name} "' + "W" * 38 + "… is "
     )
-    assert str(caught.value).endswith(f"pt wide; the {container} has {room} pt.")
-    hint = (
-        "make the figure wider or pass a smaller size=."
-        if size == ub.Size.pt(18)
-        else "make the figure wider or lower the font scale with Theme.with_font_scale()."
-    )
+    if size == ub.Size.AUTO:
+        # The text shrank to its floor and is still too wide there.
+        floor = "15" if kind == "figure" and not subtitle else "8.5"
+        at = f" at {floor} pt, the smallest size it shrinks to"
+        hint = SHRUNK_HINT.format(name=name)
+    else:
+        at = ""
+        hint = (
+            "make the figure wider or pass a smaller size=."
+            if size == ub.Size.pt(18)
+            else "make the figure wider or lower the font scale with Theme.with_font_scale()."
+        )
+    assert str(caught.value).endswith(f"pt wide{at}; the {container} has {room} pt.")
     assert details(caught.value) == (None, hint)
     setter("Fits", size=size)
     assert call()
@@ -327,3 +339,191 @@ def test_figure_text_errors_precede_panel_errors(kind: str) -> None:
     setter("W" * 100)
     with pytest.raises(ub.StyleError, match=f"the {kind} .*the figure has 408 pt"):
         fig.to_svg()
+
+
+def _size(element: ET.Element) -> float:
+    return float(element.attrib["font-size"])
+
+
+def test_a_title_too_wide_shrinks_in_half_points() -> None:
+    fig = ub.Figure(3.5, 2)
+    fig.add_axes().line([0, 1], [0.0, 1.0]).title(LONG)
+    size = _size(_texts(fig)[LONG])
+    assert 8.5 <= size < 15
+    assert (size * 2).is_integer()
+    assert fig.to_png()
+
+
+def test_a_title_that_fits_keeps_its_size() -> None:
+    fig = ub.Figure(6, 4)
+    fig.add_axes().title("Revenue")
+    assert _size(_texts(fig)["Revenue"]) == 15
+
+
+def test_a_title_with_size_does_not_shrink() -> None:
+    fig = ub.Figure(3.5, 2)
+    fig.add_axes().title(LONG, size=ub.Size.pt(15))
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    assert details(caught.value) == (None, "make the figure wider or pass a smaller size=.")
+
+
+def test_a_title_too_wide_at_the_axis_label_size_raises() -> None:
+    fig = ub.Figure(2, 2)
+    fig.add_axes().title(LONG + " " + LONG)
+    with pytest.raises(ub.StyleError) as caught:
+        fig.to_svg()
+    message = str(caught.value)
+    assert " pt wide at 8.5 pt, the smallest size it shrinks to; the panel has 120 pt." in message
+    assert details(caught.value) == (None, SHRUNK_HINT.format(name="title"))
+
+
+def test_panel_titles_shrink_to_one_size() -> None:
+    fig = ub.Figure(10, 3, cols=3)
+    fig.add_axes(col=0).title(LONG)
+    fig.add_axes(col=1).title("Rain")
+    fig.add_axes(col=2).title("Wind", size=ub.Size.pt(12))
+    fig.title("Weather")
+    texts = _texts(fig)
+    shrunk = _size(texts[LONG])
+    assert 8.5 <= shrunk < 15
+    assert _size(texts["Rain"]) == shrunk
+    assert _size(texts["Wind"]) == 12
+    assert _size(texts["Weather"]) == 22.5
+
+
+def test_the_figure_title_shrinks_on_its_own() -> None:
+    fig = ub.Figure(5.5, 3).title(LONG)
+    fig.add_axes().title("Rain")
+    texts = _texts(fig)
+    assert 15 <= _size(texts[LONG]) < 22.5
+    assert _size(texts["Rain"]) == 15
+
+
+def test_every_line_of_a_title_shrinks_together() -> None:
+    fig = ub.Figure(3.5, 3)
+    fig.add_axes().title(f"Revenue\n{LONG}")
+    texts = _texts(fig)
+    size = _size(texts[LONG])
+    assert size < 15
+    assert _size(texts["Revenue"]) == size
+
+
+def test_shrunk_titles_leave_the_plot_more_room() -> None:
+    def plot_top(title: str) -> float:
+        fig = ub.Figure(3.5, 3)
+        fig.add_axes().xticks([]).yticks([]).title(title).ylabel("Load")
+        return float(_texts(fig)["Load"].attrib["y"])
+
+    assert plot_top(LONG) < plot_top("Revenue")
+
+
+def test_grid_headers_start_at_the_y_axis_label() -> None:
+    fig = ub.Figure(8, 3, cols=2, legend=ub.Legend.PER_PANEL)
+    left = fig.add_axes(col=0).line([0, 1], [0, 2000], label="Sunny").title("Days")
+    left.ylabel("Share of days (%)").subtitle("By type")
+    right = fig.add_axes(col=1).line([0, 1], [0, 1]).title("Hours")
+    right.yticks_labeled([0, 1], ["low", "highest"])
+    texts = _texts(fig)
+    x = float(texts["Share of days (%)"].attrib["x"])
+    assert float(texts["Days"].attrib["x"]) == pytest.approx(x, abs=0.01)
+    assert float(texts["By type"].attrib["x"]) == pytest.approx(x, abs=0.01)
+    assert float(texts["Sunny"].attrib["x"]) > x
+    # The second panel's title starts at its widest y tick label, left of its plot.
+    widest = float(texts["highest"].attrib["x"])
+    assert widest < float(texts["low"].attrib["x"])
+    assert float(texts["Hours"].attrib["x"]) == pytest.approx(widest, abs=0.01)
+
+
+def test_figure_texts_stay_at_the_figure_margin() -> None:
+    fig = ub.Figure(8, 3, cols=2).title("Weather").subtitle("Two stations").caption("Survey")
+    fig.add_axes(col=0).line([0, 1], [0, 2000]).ylabel("Share of days (%)")
+    fig.add_axes(col=1).line([0, 1], [0, 1])
+    texts = _texts(fig)
+    for text in ("Weather", "Two stations", "Survey", "Share of days (%)"):
+        assert float(texts[text].attrib["x"]) == pytest.approx(12, abs=0.01)
+
+
+@pytest.mark.parametrize(("width", "cols"), [(3.5, 1), (7, 2)])
+def test_titles_shrink_before_the_height_is_checked(width: float, cols: int) -> None:
+    text = "Quarterly revenue by region and sales channel"
+    fig = ub.Figure(width, 1, cols=cols)
+    for col in range(cols):
+        fig.add_axes(col=col).xticks([]).yticks([]).title("\n".join([text] * 3))
+    assert fig.to_svg()
+    assert _size(_texts(fig)[text]) < 15
+
+
+@pytest.mark.parametrize("cols", [1, 2])
+def test_headers_over_equal_aspect_plots_start_at_the_y_axis_label(cols: int) -> None:
+    fig = ub.Figure(6 * cols, 4, cols=cols)
+    for col in range(cols):
+        ax = fig.add_axes(col=col).xlim(0, 20).ylim(0, 1)
+        ax.title(f"T{col}").ylabel(f"Y{col}").equal_aspect()
+    texts = _texts(fig)
+    for col in range(cols):
+        assert float(texts[f"T{col}"].attrib["x"]) == pytest.approx(
+            float(texts[f"Y{col}"].attrib["x"]), abs=0.01
+        )
+
+
+def _inset_legend(height: float, position: ub.LegendPosition) -> ub.Figure:
+    fig = ub.Figure(3.5, height / 72)
+    ax = fig.add_axes().title("Days").ylabel("Share").xlim(0, 1).ylim(0, 1)
+    ax.xticks_labeled([0, 1], ["W" * 10, "1"])
+    ax.yticks_labeled([0, 1], ["0", "1"]).legend(ub.LegendStyle.HEADER, position=position)
+    for i in range(8):
+        ax.line([0, 1], [0, 1], label=f"RRR{i}")
+    return fig
+
+
+@pytest.mark.parametrize(
+    ("height", "position"),
+    [(119, ub.LegendPosition.TOP_LEFT), (121, ub.LegendPosition.BOTTOM)],
+)
+def test_a_short_figure_with_an_inset_legend_names_its_height(
+    height: float, position: ub.LegendPosition
+) -> None:
+    with pytest.raises(ub.StyleError) as caught:
+        _inset_legend(height, position).to_svg()
+    message = str(caught.value)
+    assert "colorbar" not in message
+    found = re.search(r"at least (\d+) pt", message)
+    assert found is not None, message
+    assert _inset_legend(int(found[1]), position).to_svg()
+
+
+def _inset_title(*, explicit_y: bool, size: ub.Size = ub.Size.AUTO) -> ub.Figure:
+    fig = ub.Figure(3, 1.3)
+    ax = fig.add_axes().xlim(0, 1).ylim(0, 1)
+    ax.xticks_labeled([0, 1], ["W" * 10, "1"]).title("\n".join(["M" * 18] * 3), size=size)
+    if explicit_y:
+        ax.yticks([0, 1])
+    return fig
+
+
+@pytest.mark.parametrize("explicit_y", [False, True])
+def test_guessed_ticks_do_not_refuse_a_height_the_fitted_title_leaves(explicit_y: bool) -> None:
+    fig = _inset_title(explicit_y=explicit_y)
+    assert fig.to_svg()
+    assert _size(_texts(fig)["M" * 18]) < 15
+    assert _inset_title(explicit_y=explicit_y, size=ub.Size.pt(10.5)).to_svg()
+
+
+def test_an_equal_aspect_header_moves_in_only_to_its_y_axis_label() -> None:
+    fig = ub.Figure(3.5, 3)
+    fig.add_axes().xlim(0, 20).ylim(-1, 9).title("T").ylabel("Y").equal_aspect()
+    texts = _texts(fig)
+    assert float(texts["T"].attrib["x"]) == pytest.approx(float(texts["Y"].attrib["x"]), abs=0.01)
+
+
+def test_an_equal_aspect_header_legend_keeps_the_rows_it_reserved() -> None:
+    fig = ub.Figure(6, 4)
+    ax = fig.add_axes().xlim(0, 20).ylim(0, 1).title("T").ylabel("Y axis label (units)")
+    ax.equal_aspect().legend(ub.LegendStyle.HEADER)
+    for i in range(3):
+        ax.line([0, 20], [0, 1], label="R" * 18 + str(i))
+    texts = _texts(fig)
+    label = float(texts["Y axis label (units)"].attrib["y"])
+    last = max(float(texts["R" * 18 + str(i)].attrib["y"]) for i in range(3))
+    assert last < label - 8

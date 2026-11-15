@@ -94,7 +94,8 @@ class LegendPosition(Enum):
     __slots__ = ()
 
     TOP_LEFT = 0
-    """A row under the panel title, aligned to the plot's left edge (the default)."""
+    """A row under the panel title, starting with it at the left edge of the panel's content,
+    where the y axis label and the y tick labels start (the default)."""
 
     TOP_RIGHT = 1
     """A row under the panel title, aligned to the plot's right edge."""
@@ -103,7 +104,8 @@ class LegendPosition(Enum):
     """A column to the right of the plot."""
 
     BOTTOM = 3
-    """A row below the x tick labels and x axis title."""
+    """A row below the x tick labels and x axis title, starting with the panel title at the
+    left edge of the panel's content."""
 
     BEST = 4
     """A column inside the plot at the position covering the least drawn data."""

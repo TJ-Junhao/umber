@@ -914,6 +914,10 @@ fn plan(
                     .map_err(|error| in_cell(figure, panels[i].axes, error))?;
             }
         }
+        if let Rooms::Given(_) | Rooms::Provisional(_) = rooms {
+            // The reference's headers start at its own y tick labels; these may differ.
+            layout::rehead(&inputs, bands, &mut solution);
+        }
         Ok(solution)
     };
     let color_plots = |solution: &layout::GridSolution| {
@@ -1148,15 +1152,30 @@ fn plan(
                 changed = true;
             }
         }
-        if !changed {
-            return Err(error);
-        }
         let bands: Vec<_> = provisional
             .iter()
             .enumerate()
             .map(|(i, r)| measure(i, r))
             .collect::<Result<_>>()?;
-        solve(&provisional, &bands).map_err(|_| error)
+        if changed && let Ok(solution) = solve(&provisional, &bands) {
+            return Ok(solution);
+        }
+        // The titles shrink to the widths of the final ticks, which these guessed ticks need
+        // not give: before the height is refused, try them at their floors, and let the tick
+        // choice and the final fit go on from that plot. The final solves refuse it if the
+        // fitted titles still leave the plot too little height.
+        let floored = |bands: &[PanelBands]| -> Result<Vec<PanelBands>> {
+            let mut bands = bands.to_vec();
+            layout::apply_panel_fit(&inputs, &mut bands, layout::PanelFit::floors(theme))?;
+            Ok(bands)
+        };
+        if let Ok(solution) = solve(&first, &floored(&first_bands)?) {
+            return Ok(solution);
+        }
+        if changed && let Ok(solution) = solve(&provisional, &floored(&bands)?) {
+            return Ok(solution);
+        }
+        Err(error)
     })?;
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
     let bar_plots = color_plots(&first);
@@ -1508,6 +1527,10 @@ fn plan(
             break;
         }
     }
+
+    // The titles and subtitles take the sizes the final solve fitted them to, whose height it
+    // reserved.
+    layout::apply_panel_fit(&inputs, &mut bands, solution.fit)?;
 
     // Check only final domains: shared data, cells and bubble fitting can widen them, and
     // provisional layouts may deliberately omit automatic x ticks.
@@ -3899,11 +3922,17 @@ mod tests {
         assert_eq!(a.plot.y, b.plot.y);
         assert!(c.plot.y > a.plot.bottom() + 24.0);
         assert!(b.plot.x > a.plot.right() + 24.0);
-        // Each title starts at its plot's left edge and sits above it, its row's top in the
-        // first row at the padding.
+        // Each title starts at the left edge of its panel's y tick labels and sits above its
+        // plot, its row's top in the first row at the padding.
         for l in [&a, &b, &c] {
             let title = l.title.as_ref().expect("a title").first();
-            assert_eq!(title.x, l.plot.x);
+            let left = l
+                .y_tick_labels
+                .iter()
+                .map(|label| label.first().x)
+                .fold(f64::INFINITY, f64::min);
+            assert!(left < l.plot.x);
+            assert!((title.x - left).abs() < 1e-9, "{} != {left}", title.x);
             assert!(title.y < l.plot.y);
         }
         assert_eq!(a.header_bottom, b.header_bottom);

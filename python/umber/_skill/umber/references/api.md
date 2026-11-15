@@ -2291,6 +2291,10 @@ Axes.subtitle(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the subtitle, shown under the title.
 
+The subtitle starts with the title, where the panel's content starts, and has the same
+room. It is set at the theme's axis label size, the smallest size a title shrinks to,
+so it does not shrink.
+
 ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
 title alignment; the header grows by every further line, and blank lines are kept.
 
@@ -2306,8 +2310,7 @@ Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long, or holds a control character other than
         ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-        if the widest line is wider than the panel's plot width (for a one-cell figure,
-        than the figure inside its padding, with or without a twin y axis).
+        if the widest line is wider than its room.
 
 Example:
 
@@ -2425,13 +2428,23 @@ Axes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the title, shown above the plot.
 
+The title starts where the panel's content starts, at the left edge of the y axis
+label and the y tick labels, and its room runs to the plot's right edge (for a
+one-cell figure, across the figure inside its padding, with or without a twin y axis).
+Without ``size=``, a title too wide for its room shrinks, in steps of 0.5 pt, to the
+largest size at which every line fits, but not below the theme's axis label size;
+the panel titles of the figure then all take the smallest size any of them needs, so
+that they stay equal. The header takes the height of the size used. A title with
+``size=`` keeps its size.
+
 ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
 title alignment; the header grows by every further line, and blank lines are kept.
 
 Args:
     text: The title, at most 1,000 characters. An empty string removes it.
-    size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
-        after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+    size: ``Size.AUTO`` uses the theme's size, shrunk to fit, ``Size.times(k)``
+        multiplies it after font scaling, and ``Size.pt(p)`` uses points without font
+        scaling.
 
 Returns:
     These axes.
@@ -2440,14 +2453,15 @@ Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long, or holds a control character other than
         ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-        if the widest line is wider than the panel's plot width (for a one-cell figure,
-        than the figure inside its padding, with or without a twin y axis).
+        if the widest line is still wider than its room, naming its width at the
+        smallest size for a title without ``size=``.
 
 Example:
 
 ```python
 >>> import umber as ub
->>> ax = ub.Figure().add_axes().title("Revenue")
+>>> ax = ub.Figure(3, 2).add_axes().title("Quarterly revenue by region")
+>>> png = ax.figure.to_png()  # the title shrinks to fit the narrow figure
 ```
 
 ### `umber.Axes.tricontour`
@@ -4922,7 +4936,9 @@ Figure.subtitle(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the figure subtitle, shown under its title and above every panel.
 
-Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
+Its alignment follows the figure title, as set by ``Theme.with_title_align()``. It is
+set at the theme's axis label size, the smallest size a title shrinks to, so it does
+not shrink.
 
 ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
 title alignment; the header grows by every further line, and blank lines are kept.
@@ -4961,7 +4977,10 @@ Set the figure title, shown above every panel and the merged legend.
 
 The default figure title is 1.5 times the panel title size. ``Size.times(k)``
 follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
-theme's ``with_title_align()`` setting.
+theme's ``with_title_align()`` setting, across the figure inside its padding.
+Without ``size=``, a title wider than that shrinks, in steps of 0.5 pt, to the
+largest size at which every line fits, but not below the panel title size; the panel
+titles keep their own size.
 
 ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
 title alignment; the header grows by every further line, and blank lines are kept.
@@ -4978,8 +4997,9 @@ Raises:
     TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
     StyleError: If ``text`` is too long, or holds a lone surrogate, a control
         character other than ``"\n"`` (such as a tab) or a line or paragraph
-        separator. Rendering raises it if the widest line is wider than the figure's
-        room inside its padding.
+        separator. Rendering raises it if the widest line is still wider than the
+        figure's room inside its padding, naming its width at the smallest size for a
+        title without ``size=``.
 
 Example:
 
@@ -4987,6 +5007,8 @@ Example:
 >>> import umber as ub
 >>> fig = ub.Figure(cols=2).title("Revenue")
 >>> ax = fig.add_axes(col=0).title("North")
+>>> narrow = ub.Figure(3, 2).title("Quarterly revenue")
+>>> png = narrow.to_png()  # the title shrinks to fit the narrow figure
 ```
 
 ### `umber.Figure.to_pdf`
@@ -5578,7 +5600,8 @@ A column inside the plot at the position covering the least drawn data.
 LegendPosition.BOTTOM
 ```
 
-A row below the x tick labels and x axis title.
+A row below the x tick labels and x axis title, starting with the panel title at the
+left edge of the panel's content.
 
 ### `umber.LegendPosition.RIGHT`
 
@@ -5594,7 +5617,8 @@ A column to the right of the plot.
 LegendPosition.TOP_LEFT
 ```
 
-A row under the panel title, aligned to the plot's left edge (the default).
+A row under the panel title, starting with it at the left edge of the panel's content,
+where the y axis label and the y tick labels start (the default).
 
 ### `umber.LegendPosition.TOP_RIGHT`
 
@@ -5900,6 +5924,11 @@ PieAxes.title(self, text: str, *, size: Size=Size.AUTO) -> Self
 
 Set the title above this pie panel.
 
+The title starts at the left edge of the pie's cell (for a one-cell figure, of the
+figure inside its padding) and may take its whole width. Without ``size=``, a title
+too wide for it shrinks as ``Axes.title()`` describes, to one size with the figure's
+other panel titles.
+
 ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
 title alignment; the header grows by every further line, and blank lines are kept.
 
@@ -5915,8 +5944,9 @@ Raises:
     TypeError: If text or size has the wrong type.
     StyleError: If text is too long or cannot be displayed: it holds a lone surrogate,
         a control character other than ``"\n"`` (such as a tab) or a line or
-        paragraph separator. Rendering raises it if the widest line is wider than its
-        panel (for a one-cell figure, than the figure inside its padding).
+        paragraph separator. Rendering raises it if the widest line is still wider
+        than its room, naming its width at the smallest size for a title without
+        ``size=``.
 
 Example:
 

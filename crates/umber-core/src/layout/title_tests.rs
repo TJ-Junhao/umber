@@ -7,6 +7,10 @@ const TEXT: &str = "A very long title that certainly cannot fit in six inches of
 const SCALE_HINT: &str =
     "make the figure wider or lower the font scale with Theme.with_font_scale().";
 const POINTS_HINT: &str = "make the figure wider or pass a smaller size=.";
+const SHRUNK_TITLE_HINT: &str =
+    "make the figure wider, shorten the title, or break it into lines with \"\\n\".";
+const SHRUNK_SUBTITLE_HINT: &str =
+    "make the figure wider, shorten the subtitle, or break it into lines with \"\\n\".";
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -47,6 +51,17 @@ impl Kind {
             2
         } else {
             1
+        }
+    }
+
+    /// The least size, in points, the text shrinks to in pigment: the panel title size for
+    /// the figure title, the axis label size otherwise.
+    fn floor(self) -> f32 {
+        let theme = Theme::pigment();
+        if matches!(self, Self::FigureTitle) {
+            theme.title_size()
+        } else {
+            theme.body_size()
         }
     }
 
@@ -164,24 +179,34 @@ fn refuses(kind: Kind) {
                 "title"
             };
             let container = if kind.is_figure() { "figure" } else { "panel" };
+            // Without a size, the text shrank to its floor and is still too wide there.
+            let (size, at, hint) = match size {
+                SizeSpec::Auto => {
+                    let floor = kind.floor();
+                    (
+                        SizeSpec::pt(f64::from(floor)).unwrap(),
+                        format!(" at {floor} pt, the smallest size it shrinks to"),
+                        if kind.is_subtitle() {
+                            SHRUNK_SUBTITLE_HINT
+                        } else {
+                            SHRUNK_TITLE_HINT
+                        },
+                    )
+                }
+                SizeSpec::Points(_) => (size, String::new(), POINTS_HINT),
+                SizeSpec::Times(_) => (size, String::new(), SCALE_HINT),
+            };
             assert_eq!(
                 error.to_string(),
                 format!(
-                    "Figure.to_scene(): {prefix}the {name} {} is {} pt wide; the {container} has {} pt.",
+                    "Figure.to_scene(): {prefix}the {name} {} is {} pt wide{at}; the {container} has {} pt.",
                     quoted(TEXT),
                     text_width(kind, TEXT, size).ceil(),
                     kind.room(432.0).floor(),
                 )
             );
             assert_eq!(error.parameter(), None);
-            assert_eq!(
-                error.hint(),
-                Some(if matches!(size, SizeSpec::Points(_)) {
-                    POINTS_HINT
-                } else {
-                    SCALE_HINT
-                })
-            );
+            assert_eq!(error.hint(), Some(hint));
         }
     }
 }
@@ -842,4 +867,381 @@ fn reported_x_tick_width_keeps_room_for_axis_titles() {
             .to_scene(FontLibrary::global())
             .unwrap();
     }
+}
+
+/// The layouts of `figure`, in panel order.
+fn planned(figure: &Figure) -> Vec<Layout> {
+    crate::pipeline::try_plan_panels(figure, FontLibrary::global())
+        .unwrap()
+        .into_iter()
+        .map(|(_, layout)| layout)
+        .collect()
+}
+
+/// The figure header of `figure`, without a merged legend.
+fn figure_header(figure: &Figure) -> FigureHeader {
+    let fonts = figure_fonts(FontLibrary::global(), figure.theme()).unwrap();
+    FigureHeader::measure(figure, &MeasuredLegend::default(), &fonts).unwrap()
+}
+
+/// The size, in points, `block` is set at.
+fn size_of(block: Option<&TextBlock>) -> f32 {
+    block.unwrap().first().style.size
+}
+
+#[test]
+fn a_title_too_wide_shrinks_to_the_largest_half_point_that_fits() {
+    let text = "Quarterly revenue by region and sales channel";
+    let natural = text_width(Kind::AxesTitle, text, SizeSpec::Auto);
+    for share in [0.95, 0.8, 0.62] {
+        let room = (natural * share).floor();
+        let f = figure(
+            Kind::AxesTitle,
+            room + 2.0 * PADDING,
+            text,
+            SizeSpec::Auto,
+            Align::Left,
+        );
+        let layout = &planned(&f)[0];
+        let title = layout.title.as_ref().unwrap();
+        let size = title.first().style.size;
+        assert!((8.5..15.0).contains(&size), "{size}");
+        assert_eq!((size * 2.0).fract(), 0.0, "{size}");
+        assert!(title.width() <= room + inset::CONTAINMENT_TOLERANCE);
+        assert!(
+            text_width(
+                Kind::AxesTitle,
+                text,
+                SizeSpec::pt(f64::from(size) + 0.5).unwrap()
+            ) > room
+        );
+        // Same face and weight; the header takes the height of the size used.
+        assert_eq!(title.first().style.face, TITLE_FACE);
+        assert_eq!(title.first().style.weight, Weight::SemiBold);
+        let line = TITLE_LINE * f64::from(size);
+        assert!((layout.header_bottom - (PADDING + line + HEADER_GAP)).abs() < 1e-9);
+        // The plot starts that much higher than under a title at the theme's size.
+        let mut fixed = f.clone();
+        fixed.single_axes_mut().title_sized("Short", SizeSpec::Auto);
+        let full = &planned(&fixed)[0];
+        assert_eq!(size_of(full.title.as_ref()), 15.0);
+        let saved = TITLE_LINE * (15.0 - f64::from(size));
+        assert!((full.plot.y - layout.plot.y - saved).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn a_title_that_fits_keeps_the_theme_size() {
+    let text = "Station output";
+    let width = text_width(Kind::AxesTitle, text, SizeSpec::Auto) + 2.0 * PADDING;
+    for kind in [Kind::AxesTitle, Kind::GridTitle, Kind::PieTitle] {
+        let f = figure(
+            kind,
+            width * kind.cols() as f64,
+            text,
+            SizeSpec::Auto,
+            Align::Left,
+        );
+        assert_eq!(size_of(planned(&f)[0].title.as_ref()), 15.0);
+    }
+}
+
+#[test]
+fn a_title_with_an_explicit_size_keeps_it() {
+    let text = "Quarterly revenue by region and sales channel";
+    let size = SizeSpec::pt(15.0).unwrap();
+    let room = (text_width(Kind::AxesTitle, text, size) * 0.8).floor();
+    let error = figure(
+        Kind::AxesTitle,
+        room + 2.0 * PADDING,
+        text,
+        size,
+        Align::Left,
+    )
+    .to_scene(FontLibrary::global())
+    .unwrap_err();
+    assert_eq!(error.hint(), Some(POINTS_HINT));
+    assert!(
+        error
+            .to_string()
+            .ends_with(&format!("the panel has {room} pt."))
+    );
+}
+
+#[test]
+fn a_title_that_fits_only_at_its_floor_is_set_there() {
+    let text = "Quarterly revenue by region and sales channel";
+    let floor = text_width(Kind::AxesTitle, text, SizeSpec::pt(8.5).unwrap());
+    let f = figure(
+        Kind::AxesTitle,
+        floor.ceil() + 2.0 * PADDING,
+        text,
+        SizeSpec::Auto,
+        Align::Left,
+    );
+    assert_eq!(size_of(planned(&f)[0].title.as_ref()), 8.5);
+    let error = figure(
+        Kind::AxesTitle,
+        floor.ceil() - 1.0 + 2.0 * PADDING,
+        text,
+        SizeSpec::Auto,
+        Align::Left,
+    )
+    .to_scene(FontLibrary::global())
+    .unwrap_err();
+    assert!(
+        error.to_string().ends_with(&format!(
+            "is {} pt wide at 8.5 pt, the smallest size it shrinks to; the panel has {} pt.",
+            floor.ceil(),
+            floor.ceil() - 1.0
+        )),
+        "{error}"
+    );
+    assert_eq!(error.hint(), Some(SHRUNK_TITLE_HINT));
+}
+
+#[test]
+fn each_line_of_a_title_fits_at_one_size() {
+    let long = "Quarterly revenue by region and sales channel";
+    let natural = text_width(Kind::AxesTitle, long, SizeSpec::Auto);
+    let room = (natural * 0.7).floor();
+    for text in [format!("Revenue\n{long}"), format!("{long}\nRevenue")] {
+        let f = figure(
+            Kind::AxesTitle,
+            room + 2.0 * PADDING,
+            &text,
+            SizeSpec::Auto,
+            Align::Left,
+        );
+        let layout = &planned(&f)[0];
+        let title = layout.title.as_ref().unwrap();
+        let size = title.first().style.size;
+        assert!(size < 15.0);
+        assert!(title.lines().all(|line| line.style.size == size));
+        assert!(title.width() <= room + inset::CONTAINMENT_TOLERANCE);
+        assert!(
+            text_width(
+                Kind::AxesTitle,
+                long,
+                SizeSpec::pt(f64::from(size) + 0.5).unwrap()
+            ) > room
+        );
+        assert!((title.pitch() - LINE_PITCH * f64::from(size)).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn the_panel_titles_of_a_figure_share_the_smallest_size_any_needs() {
+    let long = "Share of days by weather type, season, region and year";
+    for theme in [Theme::pigment(), Theme::graphite(), Theme::midnight()] {
+        let natural = theme.title_size();
+        let mut f = Figure::with_grid(10.0, 6.0, theme.clone(), Grid::new(2, 2).unwrap()).unwrap();
+        f.title("Weather");
+        let titles = [
+            (0, 0, long, SizeSpec::Auto),
+            (0, 1, "Rain", SizeSpec::Auto),
+            (1, 0, "Wind", SizeSpec::pt(13.0).unwrap()),
+        ];
+        for (row, col, text, size) in titles {
+            f.add_axes_at(
+                Placement {
+                    row: GridIndex::At(row),
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap()
+            .title_sized(text, size)
+            .subtitle("Daily");
+        }
+        f.add_pie_axes_at(Placement {
+            row: GridIndex::At(1),
+            col: GridIndex::At(1),
+            ..Placement::default()
+        })
+        .unwrap()
+        .title("Snow")
+        .pie(vec!["A".into()], &[1.0], PieOptions::default())
+        .unwrap();
+        let layouts = planned(&f);
+        let shrunk = size_of(layouts[0].title.as_ref());
+        assert!((theme.body_size()..natural).contains(&shrunk), "{shrunk}");
+        // Every panel title without a size takes it, the pie's too; an explicit size stays.
+        assert_eq!(size_of(layouts[1].title.as_ref()), shrunk);
+        assert_eq!(size_of(layouts[2].title.as_ref()), 13.0);
+        assert_eq!(size_of(layouts[3].title.as_ref()), shrunk);
+        // Subtitles stay at the axis label size; the panels of a row share their header band.
+        for layout in &layouts[..3] {
+            assert_eq!(size_of(layout.subtitle.as_ref()), theme.body_size());
+        }
+        assert_eq!(layouts[0].plot.y, layouts[1].plot.y);
+        // The figure title fits and keeps its own size.
+        let header = figure_header(&f);
+        assert_eq!(
+            size_of(header.title.as_ref()),
+            natural * panel::FIGURE_TITLE_SCALE
+        );
+    }
+}
+
+#[test]
+fn the_figure_title_shrinks_on_its_own_down_to_the_panel_title_size() {
+    let text = "Daily rainfall and temperature";
+    let theme = Theme::pigment();
+    let figure_size = theme.title_size() * panel::FIGURE_TITLE_SCALE;
+    let natural = text_width(Kind::FigureTitle, text, SizeSpec::Auto);
+    let room = (natural * 0.8).floor();
+    let mut f = Figure::new((room + 2.0 * PADDING) / 72.0, 4.0, theme.clone()).unwrap();
+    f.title(text);
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .title("Rain");
+    let header = figure_header(&f);
+    let title = header.title.as_ref().unwrap();
+    let size = title.first().style.size;
+    assert!((theme.title_size()..figure_size).contains(&size), "{size}");
+    assert_eq!((size * 2.0).fract(), 0.0);
+    assert!(title.width() <= room + inset::CONTAINMENT_TOLERANCE);
+    assert!(
+        text_width(
+            Kind::FigureTitle,
+            text,
+            SizeSpec::pt(f64::from(size) + 0.5).unwrap()
+        ) > room
+    );
+    // The grid starts below the shrunk header; the panel title keeps its size.
+    let line = TITLE_LINE * f64::from(size);
+    assert!((header.bottom - (PADDING + line + HEADER_GAP)).abs() < 1e-9);
+    assert_eq!(size_of(planned(&f)[0].title.as_ref()), theme.title_size());
+}
+
+#[test]
+fn shrunk_titles_over_plots_with_equal_aspect_keep_their_room() {
+    let long = "A title wider than the plot below it and its cell";
+    let mut f = Figure::with_grid(7.0, 3.0, Theme::pigment(), Grid::new(1, 2).unwrap()).unwrap();
+    for col in [0, 1] {
+        let mut axes = f
+            .add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.xlim(0.0, 1.0)
+            .unwrap()
+            .ylim(0.0, 1.0)
+            .unwrap()
+            .title(long);
+        if col == 1 {
+            axes.equal_aspect().unwrap();
+        }
+    }
+    f.to_scene(FontLibrary::global()).unwrap();
+    let layouts = planned(&f);
+    let size = size_of(layouts[0].title.as_ref());
+    assert!(size < 15.0);
+    assert_eq!(size_of(layouts[1].title.as_ref()), size);
+    for layout in &layouts {
+        let title = layout.title.as_ref().unwrap();
+        assert!(title.first().y < layout.plot.y);
+        assert!(layout.header_bottom <= layout.plot.y + 1e-9);
+    }
+}
+
+const QUARTERLY: &str = "Quarterly revenue by region and sales channel";
+
+/// A `width` in by 1 in figure of `cols` panels without ticks, each titled with three lines of
+/// [`QUARTERLY`] at `size`.
+fn short_titled(width: f64, cols: i64, size: SizeSpec) -> Figure {
+    let title = [QUARTERLY; 3].join("\n");
+    let mut f =
+        Figure::with_grid(width, 1.0, Theme::pigment(), Grid::new(1, cols).unwrap()).unwrap();
+    for col in 0..cols {
+        f.add_axes_at(
+            Placement {
+                col: GridIndex::At(col),
+                ..Placement::default()
+            },
+            ScaleKind::Linear,
+            ScaleKind::Linear,
+        )
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .title_sized(&title, size);
+    }
+    f
+}
+
+#[test]
+fn titles_shrink_before_the_height_is_checked() {
+    // At its own size the title of three lines is too tall for a 1 in figure, but the size it
+    // shrinks to for the width leaves the plot room: the height is checked for that size.
+    for (width, cols) in [(3.5, 1), (7.0, 2)] {
+        let f = short_titled(width, cols, SizeSpec::Auto);
+        f.to_scene(FontLibrary::global()).unwrap();
+        let layouts = planned(&f);
+        let size = size_of(layouts[0].title.as_ref());
+        assert!(size < 15.0, "{size}");
+        for layout in &layouts {
+            assert_eq!(size_of(layout.title.as_ref()), size);
+            assert!(layout.header_bottom <= layout.plot.y + 1e-9);
+        }
+        // The same size given explicitly lays out the same.
+        let given = short_titled(width, cols, SizeSpec::pt(f64::from(size)).unwrap());
+        let explicit = planned(&given);
+        assert_eq!(layouts[0].plot, explicit[0].plot);
+        // At the theme's size it does not fit.
+        let error = short_titled(width, cols, SizeSpec::times(1.0).unwrap())
+            .to_scene(FontLibrary::global())
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("tall") || message.contains("vertically"),
+            "{message}"
+        );
+    }
+}
+
+/// A 3 in by 1.3 in figure whose wide first x tick label insets the plot, titled with three
+/// lines of 18 "M", its y ticks automatic or at 0 and 1, the title at `size`.
+fn inset_title(explicit_y: bool, size: SizeSpec) -> Figure {
+    let mut f = Figure::new(3.0, 1.3, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec!["W".repeat(10), "1".into()])
+        .unwrap()
+        .title_sized(&vec!["M".repeat(18); 3].join("\n"), size);
+    if explicit_y {
+        axes.yticks(&[0.0, 1.0]).unwrap();
+    }
+    f
+}
+
+#[test]
+fn guessed_ticks_do_not_refuse_a_height_the_fitted_title_leaves() {
+    // The first ticks are guessed for a plot size; the title fits other widths than the final
+    // ticks leave, so the height is not refused before the title is fitted to those.
+    for explicit_y in [false, true] {
+        let f = inset_title(explicit_y, SizeSpec::Auto);
+        f.to_scene(FontLibrary::global()).unwrap();
+        let size = size_of(planned(&f)[0].title.as_ref());
+        assert!(size < 15.0, "{size}");
+        inset_title(explicit_y, SizeSpec::pt(f64::from(size)).unwrap())
+            .to_scene(FontLibrary::global())
+            .unwrap();
+    }
+    inset_title(false, SizeSpec::pt(10.5).unwrap())
+        .to_scene(FontLibrary::global())
+        .unwrap();
 }

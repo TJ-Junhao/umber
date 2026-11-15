@@ -190,9 +190,13 @@ impl<'a> PieAxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than its panel, or the
-    /// figure inside its padding for a one-cell figure, and if the text holds a control
-    /// character other than `"\n"` or a line or paragraph separator (U+2028, U+2029).
+    /// The title starts at the left edge of the pie's cell, or of the figure inside its padding
+    /// for a one-cell figure, and may take the whole width. A title too wide for it shrinks as
+    /// [`AxesMut::title`](crate::AxesMut::title) describes, with the other panel titles.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is still wider than its room, and if
+    /// the text holds a control character other than `"\n"` or a line or paragraph separator
+    /// (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -211,9 +215,14 @@ impl<'a> PieAxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than its panel, or the
-    /// figure inside its padding for a one-cell figure, and if the text holds a control
-    /// character other than `"\n"` or a line or paragraph separator (U+2028, U+2029).
+    /// The title starts at the left edge of the pie's cell, or of the figure inside its padding
+    /// for a one-cell figure, and may take the whole width. With `SizeSpec::Auto`, a title too
+    /// wide for it shrinks as [`AxesMut::title`](crate::AxesMut::title) describes; an explicit
+    /// size is kept.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its room at the size it
+    /// is set at, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///

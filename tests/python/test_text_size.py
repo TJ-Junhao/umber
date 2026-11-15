@@ -299,7 +299,7 @@ def test_legend_checks_types_in_signature_order(
     [
         (
             "grid-title",
-            'row 0, col 0: the title "Large panel title" is 530 pt wide; the panel has 108 pt.',
+            'row 0, col 0: the title "Large panel title" is 530 pt wide; the panel has 119 pt.',
             "make the figure wider or pass a smaller size=.",
         ),
         (

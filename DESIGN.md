@@ -29,7 +29,7 @@ umber is a plotting library for scientific computing and for figures that go int
 | Axis scales are fixed when the axes is created | The axes' type follows its scales, and a scale cannot change under existing marks | Changing a scale means creating new axes |
 | Data frames are passed as columns, with `by=` for groups; column names are never read | One way to pass data, the same for pandas, polars, NumPy and lists | `ax.line(df["day"], df["temp"], by=df["station"])` is longer than passing names |
 | A line never fills; areas are `ax.area()` | A fill is usually not wanted, and a separate method keeps both parameter lists short | Two methods where some libraries have one |
-| Text that does not fit raises `StyleError` | Lost text is lost information | Long titles on small figures need a larger figure or a smaller font |
+| Text that does not fit raises `StyleError` | Lost text is lost information | A title without `size=` first shrinks, down to the axis label size; longer titles on small figures need a larger figure, shorter text or line breaks |
 | A font without a bold face raises when bold text is drawn, unless created with `bold_fallback=True` | The same rule as everywhere else: no silent substitution | One more argument for fonts that lack bold |
 | Diverging colormaps keep a midpoint close to the background | Values near the centre recede, which is what a centred heatmap is for | Points near the centre would vanish, so colour-mapped points get an outline that strengthens as their colour approaches the background |
 | No API stability promise before 1.0.0 | Early decisions can still be corrected instead of being carried forever | Upgrading within 0.x may require changes; release notes list them |

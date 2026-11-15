@@ -19,7 +19,7 @@ use crate::error::quoted;
 use crate::model::Layer;
 use crate::resolve::{AxisTick, NormalizedPos, Resolved, ValueAxis, coincides};
 use crate::text::{Lines, SceneFonts};
-use crate::{Align, Figure, Result, Rgba, TickHighlight};
+use crate::{Align, Figure, Result, Rgba, TextStyle, TickHighlight};
 
 /// Axis labels are one line.
 const AXIS_LABELS: Lines = Lines::One("axis labels");
@@ -68,7 +68,9 @@ pub(crate) struct PanelSpan {
 /// `left`, its legend row starting there too and wrapping within `left..right`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct HeaderBox {
-    /// Where the title, the subtitle and the legend row start.
+    /// Where the title, the subtitle and the legend row start: the left edge of the panel's
+    /// content, where its y axis label and y tick label column start; the left edge of its
+    /// cell for a pie.
     pub left: f64,
     /// The furthest right a legend row entry may end before the row wraps.
     pub right: f64,
@@ -128,6 +130,8 @@ struct HeaderLine {
     label: TextBlock,
     /// The height of the first line's box.
     line: f64,
+    /// That height as a multiple of the size: [`TITLE_LINE`] or [`BODY_LINE`].
+    line_factor: f64,
     /// The ascent of the label style's primary font.
     ascent: f64,
     /// The descent of the label style's primary font.
@@ -135,6 +139,50 @@ struct HeaderLine {
 }
 
 impl HeaderLine {
+    /// Measures `text`, the header's `kind` (a title or subtitle), in `style`, its first line
+    /// in a box `line_factor` sizes tall. The text breaks into lines at `"\n"`.
+    ///
+    /// # Errors
+    ///
+    /// As [`TextBlock::measure`], naming the text: it is measured before the metrics of its
+    /// style.
+    fn measure(
+        lib: &SceneFonts<'_>,
+        kind: TextKind,
+        text: &str,
+        style: TextStyle,
+        line_factor: f64,
+    ) -> Result<HeaderLine> {
+        let label = TextBlock::measure(
+            lib,
+            &format!("the {} {}", kind.name(), quoted(text)),
+            text,
+            style,
+        )?;
+        let (ascent, descent) = metrics(lib, &style)?;
+        Ok(HeaderLine {
+            label,
+            line: line_factor * f64::from(style.size),
+            line_factor,
+            ascent,
+            descent,
+        })
+    }
+
+    /// The same text measured at `size` points, in the same face and weight, its first line's
+    /// box scaled with it.
+    ///
+    /// # Errors
+    ///
+    /// As [`HeaderLine::measure`].
+    fn resized(&self, lib: &SceneFonts<'_>, kind: TextKind, size: f32) -> Result<HeaderLine> {
+        let style = TextStyle {
+            size,
+            ..self.label.first().style
+        };
+        HeaderLine::measure(lib, kind, &self.label.text, style, self.line_factor)
+    }
+
     /// The height the text takes in the header: the first line's box and the pitch of each
     /// further line.
     fn height(&self) -> f64 {
@@ -189,44 +237,72 @@ impl Header {
         lib: &SceneFonts<'_>,
     ) -> Result<Header> {
         let title = (!title.is_empty())
-            .then(|| -> Result<HeaderLine> {
-                let label = TextBlock::measure(
-                    lib,
-                    &format!("the title {}", quoted(title)),
-                    title,
-                    styles.title,
-                )?;
-                let (ascent, descent) = metrics(lib, &styles.title)?;
-                Ok(HeaderLine {
-                    label,
-                    line: TITLE_LINE * f64::from(styles.title.size),
-                    ascent,
-                    descent,
-                })
-            })
+            .then(|| HeaderLine::measure(lib, TextKind::Title, title, styles.title, TITLE_LINE))
             .transpose()?;
         let subtitle = (!subtitle.is_empty())
-            .then(|| -> Result<HeaderLine> {
-                let label = TextBlock::measure(
-                    lib,
-                    &format!("the subtitle {}", quoted(subtitle)),
-                    subtitle,
-                    styles.body,
-                )?;
-                let (ascent, descent) = metrics(lib, &styles.body)?;
-                Ok(HeaderLine {
-                    label,
-                    line: BODY_LINE * f64::from(styles.body.size),
-                    ascent,
-                    descent,
-                })
-            })
+            .then(|| HeaderLine::measure(lib, TextKind::Subtitle, subtitle, styles.body, BODY_LINE))
             .transpose()?;
         Ok(Header {
             title,
             subtitle,
             row: (!row.is_empty()).then(|| row.height()),
         })
+    }
+
+    /// The width of the widest line of the title or the subtitle, as `kind` says, and the size
+    /// it is set at; `None` without that text.
+    pub(super) fn width_and_size(&self, kind: HeaderText) -> Option<(f64, f32)> {
+        self.line(kind)
+            .map(|line| (line.label.width(), line.label.first().style.size))
+    }
+
+    /// The title or the subtitle.
+    fn line(&self, kind: HeaderText) -> Option<&HeaderLine> {
+        match kind {
+            HeaderText::Title => self.title.as_ref(),
+            HeaderText::Subtitle => self.subtitle.as_ref(),
+        }
+    }
+
+    /// Whether the title or the subtitle, measured at `size` points, fits `room`.
+    ///
+    /// # Errors
+    ///
+    /// As [`HeaderLine::measure`].
+    pub(super) fn fits_at(
+        &self,
+        kind: HeaderText,
+        lib: &SceneFonts<'_>,
+        size: f32,
+        room: f64,
+    ) -> Result<bool> {
+        match self.line(kind) {
+            Some(line) => Ok(line.resized(lib, kind.into(), size)?.label.width()
+                <= room + super::inset::CONTAINMENT_TOLERANCE),
+            None => Ok(true),
+        }
+    }
+
+    /// Sets the title or the subtitle at `size` points, measured again in the same face and
+    /// weight, so that the header takes the height of that size.
+    ///
+    /// # Errors
+    ///
+    /// As [`HeaderLine::measure`].
+    pub(super) fn resize(
+        &mut self,
+        kind: HeaderText,
+        lib: &SceneFonts<'_>,
+        size: f32,
+    ) -> Result<()> {
+        let slot = match kind {
+            HeaderText::Title => &mut self.title,
+            HeaderText::Subtitle => &mut self.subtitle,
+        };
+        if let Some(line) = slot {
+            *line = line.resized(lib, kind.into(), size)?;
+        }
+        Ok(())
     }
 
     /// The header parts stacked from `top` down: the title line, the title gap and the subtitle
@@ -282,6 +358,13 @@ impl Header {
         self.stack(top).bottom
     }
 
+    /// Where the header stacked from `top` ends with the legend row `row` in place of its own,
+    /// the gap below a non-empty header included.
+    pub(super) fn bottom_with_row(&self, top: f64, row: &LegendRow) -> f64 {
+        let height = (!row.is_empty()).then(|| row.height());
+        self.stack_with_row(top, height).bottom
+    }
+
     /// The header's height with the legend row `row` in place of its own, the gap below a
     /// non-empty header included; 0 when it is empty.
     fn height_with_row(&self, row: &LegendRow) -> f64 {
@@ -326,6 +409,22 @@ pub(super) fn text_size_hint(size: crate::SizeSpec) -> &'static str {
             "make the figure wider or lower the font scale with Theme.with_font_scale()."
         }
         crate::SizeSpec::Points(_) => "make the figure wider or pass a smaller size=.",
+    }
+}
+
+/// The text of a header that can shrink to fit its room (see [`super::shrink`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeaderText {
+    Title,
+    Subtitle,
+}
+
+impl From<HeaderText> for TextKind {
+    fn from(text: HeaderText) -> TextKind {
+        match text {
+            HeaderText::Title => TextKind::Title,
+            HeaderText::Subtitle => TextKind::Subtitle,
+        }
     }
 }
 
@@ -413,6 +512,56 @@ pub(super) fn check_text_width(
             format!(
                 "the {name} {} is {width} pt wide; the {container} has {room} pt.",
                 quoted(label.text)
+            ),
+        )
+        .with_hint(hint));
+    }
+    Ok(())
+}
+
+/// Checks a title or subtitle, its widest line, against the width of the header box it is
+/// aligned in. Text without an explicit size has shrunk as far as it may (see
+/// [`super::shrink`]), so the error names its width at the size it is set at, and suggests
+/// breaking it into lines; text with an explicit size is checked as by [`check_text_width`].
+pub(super) fn check_header_width(
+    label: Option<&TextBlock>,
+    size: crate::SizeSpec,
+    room: f64,
+    kind: HeaderText,
+    container: TextContainer,
+    context: &'static str,
+) -> Result<()> {
+    if size != crate::SizeSpec::Auto {
+        return check_text_width(
+            label.map(TextBlock::extent),
+            size,
+            room,
+            kind.into(),
+            container,
+            context,
+        );
+    }
+    if let Some(label) = label
+        && label.width() > room + super::inset::CONTAINMENT_TOLERANCE
+    {
+        let (width, room) = super::widths(label.width(), room);
+        let (name, hint) = match kind {
+            HeaderText::Title => (
+                "title",
+                "make the figure wider, shorten the title, or break it into lines with \"\\n\".",
+            ),
+            HeaderText::Subtitle => (
+                "subtitle",
+                "make the figure wider, shorten the subtitle, or break it into lines with \"\\n\".",
+            ),
+        };
+        return Err(crate::Error::style(
+            context,
+            format!(
+                "the {name} {} is {width} pt wide at {} pt, the smallest size it shrinks to; the {} has {room} pt.",
+                quoted(&label.text),
+                label.first().style.size,
+                container.name(),
             ),
         )
         .with_hint(hint));
@@ -512,12 +661,19 @@ impl FigureHeader {
             inset: (0.0, 0.0),
         };
         let row = legend.row_within(box_.left, box_.right);
-        let header = Header::measure(
+        let mut header = Header::measure(
             figure.title_text(),
             figure.subtitle_text(),
             &styles,
             &row,
             lib,
+        )?;
+        super::shrink::fit_figure_header(
+            &mut header,
+            [figure.title_size(), figure.subtitle_size()],
+            theme,
+            lib,
+            box_.right - box_.left,
         )?;
         let row_height = (!row.is_empty()).then(|| row.height());
         let placed = header.place(box_, theme.title_align(), row_height);
@@ -542,28 +698,24 @@ impl FigureHeader {
     /// panels must still have room for its header and the bottom padding.
     pub fn check(&self, figure: &Figure, context: &'static str) -> Result<()> {
         let room = figure.width_in() * 72.0 - 2.0 * PADDING;
-        for (label, size, name) in [
-            (self.title.as_ref(), figure.title_size(), TextKind::Title),
+        for (label, size, kind) in [
+            (self.title.as_ref(), figure.title_size(), HeaderText::Title),
             (
                 self.subtitle.as_ref(),
                 figure.subtitle_size(),
-                TextKind::Subtitle,
-            ),
-            (
-                self.caption.text.as_ref(),
-                figure.caption_size(),
-                TextKind::Caption,
+                HeaderText::Subtitle,
             ),
         ] {
-            check_text_width(
-                label.map(TextBlock::extent),
-                size,
-                room,
-                name,
-                TextContainer::Figure,
-                context,
-            )?;
+            check_header_width(label, size, room, kind, TextContainer::Figure, context)?;
         }
+        check_text_width(
+            self.caption.text.as_ref().map(TextBlock::extent),
+            figure.caption_size(),
+            room,
+            TextKind::Caption,
+            TextContainer::Figure,
+            context,
+        )?;
         self.legend.check_width(room, context)?;
         let needed = self.bottom + self.caption.height() + PADDING;
         if figure.panels().next().is_none()
@@ -772,6 +924,17 @@ impl PanelBands {
             + self.row_offset
     }
 
+    /// The left edge of the panel's content for a plot whose left edge is `plot_x`: where the
+    /// y tick label column starts, and with it the y axis label, or the plot's edge without a
+    /// column. The panel's header starts there too.
+    pub(crate) fn content_left(&self, plot_x: f64) -> f64 {
+        if self.has_y_column() {
+            plot_x - Y_LABEL_GAP - self.y_label_width
+        } else {
+            plot_x
+        }
+    }
+
     /// Whether the panel has a y tick label column left of the plot: y tick labels, or the
     /// title of a value row.
     pub(super) fn has_y_column(&self) -> bool {
@@ -826,6 +989,15 @@ impl PanelBands {
     /// y tick label.
     pub(super) fn above_with_row(&self, row: &LegendRow) -> f64 {
         self.header_with_row(row) + self.top_label_band() + self.value_row() + self.top_label_rise()
+    }
+
+    /// The top of the plot below everything above it, stacked down from `top` with the legend
+    /// row `row` in the header, summed in the order of the stack.
+    pub(super) fn above_from(&self, top: f64, row: &LegendRow) -> f64 {
+        self.heading.bottom_with_row(top, row)
+            + self.top_label_band()
+            + self.value_row()
+            + self.top_label_rise()
     }
 
     /// Everything below the plot: the x tick label row and the x label row, or the bottom y
@@ -1140,11 +1312,10 @@ pub(crate) fn place_panel(
         bands.value_column(),
         bands.value_row(),
     );
-    let has_y_column = bands.has_y_column();
+    let content_left = bands.content_left(plot.x);
     let PanelBands {
         heading,
         mut y_labels,
-        y_label_width,
         mut x_labels,
         tick_colors: [x_tick_colors, y_tick_colors],
         mut xlabel,
@@ -1224,13 +1395,7 @@ pub(crate) fn place_panel(
     if let Some(label) = &mut ylabel {
         // Left-aligned with the left edge of the y tick label column.
         label.x = match input.axes {
-            Layer::Primary(_) => {
-                if has_y_column {
-                    plot.x - Y_LABEL_GAP - y_label_width
-                } else {
-                    plot.x
-                }
-            }
+            Layer::Primary(_) => content_left,
             Layer::Twin { .. } => plot.right() - label.width(),
         };
         // Above a value row, which sits on the rise of the top y tick label.
