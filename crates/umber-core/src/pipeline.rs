@@ -16,9 +16,7 @@ use crate::layout::{
 };
 use crate::legend::Legend;
 use crate::model::Layer;
-use crate::model::{
-    Axes, ExplicitLimits, Figure, GivenLimits, LimitEnd, ShareGroups, label_visibility,
-};
+use crate::model::{Axes, ExplicitLimits, Figure, GivenLimits, ShareGroups, label_visibility};
 use crate::resolve::{
     self, AxisRole, Limits, NormalizedPos, Resolved, ResolvedAxis, ResolvedMark, ValueAxis,
 };
@@ -2206,26 +2204,28 @@ impl<'a> ArrowPlanner<'_, 'a> {
         }
         panels.iter().enumerate().find_map(|(i, panel)| {
             let limits = Limits::of(panel.axes);
-            let automatic = [ValueAxis::X, ValueAxis::Y].map(|axis| {
-                let ends = |explicit: Option<LimitEnd>| {
-                    [LimitEnd::Low, LimitEnd::High].map(|end| explicit != Some(end))
-                };
+            let held = [ValueAxis::X, ValueAxis::Y].map(|axis| {
+                use draw::field::HeldEnds;
                 match limits.axis(axis) {
                     resolve::AxisLimits::Continuous(axis) => match axis.explicit {
-                        None => ends(None),
-                        Some(GivenLimits::OneEnd(end, _)) => ends(Some(end)),
-                        Some(GivenLimits::Both(_)) => [false, false],
+                        None => HeldEnds::Both,
+                        Some(GivenLimits::OneEnd(end, value)) => {
+                            HeldEnds::Free(end, crate::bubble_fit::ReachFrom::Number(value))
+                        }
+                        Some(GivenLimits::Both(_)) => HeldEnds::Neither,
                     },
                     resolve::AxisLimits::Time(axis) => match axis.explicit {
-                        None => ends(None),
-                        Some(GivenLimits::OneEnd(end, _)) => ends(Some(end)),
-                        Some(GivenLimits::Both(_)) => [false, false],
+                        None => HeldEnds::Both,
+                        Some(GivenLimits::OneEnd(end, time)) => {
+                            HeldEnds::Free(end, crate::bubble_fit::ReachFrom::Time(time))
+                        }
+                        Some(GivenLimits::Both(_)) => HeldEnds::Neither,
                     },
-                    resolve::AxisLimits::Category => [false, false],
+                    resolve::AxisLimits::Category => HeldEnds::Neither,
                 }
             });
             let (resolved, layout) = &planned.panels[i];
-            draw::field::spill(&panel.marks, &frames[i], resolved, layout.plot, automatic)
+            draw::field::spill(&panel.marks, &frames[i], resolved, layout.plot, held)
                 .map(|spill| (i, spill))
         })
     }

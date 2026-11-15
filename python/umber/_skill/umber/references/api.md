@@ -2987,9 +2987,10 @@ with the fixed end in place of the data on its side: the span runs from the fixe
 to the farthest value, and the padding, 5% of that span, is added on the automatic
 side only. With no value beyond the fixed end, the automatic end is as far from it as
 a single value would expand. Bubbles, arrows, barbs and value labels widen the
-automatic end to hold them, as automatic limits do; at the fixed end they are clipped,
-as at explicit limits. A fixed limit at the end of the supported range, which leaves
-no room for the automatic one, is refused.
+automatic end to hold them, as automatic limits do. The fixed end works as an explicit
+limit: bubbles, arrows and barbs are clipped there, and a value label that would reach
+past it must fit inside the plot, or rendering raises ``StyleError``. A fixed limit at
+the end of the supported range, which leaves no room for the automatic one, is refused.
 
 Args:
     low: The lower limit; finite, and positive on a log axis; a time on a time axis;
@@ -3004,7 +3005,8 @@ Raises:
     TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
     StyleError: If the limits are not finite, ``low`` is not below ``high``, a limit
         is not positive on a log axis, or a single limit leaves no room for the other.
-        Rendering raises it when every value lies beyond the one fixed limit.
+        Rendering raises it when every value lies beyond the one fixed limit, or when a
+        value label does not fit inside it.
     UsageError: If the x axis is a category axis, or both limits are ``ub.AUTO``.
 
 Example:
@@ -3305,9 +3307,11 @@ automatic end follows the rules above with the fixed end in place of the data on
 side: the span runs from the fixed end to the farthest value, and the padding, 5% of
 that span, is added on the automatic side only. With no value beyond the fixed end,
 the automatic end is as far from it as a single value would expand. Bubbles, arrows,
-barbs and value labels widen the automatic end to hold them, as automatic limits do;
-at the fixed end they are clipped, as at explicit limits. A fixed limit at the end of
-the supported range, which leaves no room for the automatic one, is refused.
+barbs and value labels widen the automatic end to hold them, as automatic limits do.
+The fixed end works as an explicit limit: bubbles, arrows and barbs are clipped there,
+and a value label that would reach past it must fit inside the plot, or rendering
+raises ``StyleError``. A fixed limit at the end of the supported range, which leaves no
+room for the automatic one, is refused.
 
 Args:
     low: The lower limit; finite, and positive on a log axis; a time on a time axis;
@@ -3322,7 +3326,8 @@ Raises:
     TypeError: If ``low`` or ``high`` is neither a number nor ``ub.AUTO``.
     StyleError: If the limits are not finite, ``low`` is not below ``high``, a limit
         is not positive on a log axis, or a single limit leaves no room for the other.
-        Rendering raises it when every value lies beyond the one fixed limit.
+        Rendering raises it when every value lies beyond the one fixed limit, or when a
+        value label does not fit inside it.
     UsageError: If the y axis is a category axis, or both limits are ``ub.AUTO``.
 
 Example:

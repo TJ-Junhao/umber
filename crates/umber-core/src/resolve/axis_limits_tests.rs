@@ -562,3 +562,109 @@ fn a_fixed_end_without_room_for_the_other_is_refused() {
     assert!(time.xlim_time_end(LimitEnd::High, Instant::MIN).is_err());
     assert!(time.xlim_time_end(LimitEnd::High, Instant::MAX).is_ok());
 }
+
+/// The leftmost x of every filled shape the plot clips, in points.
+fn leftmost_clipped_fill(f: &Figure) -> f64 {
+    let scene = f.to_scene(FontLibrary::global()).unwrap();
+    let mut left = f64::INFINITY;
+    for item in &scene.items {
+        let crate::Item::Group {
+            clip: Some(_),
+            items,
+        } = item
+        else {
+            continue;
+        };
+        for item in items {
+            if let crate::Item::Fill { path, .. } = item {
+                for verb in path.verbs() {
+                    if let crate::PathVerb::MoveTo(p) | crate::PathVerb::LineTo(p) = verb {
+                        left = left.min(f64::from(p.x));
+                    }
+                }
+            }
+        }
+    }
+    left
+}
+
+#[test]
+fn time_bubbles_are_held_from_the_same_origin_beside_a_fixed_end() {
+    // 5 x 4 in; bubbles on Jan 1 and Jan 11 of equal size, xlim(AUTO, Jan 11), ylim(0, 1).
+    let day = |k: i64| Instant::from_micros((20_454 + k) * DAY).unwrap();
+    let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Time, ScaleKind::Linear)
+        .unwrap()
+        .bubbles_time(
+            AxisData::Times(vec![Some(day(0)), Some(day(10))]),
+            AxisData::Numbers(vec![0.5, 0.5]),
+            std::sync::Arc::from([1.0, 1.0]),
+            Default::default(),
+        )
+        .unwrap()
+        .xlim_time_end(LimitEnd::High, day(10))
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap();
+    let (_, layout) = plan_figure(&f, (0, 0), FontLibrary::global());
+    assert!(
+        leftmost_clipped_fill(&f) >= layout.plot.x - 1e-3,
+        "{} < {}",
+        leftmost_clipped_fill(&f),
+        layout.plot.x
+    );
+}
+
+#[test]
+fn arrows_past_a_fixed_end_do_not_need_the_automatic_end_to_hold_them() {
+    // 5 x 4 in; quiver([0, 1.01], [0, 0], [0, -1], [0, 0], pt_per_unit=400), xlim(AUTO, 1),
+    // ylim(-1, 1); and the mirror at a fixed lower limit.
+    for (x, u, end, at) in [
+        ([0.0, 1.01], [0.0, -1.0], LimitEnd::High, 1.0),
+        ([-1.01, 0.0], [1.0, 0.0], LimitEnd::Low, -1.0),
+    ] {
+        let mut f = Figure::new(5.0, 4.0, Theme::pigment()).unwrap();
+        f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .quiver(
+                AxisData::Numbers(x.to_vec()),
+                AxisData::Numbers(vec![0.0, 0.0]),
+                crate::FieldVectors {
+                    form: crate::FieldForm::Points,
+                    u: std::sync::Arc::from(u),
+                    v: std::sync::Arc::from([0.0, 0.0]),
+                },
+                crate::QuiverOptions {
+                    length: crate::ArrowLength::PtPerUnit(400.0),
+                    ..crate::QuiverOptions::default()
+                },
+            )
+            .unwrap()
+            .xlim_end(end, at)
+            .unwrap()
+            .ylim(-1.0, 1.0)
+            .unwrap();
+        assert!(f.to_scene(FontLibrary::global()).is_ok(), "{end:?}");
+    }
+}
+
+#[test]
+fn equal_aspect_pads_only_the_free_side_of_a_one_sided_limit() {
+    // 0.6 x 3 in, no ticks, bubbles([0], [0.5], [1]), xlim(0, AUTO), ylim(0, 1), equal aspect.
+    let mut f = Figure::new(0.6, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xticks(&[])
+        .unwrap()
+        .yticks(&[])
+        .unwrap()
+        .bubbles(&[0.0], &[0.5], &[1.0], Default::default())
+        .unwrap()
+        .xlim_end(LimitEnd::Low, 0.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .equal_aspect()
+        .unwrap();
+    assert!(f.to_scene(FontLibrary::global()).is_ok());
+}

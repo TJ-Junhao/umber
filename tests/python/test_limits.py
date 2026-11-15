@@ -173,3 +173,33 @@ def test_a_limit_without_room_for_the_other_is_refused() -> None:
         "low",
         "set both limits, or move this one away from the end of the range.",
     )
+
+
+def test_one_sided_quivers_hold_only_the_arrows_on_the_free_side() -> None:
+    ax = ub.Figure(5, 4).add_axes()
+    ax.quiver([0, 1.01], [0, 0], [0, -1], [0, 0], pt_per_unit=400).xlim(ub.AUTO, 1).ylim(-1, 1)
+    assert ax.figure.to_svg()
+    mirrored = ub.Figure(5, 4).add_axes()
+    mirrored.quiver([-1.01, 0], [0, 0], [1, 0], [0, 0], pt_per_unit=400)
+    mirrored.xlim(-1, ub.AUTO).ylim(-1, 1)
+    assert mirrored.figure.to_svg()
+
+
+def test_equal_aspect_with_one_fixed_end_pads_only_the_free_side() -> None:
+    ax = ub.Figure(0.6, 3).add_axes().xticks([]).yticks([])
+    ax.bubbles([0], [0.5], [1]).xlim(0, ub.AUTO).ylim(0, 1).equal_aspect()
+    assert ax.figure.to_svg()
+
+
+def test_time_bubbles_beside_a_fixed_end_render() -> None:
+    days = [dt.datetime(2026, 1, 1), dt.datetime(2026, 1, 11)]
+    ax = ub.Figure(5, 4).add_axes(x=ub.Scale.time()).bubbles(days, [0.5, 0.5], [1, 1])
+    ax.xlim(ub.AUTO, dt.datetime(2026, 1, 11)).ylim(0, 1)
+    assert ax.figure.to_svg()
+
+
+def test_a_value_label_past_a_fixed_end_must_fit_inside_it() -> None:
+    ax = ub.Figure().add_axes(x=ub.Scale.category()).bar(["a"], [3], annotate=True)
+    ax.ylim(ub.AUTO, 3)
+    with pytest.raises(ub.StyleError, match="does not fit inside the plot"):
+        ax.figure.to_svg()

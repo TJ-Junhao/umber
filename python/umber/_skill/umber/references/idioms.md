@@ -253,7 +253,7 @@ svg = ax.figure.to_svg()
 
 `xticks([...])`, `xticks_labeled([...], [...])`, `xlim(low, high)`, and `xtick_format(ub.TickFormat.percent(1))` (also `fixed(decimals)`, `scientific()`, `iso()` for times, and `.affix(prefix=, suffix=)`). The y methods mirror them.
 
-`ylim(0, ub.AUTO)` fixes one limit and leaves the other automatic: the automatic end follows the data from the fixed end, with 5% of that span as padding on its side only. Use it to start a value axis at zero; do not compute the upper limit yourself. `ylim(ub.AUTO, ub.AUTO)` raises `UsageError`, and rendering raises `StyleError` when every value lies beyond the fixed limit.
+`ylim(0, ub.AUTO)` fixes one limit and leaves the other automatic: the automatic end follows the data from the fixed end, with 5% of that span as padding on its side only. Use it to start a value axis at zero; do not compute the upper limit yourself. `ylim(ub.AUTO, ub.AUTO)` raises `UsageError`, and rendering raises `StyleError` when every value lies beyond the fixed limit. Bubbles, arrows, barbs and value labels widen only the automatic end; the fixed end works as an explicit limit, so a value label that would reach past it must fit inside the plot.
 
 Automatic ticks on integer data, such as years, counts or indices, take whole steps (1, 2, 5, 10, 20, 25, 50, …) and print no decimals, so years never read `2017.5`; do not set `xticks()` only to avoid half steps. Every value the automatic limits come from must be an exact integer; data with any fraction, or explicit limits at both ends, keep the usual steps of 1, 2, 2.5 or 5 times a power of ten.
 

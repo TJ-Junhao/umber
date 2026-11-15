@@ -928,11 +928,14 @@ impl ScaleAxis {
     /// whose extent resolve finishes as `padding` says.
     fn fitted(fit: &BubbleFit, room: f64, padding: ExtentPadding) -> ScaleAxis {
         let (low, high) = fit.seed.domain();
+        // A fixed end is never padded, and nothing reaches towards it (see
+        // [`BubbleFit::fixed`]): only the free side is padded and counts.
+        let sides = if fit.fixed.is_some() { 1.0 } else { 2.0 };
         let (credit, charge) = match padding {
             ExtentPadding::Exact => (0.0, 1.0),
-            ExtentPadding::BothSides => (AUTO_LIMIT_PADDING, 1.0 + 2.0 * AUTO_LIMIT_PADDING),
+            ExtentPadding::BothSides => (AUTO_LIMIT_PADDING, 1.0 + sides * AUTO_LIMIT_PADDING),
             // An end at 0 may or may not move, so the padding is charged and never counted.
-            ExtentPadding::KeepZero => (0.0, 1.0 + 2.0 * AUTO_LIMIT_PADDING),
+            ExtentPadding::KeepZero => (0.0, 1.0 + sides * AUTO_LIMIT_PADDING),
         };
         let (mut upper, mut lower) = (Vec::new(), Vec::new());
         for (i, bubble) in fit.bubbles.iter().enumerate() {

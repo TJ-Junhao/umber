@@ -371,8 +371,10 @@ impl<'a> AxesMut<'a> {
     /// With no data beyond the fixed end, the automatic end is where a single value at the
     /// fixed end would reach. Rendering raises `Error::Style` when every value lies past the
     /// fixed end. Bubbles, arrows, barbs and value labels widen the automatic end to hold them,
-    /// as automatic limits do; at the fixed end they are clipped. `Error::Style` also refuses a
-    /// value that leaves no room for the automatic end within the supported values.
+    /// as automatic limits do. The fixed end works as an explicit limit: bubbles, arrows and
+    /// barbs are clipped there, and a value label that would reach past it must fit inside the
+    /// plot, or rendering raises `Error::Style`. `Error::Style` also refuses a value that
+    /// leaves no room for the automatic end within the supported values.
     ///
     /// # Examples
     ///

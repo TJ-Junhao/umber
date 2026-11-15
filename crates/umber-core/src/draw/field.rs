@@ -21,13 +21,14 @@ use super::MarkContext;
 use super::clip::Bounds;
 use super::contrast::Background;
 use super::mapping::{AxisMaps, AxisPoint, PlotPoint, axis_shared, point};
+use crate::bubble_fit::ReachFrom;
 use crate::color_scale::{MappedColors, ResolvedColorScale};
 use crate::field::arrow::{ArrowFrame, HEAD_WIDTH, Outline, SHAFT_WIDTH};
 use crate::field::barb::{self, Barb};
 use crate::field::{Reach, SCREEN_SCALES, spacing};
 use crate::geometry::Path;
 use crate::layout::Area;
-use crate::model::{BarbsMark, MAX_ARROW_LENGTH, QuiverMark, VectorField};
+use crate::model::{BarbsMark, LimitEnd, MAX_ARROW_LENGTH, QuiverMark, SharedValues, VectorField};
 use crate::resolve::{Resolved, ResolvedMark};
 use crate::scene::{FillRule, Item, LineCap, LineJoin, Paint, StrokeStyle};
 use crate::{ArrowLength, Direction, FieldForm, Pivot, Rgba, Theme};
@@ -346,17 +347,62 @@ pub(crate) enum Spill {
 /// visible, and above the rounding of the frames.
 const HELD_SLACK: f64 = 1e-3;
 
-/// What reaches past the edges of `plot` at the ends that `automatic` names, low then high of x,
-/// then of y, on the axes `resolved`: an arrow or barb of `marks` as it is drawn, the arrows in
-/// the `frames` of the quivers, in order. Automatic limits hold whole shapes, so a layout where
-/// this finds one is not a layout to draw; explicit limits clip them, so those edges do not
-/// count.
+/// The ends of one axis whose limits hold whole arrows and barbs, as the limit fits make them
+/// hold ([`crate::bubble_fit`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum HeldEnds {
+    /// Neither end: explicit limits at both ends, or a category axis.
+    Neither,
+    /// Both ends: automatic limits.
+    Both,
+    /// The automatic end of an axis with the other end fixed at a coordinate: it holds the
+    /// shapes anchored at the fixed end or on its side of it, while those anchored past the
+    /// fixed end are clipped whole.
+    Free(LimitEnd, ReachFrom),
+}
+
+impl HeldEnds {
+    /// Whether the low and the high end hold the shape anchored at the coordinate `i` of
+    /// `values`.
+    fn hold(self, values: &SharedValues, i: usize) -> [bool; 2] {
+        let Self::Free(end, at) = self else {
+            return [self == Self::Both; 2];
+        };
+        let on_free_side = match (values, at) {
+            (SharedValues::Numbers(values), ReachFrom::Number(at)) => {
+                let v = values.get(i).copied().unwrap_or(f64::NAN);
+                match end {
+                    LimitEnd::Low => v >= at,
+                    LimitEnd::High => v <= at,
+                }
+            }
+            (SharedValues::Times(times), ReachFrom::Time(at)) => {
+                times.get(i).copied().flatten().is_some_and(|t| match end {
+                    LimitEnd::Low => t >= at,
+                    LimitEnd::High => t <= at,
+                })
+            }
+            (SharedValues::Numbers(_), ReachFrom::Time(_))
+            | (SharedValues::Times(_), ReachFrom::Number(_)) => false,
+        };
+        match end {
+            LimitEnd::Low => [false, on_free_side],
+            LimitEnd::High => [on_free_side, false],
+        }
+    }
+}
+
+/// What reaches past the edges of `plot` at the ends that `held` names, x then y, on the axes
+/// `resolved`: an arrow or barb of `marks` as it is drawn, the arrows in the `frames` of the
+/// quivers, in order. Automatic limits hold whole shapes, so a layout where this finds one is
+/// not a layout to draw; explicit limits clip them, so those edges do not count, and an
+/// automatic end beside a fixed one holds only the shapes the fits hold ([`HeldEnds`]).
 pub(crate) fn spill(
     marks: &[ResolvedMark<'_>],
     frames: &[ArrowFrame],
     resolved: &Resolved,
     plot: Area,
-    automatic: [[bool; 2]; 2],
+    held: [HeldEnds; 2],
 ) -> Option<Spill> {
     let maps = AxisMaps::new(&resolved.x, &resolved.y, plot);
     let spills = |field: &VectorField, fill: FieldFill<'_>, reach: &dyn Fn(f64, f64) -> Reach| {
@@ -368,7 +414,8 @@ pub(crate) fn spill(
             }
             let at = maps.to_plot(AxisPoint::new(xs[sample.column], ys[sample.row]));
             let reach = reach(sample.u, sample.v);
-            let [[left, right], [bottom, top]] = automatic;
+            let [left, right] = held[0].hold(field.x_values(), sample.column);
+            let [bottom, top] = held[1].hold(field.y_values(), sample.row);
             // The plot's y grows downwards: its top is the high end of the y axis.
             (left && at.x - reach.left < plot.x - HELD_SLACK)
                 || (right && at.x + reach.right > plot.right() + HELD_SLACK)

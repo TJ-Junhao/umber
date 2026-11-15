@@ -1623,8 +1623,8 @@ fn time_axis<'a, 'm: 'a>(
 /// bubbles, if any) reach their own far end, exactly when an axis without limits would keep
 /// their exact extent ([`exact_time_extent`]), and otherwise padded by 5 % of the span from the
 /// fixed end. The automatic end is the further of the two. With no time beyond the fixed end,
-/// it lies [`SINGLE_TIME_REACH`] from it. The seconds count from the low end, as on an axis
-/// with both limits.
+/// it lies [`SINGLE_TIME_REACH`] from it. The seconds count from the earliest of the times and
+/// ticks, as on an axis without limits, or from the low end when there is none.
 fn time_end_scale<'a, 'm: 'a>(
     marks: impl Iterator<Item = &'a ResolvedMark<'m>> + Clone,
     (which, role): (ValueAxis, AxisRole),
@@ -1682,7 +1682,15 @@ fn time_end_scale<'a, 'm: 'a>(
         LimitEnd::Low => (fixed, automatic),
         LimitEnd::High => (automatic, fixed),
     };
-    time_scale(low, 0.0, seconds_between(low, high), (low, high))
+    // The seconds count from the earliest time, as on an axis without limits, so that the
+    // bubble fits, measured from it too, read the scale as they read their own extent.
+    let origin = origin.unwrap_or(low);
+    time_scale(
+        origin,
+        seconds_between(origin, low),
+        seconds_between(origin, high),
+        (low, high),
+    )
 }
 
 /// The time scale from `low` to `high` seconds measured from `origin`, whose earliest and
