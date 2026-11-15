@@ -1384,3 +1384,69 @@ fn a_short_figure_with_an_inset_legend_names_its_height_not_a_colorbar() {
             .unwrap();
     }
 }
+
+#[test]
+fn an_equal_aspect_header_moves_in_only_to_its_y_axis_label() {
+    // The plot moves right in its room for its wider y tick labels; the header starts with
+    // the y axis label, at the padding, not that far further in.
+    let mut f = Figure::new(3.5, 3.0, Theme::pigment()).unwrap();
+    f.add_axes(ScaleKind::Linear, ScaleKind::Linear)
+        .unwrap()
+        .xlim(0.0, 20.0)
+        .unwrap()
+        .ylim(-1.0, 9.0)
+        .unwrap()
+        .title("T")
+        .ylabel("Y")
+        .equal_aspect()
+        .unwrap();
+    f.to_scene(FontLibrary::global()).unwrap();
+    let (_, layout) = &try_plan_panels(&f, FontLibrary::global()).unwrap()[0];
+    let label = layout.ylabel.as_ref().unwrap();
+    assert_near(layout.title.as_ref().unwrap().first().x, label.x);
+}
+
+#[test]
+fn an_equal_aspect_header_legend_keeps_the_rows_it_reserved() {
+    // The legend row wraps within the reference's header box, whose height the rows reserve,
+    // so it ends above the y axis label.
+    let mut f = Figure::new(6.0, 4.0, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.xlim(0.0, 20.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .title("T")
+        .ylabel("Y axis label (units)")
+        .equal_aspect()
+        .unwrap()
+        .legend(crate::LegendStyle::Header, crate::SizeSpec::Auto)
+        .unwrap();
+    for i in 0..3 {
+        axes.line(
+            AxisData::Numbers(vec![0.0, 20.0]),
+            &[0.0, 1.0],
+            LineOptions {
+                label: format!("{}{i}", "R".repeat(18)),
+                ..LineOptions::default()
+            },
+        )
+        .unwrap();
+    }
+    f.to_scene(FontLibrary::global()).unwrap();
+    let (_, layout) = &try_plan_panels(&f, FontLibrary::global()).unwrap()[0];
+    let label = layout.ylabel.as_ref().unwrap();
+    assert!(
+        layout.header_bottom <= label.y - 0.5 * f64::from(label.style.size) + 1e-9,
+        "{} {}",
+        layout.header_bottom,
+        label.y
+    );
+    let last = layout
+        .legend
+        .entries()
+        .iter()
+        .map(|entry| entry.label.y)
+        .fold(f64::NEG_INFINITY, f64::max);
+    assert!(last < label.y - 8.0, "{last} {}", label.y);
+}

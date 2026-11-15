@@ -158,6 +158,47 @@ fn inset(theme: Theme) -> Figure {
     figure
 }
 
+/// Two panels with equal aspect, a y axis label and a header legend that wraps: each header
+/// starts at its own y axis label, and the legend rows keep the height they reserved.
+fn equal_aspect(theme: Theme) -> Figure {
+    let grid = Grid::new(1, 2).unwrap().with_legend(LegendMode::PerPanel);
+    let mut figure = Figure::with_grid(9.0, 3.5, theme, grid).unwrap();
+    for (col, (lo, hi)) in [(0, (0.0, 1.0)), (1, (-1.0, 9.0))] {
+        let mut axes = figure
+            .add_axes_at(
+                Placement {
+                    col: GridIndex::At(col),
+                    ..Placement::default()
+                },
+                ScaleKind::Linear,
+                ScaleKind::Linear,
+            )
+            .unwrap();
+        axes.xlim(0.0, 20.0)
+            .unwrap()
+            .ylim(lo, hi)
+            .unwrap()
+            .title("Flow")
+            .ylabel("Y axis label (units)")
+            .equal_aspect()
+            .unwrap()
+            .legend(LegendStyle::Header, SizeSpec::Auto)
+            .unwrap();
+        for i in 0..3 {
+            axes.line(
+                AxisData::Numbers(vec![0.0, 20.0]),
+                &[lo, hi],
+                LineOptions {
+                    label: format!("{}{i}", "R".repeat(18)),
+                    ..LineOptions::default()
+                },
+            )
+            .unwrap();
+        }
+    }
+    figure
+}
+
 /// The errors of titles too wide at their floor and of a title with an explicit size.
 fn error_cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
     let mut out = String::new();
@@ -236,6 +277,7 @@ pub fn cases(lib: &FontLibrary, sink: &mut impl FnMut(Output)) {
             ("lines", lines(theme.clone())),
             ("shared-grid", shared_grid(theme.clone())),
             ("inset", inset(theme.clone())),
+            ("equal-aspect", equal_aspect(theme.clone())),
         ];
         for (name, figure) in figures {
             emit_scene(

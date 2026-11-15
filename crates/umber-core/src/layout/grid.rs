@@ -240,36 +240,27 @@ impl Across {
     }
 }
 
-/// Fits the headers of `solution`, a solve of the reference layout of a figure with equal
-/// aspect, to the panels of `inputs` as measured in `bands` (in the same order): each Cartesian
-/// panel's header box starts again at the left edge of its own content for its room, as its y
-/// axis label does, and never left of its frame or the canvas padding; and the titles and
-/// subtitles are fitted to those boxes, never larger than in the reference, whose rows reserve
-/// their height.
-///
-/// # Errors
-///
-/// As [`super::shrink::fit_panel_headers`].
+/// Aligns the headers of `solution`, a solve of the reference layout of a figure with equal
+/// aspect whose plots have been fitted, with the panels of `inputs` as measured in `bands` (in
+/// the same order). Each header box keeps the reference's extent, which its legend rows wrap
+/// within and its titles were fitted to, so the rows reserve the height they take; the left
+/// end of what is aligned in it moves in to where the panel's content starts on its final plot,
+/// as its y axis label does ([`HeaderBox::inset`]), replacing the inset the plot's fit gave.
+/// The left end never moves out of the box: when the final y tick labels reach further left
+/// than the reference's, the header starts where the reference's did. A pie keeps its header.
 pub(crate) fn rehead(
     inputs: &[LayoutInput<'_>],
     bands: &[PanelBands],
     solution: &mut GridSolution,
-) -> Result<()> {
+) {
     for (i, (input, slot)) in inputs.iter().zip(&mut solution.panels).enumerate() {
         let own = match input.axes {
             crate::model::Layer::Primary(crate::Panel::Pie(_)) => continue,
             crate::model::Layer::Primary(crate::Panel::Cartesian { .. }) => &bands[i],
             crate::model::Layer::Twin { parent, .. } => &bands[parent],
         };
-        slot.header.left = own.content_left(slot.room.x).max(slot.frame.x.max(PADDING));
+        slot.header.inset.0 = (own.content_left(slot.plot.x) - slot.header.left).max(0.0);
     }
-    let rooms: Vec<f64> = solution
-        .panels
-        .iter()
-        .map(|slot| slot.header.right - slot.header.left)
-        .collect();
-    solution.fit = super::shrink::fit_panel_headers(inputs, bands, &rooms, solution.fit)?;
-    Ok(())
 }
 
 /// The shared colorbar reserve after each column, shared by bars ending there.

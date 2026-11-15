@@ -491,3 +491,39 @@ def test_a_short_figure_with_an_inset_legend_names_its_height(
     found = re.search(r"at least (\d+) pt", message)
     assert found is not None, message
     assert _inset_legend(int(found[1]), position).to_svg()
+
+
+def _inset_title(*, explicit_y: bool, size: ub.Size = ub.Size.AUTO) -> ub.Figure:
+    fig = ub.Figure(3, 1.3)
+    ax = fig.add_axes().xlim(0, 1).ylim(0, 1)
+    ax.xticks_labeled([0, 1], ["W" * 10, "1"]).title("\n".join(["M" * 18] * 3), size=size)
+    if explicit_y:
+        ax.yticks([0, 1])
+    return fig
+
+
+@pytest.mark.parametrize("explicit_y", [False, True])
+def test_guessed_ticks_do_not_refuse_a_height_the_fitted_title_leaves(explicit_y: bool) -> None:
+    fig = _inset_title(explicit_y=explicit_y)
+    assert fig.to_svg()
+    assert _size(_texts(fig)["M" * 18]) < 15
+    assert _inset_title(explicit_y=explicit_y, size=ub.Size.pt(10.5)).to_svg()
+
+
+def test_an_equal_aspect_header_moves_in_only_to_its_y_axis_label() -> None:
+    fig = ub.Figure(3.5, 3)
+    fig.add_axes().xlim(0, 20).ylim(-1, 9).title("T").ylabel("Y").equal_aspect()
+    texts = _texts(fig)
+    assert float(texts["T"].attrib["x"]) == pytest.approx(float(texts["Y"].attrib["x"]), abs=0.01)
+
+
+def test_an_equal_aspect_header_legend_keeps_the_rows_it_reserved() -> None:
+    fig = ub.Figure(6, 4)
+    ax = fig.add_axes().xlim(0, 20).ylim(0, 1).title("T").ylabel("Y axis label (units)")
+    ax.equal_aspect().legend(ub.LegendStyle.HEADER)
+    for i in range(3):
+        ax.line([0, 20], [0, 1], label="R" * 18 + str(i))
+    texts = _texts(fig)
+    label = float(texts["Y axis label (units)"].attrib["y"])
+    last = max(float(texts["R" * 18 + str(i)].attrib["y"]) for i in range(3))
+    assert last < label - 8

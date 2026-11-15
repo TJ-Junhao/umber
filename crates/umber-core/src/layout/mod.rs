@@ -47,7 +47,7 @@ pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, rehead, sol
 pub(crate) use inset::CONTAINMENT_TOLERANCE;
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
-pub(crate) use shrink::apply_panel_fit;
+pub(crate) use shrink::{PanelFit, apply_panel_fit};
 pub(crate) use value_column::{ColumnInput, ColumnSide, PlacedColumn};
 
 use std::cell::RefCell;

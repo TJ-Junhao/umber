@@ -1,5 +1,5 @@
 # umber refactor output manifest: sha256, then kind/file
-# revision: 1a50c3139088384e4d2e8ca67e8c702a83b09f2a
+# revision: df6e8282164290e46c401cbaaf634ae371c4099d
 # platform: Linux x86_64
 # rustc: rustc 1.97.1 (8bab26f4f 2026-07-14)
 921c83ef523e029363fddc712879a177df6bb91f0eb39af1cbd98d6b880d7d92  api/captions.txt
@@ -2030,6 +2030,12 @@ b933379e9b7919a28db4586f60304ba14a40c7e8a0bd131f557cded76a06b603  png/time-mesh.
 94f1c570483f9935fe5b57bd80f6a4f5c9f8d9daeecdd7524ba94b2cc7635ee1  png/time-mesh.dpi72.png
 417540dd1b6701e6e33b1a61f7fe5e1fbf0250284b9c39fe8ad176d13d3e2367  png/time-y-axis.dpi200.png
 70daefe5ab1ba8f33fb7b51fab10dcfa1339761f91b767778c8da230f9d8553c  png/time-y-axis.dpi72.png
+544228321e298e90eb709b3210af2786a0be1c84055006ac20e849676385d003  png/title-fit-equal-aspect-graphite.dpi200.png
+c7594b5212a13b364c33063a989dae926f8d3f2c9914c5d4971e19abef12d620  png/title-fit-equal-aspect-graphite.dpi72.png
+ecc8f81abc437f04c8a02c8908cb80cdc11aa1cea9de7641b072866cba72dcad  png/title-fit-equal-aspect-midnight.dpi200.png
+f385ba3d0e93607998fbccc44851786abc4ca680c525255fa05de99f402dd408  png/title-fit-equal-aspect-midnight.dpi72.png
+477b1a1f95a5f4127fbe13c57144315dc0605381b649a6afa3415ced3ff1df3e  png/title-fit-equal-aspect-pigment.dpi200.png
+0938677d3265a779614168749232203fcfeba36850e503d07f5598b63b81e595  png/title-fit-equal-aspect-pigment.dpi72.png
 36975f9df22defff657b873006c71260907d15fdc0c6378e8a4d184dd5bbf7c1  png/title-fit-figure-title-graphite.dpi200.png
 68b2da8838958b5762ffbf99dc3161c54597522fc7929ebc56f481eba8c548ad  png/title-fit-figure-title-graphite.dpi72.png
 fe6cc71dbb06aa66a0c82e21551d87d431a6007bb259563578edf8ae8c3b6f92  png/title-fit-figure-title-midnight.dpi200.png
@@ -3246,6 +3252,9 @@ d5d41703871a0f216b7e15b4e462d1497a8afc3985c3ec44a0fa98d9f0b71a06  scene/time-80y
 f8e081fc359df799dde16d729f8f31b01741d782f26bc727c5c7d7538454cc73  scene/time-marks.txt
 345fd7646c14b3d05489f9a244bf254a4d7076db1bba2dc92812334fa9813263  scene/time-mesh.txt
 1238df36ffc6bc51787c0520c958844d44682ce7074f50e9c7df2c077afb58e3  scene/time-y-axis.txt
+38ba20a35ca76e1fb4ab4552b3394861d40c6c6efccb90cece6c2bb64e2bc13e  scene/title-fit-equal-aspect-graphite.txt
+c416114a82cfe2fb32c7c5d5cc771cb74a6f2c673ed6a2284aec7599e6e7908e  scene/title-fit-equal-aspect-midnight.txt
+e5071a2a8fbb53dcc005cc0fccbc6867596a75f1a30f0f02262e5ab63eb8fe43  scene/title-fit-equal-aspect-pigment.txt
 54a390126bfe4d00a9f263cec6d8d0b1e388e2dde11165f85ee800040d766b85  scene/title-fit-figure-title-graphite.txt
 59d8e82e78e5dbb54bd6f04d59f76b9219e9f04fe4d6b7db124995585e611b88  scene/title-fit-figure-title-midnight.txt
 743e426439f1f6ed98db4d883dbe3f670d7a029c1613cedf5d7c3fc03e5011ee  scene/title-fit-figure-title-pigment.txt
@@ -5333,6 +5342,12 @@ afb6fa41c618d2ed36cf538c0aad1174c38b37a4a4db486b651217b87964ced8  svg/time-marks
 4aec7a4995180c14df88fa5c77f82ffb63b191b6916df35c5b52de863ee8847f  svg/time-mesh.outlines.svg
 ff2a895f79810a6e2c0cbdd1f829448825a13400cda0fd8708cc968470d5d683  svg/time-y-axis.editable.svg
 11e9a4866e71e5b3650a076fb210f9862857e31e5898f87f922d3256cf5e53d2  svg/time-y-axis.outlines.svg
+8d6a89f2297e4c9246b3afb4fdb5fe59c6651fb608b96bec4bbc032ff7a14847  svg/title-fit-equal-aspect-graphite.editable.svg
+5180ce8e44aba40d9074e782d77f63df808546b6b7756e93b0711cfd0d918e7d  svg/title-fit-equal-aspect-graphite.outlines.svg
+ce87d3c5faa292517b90d3b409fbef570139fec427b91ccbd9f4ab271d3440a3  svg/title-fit-equal-aspect-midnight.editable.svg
+a549cc691369b6fc6e469ef3ec792260a014a72c9a03bab52f1880b8522d96c1  svg/title-fit-equal-aspect-midnight.outlines.svg
+fc193fd7c341722c438118273eebc2930708b6392e96630c9c8caad894a8746d  svg/title-fit-equal-aspect-pigment.editable.svg
+3bd8869d51c76a08f3d6249afa9b2f59c29a952193f65ffbfadc37f4ece3684e  svg/title-fit-equal-aspect-pigment.outlines.svg
 8810b20b1f881cab2d87728884b67a134e66231262455eea0e87b85c5630d588  svg/title-fit-figure-title-graphite.editable.svg
 2172d438ed5d190c6f050c46f10ff183ddd1a4bc0cd750303661037de4eed230  svg/title-fit-figure-title-graphite.outlines.svg
 3336603d0e4c3277bb39f80d9267fe179c7888fe94b52308b46c7989ddcffd42  svg/title-fit-figure-title-midnight.editable.svg

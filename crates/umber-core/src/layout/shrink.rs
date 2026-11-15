@@ -21,9 +21,14 @@
 //! before the rows are ([`fitted`]): a header box spans the plot and the y tick label column,
 //! whose widths do not depend on the header, so each text is measured against its final width
 //! once, and the rows, the height checks included, reserve the height of the size it takes.
-//! A figure with equal aspect keeps the rooms of its reference layout, so its headers are
-//! fitted again for its own y tick labels, never larger than in the reference, whose height is
-//! reserved ([`super::grid::rehead`]).
+//! The first solve of a figure has ticks guessed for a plot size, whose widths need not be the
+//! final ones; when it refuses the height, it is tried again with the titles at their floors
+//! ([`PanelFit::floors`]) for a provisional plot, and only the solves for the final ticks
+//! refuse a height for the size the titles are fitted to.
+//! A figure with equal aspect keeps the rooms of its reference layout, and with them the header
+//! boxes and the sizes its titles take there, which its rows reserve; only where the header
+//! starts in its box follows the figure's own y tick labels ([`super::grid::rehead`]). So such
+//! a title keeps the reference's size even when the final box would hold a larger one.
 
 use std::borrow::Cow;
 
@@ -195,6 +200,18 @@ impl PanelFit {
     }
 }
 
+impl PanelFit {
+    /// Every panel title and subtitle without an explicit size at its floor, the least it
+    /// shrinks to under `theme`: for a provisional layout that must not refuse a height that
+    /// the titles may yet leave once they are fitted.
+    pub(crate) fn floors(theme: &Theme) -> PanelFit {
+        PanelFit {
+            title: TextFit::AtMost(floor(theme, HeaderText::Title, TextRole::Body)),
+            subtitle: TextFit::AtMost(floor(theme, HeaderText::Subtitle, TextRole::Body)),
+        }
+    }
+}
+
 /// Whether the text `kind` of the panel of `input` has no explicit size, and so may shrink.
 fn shrinks(input: &LayoutInput<'_>, kind: HeaderText) -> bool {
     let asked = match kind {
@@ -205,22 +222,20 @@ fn shrinks(input: &LayoutInput<'_>, kind: HeaderText) -> bool {
 }
 
 /// The sizes the titles and subtitles of the panels of `inputs`, measured in `bands`, take in
-/// header boxes `rooms` wide (each in the same order), never larger than `cap`: the panel
-/// titles without an explicit size all take the smallest size any of them needs, and so do the
-/// panel subtitles.
+/// header boxes `rooms` wide (each in the same order): the panel titles without an explicit
+/// size all take the smallest size any of them needs, and so do the panel subtitles.
 ///
 /// # Errors
 ///
 /// As [`Header::fits_at`].
-pub(crate) fn fit_panel_headers(
+fn fit_panel_headers(
     inputs: &[LayoutInput<'_>],
     bands: &[PanelBands],
     rooms: &[f64],
-    cap: PanelFit,
 ) -> Result<PanelFit> {
-    let mut fit = cap;
+    let mut fit = PanelFit::default();
     for kind in [HeaderText::Title, HeaderText::Subtitle] {
-        let mut least = cap.of(kind);
+        let mut least = TextFit::Own;
         for ((input, bands), &room) in inputs.iter().zip(bands).zip(rooms) {
             if !shrinks(input, kind) {
                 continue;
@@ -278,7 +293,7 @@ pub(super) fn fitted<'b>(
     bands: &'b [PanelBands],
     rooms: &[f64],
 ) -> Result<(Cow<'b, [PanelBands]>, PanelFit)> {
-    let fit = fit_panel_headers(inputs, bands, rooms, PanelFit::default())?;
+    let fit = fit_panel_headers(inputs, bands, rooms)?;
     if fit == PanelFit::default() {
         return Ok((Cow::Borrowed(bands), fit));
     }

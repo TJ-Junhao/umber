@@ -895,12 +895,7 @@ fn plan(
     let solve = |resolved: &[Resolved], bands: &[PanelBands]| -> Result<layout::GridSolution> {
         let mut solution = match rooms {
             Rooms::Solved | Rooms::Reference { .. } => solve_rooms(resolved, bands)?,
-            Rooms::Given(reference) | Rooms::Provisional(reference) => {
-                // The reference's headers start at its own y tick labels; these may differ.
-                let mut solution = reference.solution.clone();
-                layout::rehead(&inputs, bands, &mut solution)?;
-                solution
-            }
+            Rooms::Given(reference) | Rooms::Provisional(reference) => reference.solution.clone(),
         };
         // Every solve ends here, so whatever reads a plot below reads the final rectangle.
         for (i, slot) in solution.panels.iter_mut().enumerate() {
@@ -918,6 +913,10 @@ fn plan(
                 layout::fit_equal_aspect(slot, &bands[i], outer, [x, y], context)
                     .map_err(|error| in_cell(figure, panels[i].axes, error))?;
             }
+        }
+        if let Rooms::Given(_) | Rooms::Provisional(_) = rooms {
+            // The reference's headers start at its own y tick labels; these may differ.
+            layout::rehead(&inputs, bands, &mut solution);
         }
         Ok(solution)
     };
@@ -1153,15 +1152,30 @@ fn plan(
                 changed = true;
             }
         }
-        if !changed {
-            return Err(error);
-        }
         let bands: Vec<_> = provisional
             .iter()
             .enumerate()
             .map(|(i, r)| measure(i, r))
             .collect::<Result<_>>()?;
-        solve(&provisional, &bands).map_err(|_| error)
+        if changed && let Ok(solution) = solve(&provisional, &bands) {
+            return Ok(solution);
+        }
+        // The titles shrink to the widths of the final ticks, which these guessed ticks need
+        // not give: before the height is refused, try them at their floors, and let the tick
+        // choice and the final fit go on from that plot. The final solves refuse it if the
+        // fitted titles still leave the plot too little height.
+        let floored = |bands: &[PanelBands]| -> Result<Vec<PanelBands>> {
+            let mut bands = bands.to_vec();
+            layout::apply_panel_fit(&inputs, &mut bands, layout::PanelFit::floors(theme))?;
+            Ok(bands)
+        };
+        if let Ok(solution) = solve(&first, &floored(&first_bands)?) {
+            return Ok(solution);
+        }
+        if changed && let Ok(solution) = solve(&provisional, &floored(&bands)?) {
+            return Ok(solution);
+        }
+        Err(error)
     })?;
     let plots: Vec<_> = first.panels.iter().map(|slot| slot.plot.size()).collect();
     let bar_plots = color_plots(&first);

@@ -1209,3 +1209,39 @@ fn titles_shrink_before_the_height_is_checked() {
         );
     }
 }
+
+/// A 3 in by 1.3 in figure whose wide first x tick label insets the plot, titled with three
+/// lines of 18 "M", its y ticks automatic or at 0 and 1, the title at `size`.
+fn inset_title(explicit_y: bool, size: SizeSpec) -> Figure {
+    let mut f = Figure::new(3.0, 1.3, Theme::pigment()).unwrap();
+    let mut axes = f.add_axes(ScaleKind::Linear, ScaleKind::Linear).unwrap();
+    axes.xlim(0.0, 1.0)
+        .unwrap()
+        .ylim(0.0, 1.0)
+        .unwrap()
+        .xticks_labeled(&[0.0, 1.0], vec!["W".repeat(10), "1".into()])
+        .unwrap()
+        .title_sized(&vec!["M".repeat(18); 3].join("\n"), size);
+    if explicit_y {
+        axes.yticks(&[0.0, 1.0]).unwrap();
+    }
+    f
+}
+
+#[test]
+fn guessed_ticks_do_not_refuse_a_height_the_fitted_title_leaves() {
+    // The first ticks are guessed for a plot size; the title fits other widths than the final
+    // ticks leave, so the height is not refused before the title is fitted to those.
+    for explicit_y in [false, true] {
+        let f = inset_title(explicit_y, SizeSpec::Auto);
+        f.to_scene(FontLibrary::global()).unwrap();
+        let size = size_of(planned(&f)[0].title.as_ref());
+        assert!(size < 15.0, "{size}");
+        inset_title(explicit_y, SizeSpec::pt(f64::from(size)).unwrap())
+            .to_scene(FontLibrary::global())
+            .unwrap();
+    }
+    inset_title(false, SizeSpec::pt(10.5).unwrap())
+        .to_scene(FontLibrary::global())
+        .unwrap();
+}
