@@ -241,7 +241,10 @@ class Figure:
 
         The default figure title is 1.5 times the panel title size. ``Size.times(k)``
         follows that ratio; ``Size.pt(p)`` uses exactly p points. Alignment follows the
-        theme's ``with_title_align()`` setting.
+        theme's ``with_title_align()`` setting, across the figure inside its padding.
+        Without ``size=``, a title wider than that shrinks, in steps of 0.5 pt, to the
+        largest size at which every line fits, but not below the panel title size; the panel
+        titles keep their own size.
 
         ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
         title alignment; the header grows by every further line, and blank lines are kept.
@@ -258,13 +261,16 @@ class Figure:
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long, or holds a lone surrogate, a control
                 character other than ``"\n"`` (such as a tab) or a line or paragraph
-                separator. Rendering raises it if the widest line is wider than the figure's
-                room inside its padding.
+                separator. Rendering raises it if the widest line is still wider than the
+                figure's room inside its padding, naming its width at the smallest size for a
+                title without ``size=``.
 
         Example:
             >>> import umber as ub
             >>> fig = ub.Figure(cols=2).title("Revenue")
             >>> ax = fig.add_axes(col=0).title("North")
+            >>> narrow = ub.Figure(3, 2).title("Quarterly revenue")
+            >>> png = narrow.to_png()  # the title shrinks to fit the narrow figure
         """
         with api_call():
             context = "Figure.title()"
@@ -278,7 +284,9 @@ class Figure:
     def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
         r"""Set the figure subtitle, shown under its title and above every panel.
 
-        Its alignment follows the figure title, as set by ``Theme.with_title_align()``.
+        Its alignment follows the figure title, as set by ``Theme.with_title_align()``. It is
+        set at the theme's axis label size, the smallest size a title shrinks to, so it does
+        not shrink.
 
         ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
         title alignment; the header grows by every further line, and blank lines are kept.

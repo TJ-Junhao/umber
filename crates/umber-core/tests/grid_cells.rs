@@ -53,16 +53,27 @@ fn texts(scene: &Scene) -> Vec<(String, f32, f32)> {
 }
 
 #[test]
-fn a_panel_title_wider_than_its_panel_fails() {
-    // A left title of 35 × "W" is about 511 pt wide; the left panel's plot is far narrower. It
-    // used to run into the right cell and over the right panel's title.
-    let mut f = one_by_two();
-    f.add_axes_at(cell(0, 0), ScaleKind::Linear, ScaleKind::Linear)
-        .unwrap()
-        .title(&"W".repeat(35));
-    f.add_axes_at(cell(0, 1), ScaleKind::Linear, ScaleKind::Linear)
-        .unwrap()
-        .title("Right");
+fn a_panel_title_wider_than_its_panel_shrinks_or_fails() {
+    // A left title of 35 × "W" is about 511 pt wide at the theme's size; the left panel has
+    // far less room. It used to run into the right cell and over the right panel's title.
+    let build = |size: SizeSpec| {
+        let mut f = one_by_two();
+        f.add_axes_at(cell(0, 0), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .title_sized(&"W".repeat(35), size);
+        f.add_axes_at(cell(0, 1), ScaleKind::Linear, ScaleKind::Linear)
+            .unwrap()
+            .title("Right");
+        f
+    };
+    // Without a size it shrinks to fit its panel, and stays left of the right panel's title.
+    let shrunk = texts(&scene(&build(SizeSpec::Auto)));
+    let left = shrunk.iter().find(|t| t.0 == "W".repeat(35)).unwrap();
+    let right = shrunk.iter().find(|t| t.0 == "Right").unwrap();
+    assert!(left.2 - left.1 < 511.0);
+    assert!(left.2 < right.1, "{} {}", left.2, right.1);
+    // With a size it fails.
+    let mut f = build(SizeSpec::times(1.0).unwrap());
     let err = render_error(&f);
     let message = err.to_string();
     assert!(

@@ -271,7 +271,15 @@ fn a_title_wider_than_the_plot_stays_in_the_room() {
     let layout = &planned[1].1;
     let line = layout.title.as_ref().unwrap().first();
     assert!(line.width() > layout.plot.width);
-    assert_close(line.x, layout.room.x);
+    // It starts where the room's content does: the y tick label column left of the room.
+    let column = layout.plot.x
+        - layout
+            .y_tick_labels
+            .iter()
+            .map(|label| label.first().x)
+            .fold(f64::INFINITY, f64::min);
+    assert!(column > 0.0);
+    assert_close(line.x, layout.room.x - column);
     assert!(line.x + line.width() <= layout.room.right() + CLOSE);
 }
 

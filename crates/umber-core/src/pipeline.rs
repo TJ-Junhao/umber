@@ -1509,6 +1509,14 @@ fn plan(
         }
     }
 
+    // Titles and subtitles too wide for their settled header boxes shrink. The boxes do not
+    // depend on the headers' heights, so the plots, solved again with the same ticks for the
+    // shorter headers, keep their widths and the rooms the titles were fitted to; they only grow
+    // taller, which leaves the tick labels chosen for them more room.
+    if layout::fit_panel_headers(&inputs, &mut bands, &solution.panels)? {
+        solution = solve(&resolved, &bands)?;
+    }
+
     // Check only final domains: shared data, cells and bubble fitting can widen them, and
     // provisional layouts may deliberately omit automatic x ticks.
     for (i, r) in resolved.iter().enumerate().filter(|_| rooms.is_final()) {
@@ -3899,11 +3907,17 @@ mod tests {
         assert_eq!(a.plot.y, b.plot.y);
         assert!(c.plot.y > a.plot.bottom() + 24.0);
         assert!(b.plot.x > a.plot.right() + 24.0);
-        // Each title starts at its plot's left edge and sits above it, its row's top in the
-        // first row at the padding.
+        // Each title starts at the left edge of its panel's y tick labels and sits above its
+        // plot, its row's top in the first row at the padding.
         for l in [&a, &b, &c] {
             let title = l.title.as_ref().expect("a title").first();
-            assert_eq!(title.x, l.plot.x);
+            let left = l
+                .y_tick_labels
+                .iter()
+                .map(|label| label.first().x)
+                .fold(f64::INFINITY, f64::min);
+            assert!(left < l.plot.x);
+            assert!((title.x - left).abs() < 1e-9, "{} != {left}", title.x);
             assert!(title.y < l.plot.y);
         }
         assert_eq!(a.header_bottom, b.header_bottom);

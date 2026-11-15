@@ -368,13 +368,23 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         r"""Set the title, shown above the plot.
 
+        The title starts where the panel's content starts, at the left edge of the y axis
+        label and the y tick labels, and its room runs to the plot's right edge (for a
+        one-cell figure, across the figure inside its padding, with or without a twin y axis).
+        Without ``size=``, a title too wide for its room shrinks, in steps of 0.5 pt, to the
+        largest size at which every line fits, but not below the theme's axis label size;
+        the panel titles of the figure then all take the smallest size any of them needs, so
+        that they stay equal. The header takes the height of the size used. A title with
+        ``size=`` keeps its size.
+
         ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
         title alignment; the header grows by every further line, and blank lines are kept.
 
         Args:
             text: The title, at most 1,000 characters. An empty string removes it.
-            size: ``Size.AUTO`` uses the theme's size, ``Size.times(k)`` multiplies it
-                after font scaling, and ``Size.pt(p)`` uses points without font scaling.
+            size: ``Size.AUTO`` uses the theme's size, shrunk to fit, ``Size.times(k)``
+                multiplies it after font scaling, and ``Size.pt(p)`` uses points without font
+                scaling.
 
         Returns:
             These axes.
@@ -383,12 +393,13 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long, or holds a control character other than
                 ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-                if the widest line is wider than the panel's plot width (for a one-cell figure,
-                than the figure inside its padding, with or without a twin y axis).
+                if the widest line is still wider than its room, naming its width at the
+                smallest size for a title without ``size=``.
 
         Example:
             >>> import umber as ub
-            >>> ax = ub.Figure().add_axes().title("Revenue")
+            >>> ax = ub.Figure(3, 2).add_axes().title("Quarterly revenue by region")
+            >>> png = ax.figure.to_png()  # the title shrinks to fit the narrow figure
         """
         with api_call():
             context = "Axes.title()"
@@ -405,6 +416,10 @@ class Axes(Generic[X, Y]):  # noqa: UP046
     def subtitle(self, text: str, *, size: Size = Size.AUTO) -> Self:
         r"""Set the subtitle, shown under the title.
 
+        The subtitle starts with the title, where the panel's content starts, and has the same
+        room. It is set at the theme's axis label size, the smallest size a title shrinks to,
+        so it does not shrink.
+
         ``"\n"`` breaks the subtitle into lines, 1.2 sizes apart, each aligned by the theme's
         title alignment; the header grows by every further line, and blank lines are kept.
 
@@ -420,8 +435,7 @@ class Axes(Generic[X, Y]):  # noqa: UP046
             TypeError: If ``text`` is not a ``str`` or ``size`` is not a ``Size``.
             StyleError: If ``text`` is too long, or holds a control character other than
                 ``"\n"`` (such as a tab) or a line or paragraph separator. Rendering raises it
-                if the widest line is wider than the panel's plot width (for a one-cell figure,
-                than the figure inside its padding, with or without a twin y axis).
+                if the widest line is wider than its room.
 
         Example:
             >>> import umber as ub

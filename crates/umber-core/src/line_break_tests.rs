@@ -222,8 +222,10 @@ fn a_pie_title_breaks_into_lines() {
 
 #[test]
 fn the_width_check_measures_the_widest_line() {
+    // Too wide even at the axis label size, the least a title shrinks to; the error names its
+    // width there.
     let wide = "W".repeat(60);
-    let width = plan_text_width(&wide);
+    let width = plan_text_width(&wide, Theme::pigment().body_size());
     assert!(width > 408.0, "{width}");
     for title in [format!("Short\n{wide}"), format!("{wide}\nShort")] {
         let message = single(Align::Left, &title, "")
@@ -246,15 +248,15 @@ fn the_width_check_measures_the_widest_line() {
         .unwrap();
 }
 
-/// The width of `text` in pigment's title style.
-fn plan_text_width(text: &str) -> f64 {
+/// The width of `text` in pigment's title face and weight at `size` points.
+fn plan_text_width(text: &str, size: f32) -> f64 {
     let f = single(Align::Left, text, "");
     let lib = lib();
     let fonts = layout::figure_fonts(&lib, f.theme()).unwrap();
     let style = crate::TextStyle {
         face: layout::TITLE_FACE,
         weight: crate::Weight::SemiBold,
-        size: f.theme().title_size() * f.theme().font_scale(),
+        size,
         tabular_figures: false,
     };
     f64::from(fonts.layout(text, &style).unwrap().width())

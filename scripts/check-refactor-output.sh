@@ -131,6 +131,7 @@ driver_files=(
   crates/umber-core/tests/support/corpus/text_size.rs
   crates/umber-core/tests/support/corpus/ticks.rs
   crates/umber-core/tests/support/corpus/time.rs
+  crates/umber-core/tests/support/corpus/title_fit.rs
   crates/umber-core/tests/support/corpus/translucent_fills.rs
   crates/umber-core/tests/support/corpus/triangles.rs
   crates/umber-core/tests/support/corpus/tricontour.rs

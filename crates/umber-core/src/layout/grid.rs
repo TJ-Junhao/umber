@@ -31,10 +31,13 @@
 //!    band narrows every plot, and widens the plots of the panels that span across it, so the
 //!    least growth that fits every label is solved as a linear program (see [`fit_columns`]).
 //! 4. Headers. A panel's header starts at its row's top; its title, subtitle and legend row
-//!    start at the plot's left edge, and the legend row wraps within the plot's width. The x
-//!    axis labels of a row sit at the bottom of its band below the plots, so they line up.
+//!    start at the left edge of the panel's content, where its y axis label and y tick label
+//!    column start (the plot's left edge without them), and the legend row wraps between there
+//!    and the plot's right edge (see [`Across`]). The x axis labels of a row sit at the bottom
+//!    of its band below the plots, so they line up.
 //! 5. Containment. Once the final layout is placed, titles, subtitles and legends must fit
-//!    their header extent. Axis labels must fit their placement extent: the plot width, plus
+//!    their header extent; titles without an explicit size first shrink to fit it (see
+//!    [`super::shrink`]). Axis labels must fit their placement extent: the plot width, plus
 //!    the tick column for the left y label. Direct labels must fit the panel's frame (see
 //!    [`check_panel_contents`]).
 //!
@@ -53,7 +56,7 @@
 
 use super::inset::{CONTAINMENT_TOLERANCE, TickSpan};
 use super::panel::{
-    HeaderBox, PanelBands, PanelSlot, PanelSpan, TextContainer, TextKind, end_label_cap,
+    HeaderBox, HeaderText, PanelBands, PanelSlot, PanelSpan, TextContainer, TextKind, end_label_cap,
 };
 use super::program;
 use super::{
@@ -119,15 +122,6 @@ impl GridInput<'_> {
     /// Whether the grid is a single cell, laid out as one panel on the canvas.
     fn is_single(&self) -> bool {
         self.grid.rows() * self.grid.cols() == 1
-    }
-
-    /// The title and legend extent: the inner canvas for one cell, otherwise the plot span.
-    fn header_span(&self, left: f64, right: f64) -> (f64, f64) {
-        if self.is_single() {
-            (PADDING, self.width - PADDING)
-        } else {
-            (left, right)
-        }
     }
 
     /// Adds a cell location only when the figure has more than one cell.
@@ -197,6 +191,48 @@ impl GridInput<'_> {
             width: width.max(MIN_PLOT),
             height: height.max(MIN_PLOT),
         }
+    }
+}
+
+/// Where a panel runs across the canvas once the columns are placed: its plot, and its header
+/// box, in which its title, subtitle and legend rows start and wrap.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Across {
+    /// The left and right edges of the plot.
+    plot: (f64, f64),
+    /// The left and right edges of the header box.
+    header: (f64, f64),
+}
+
+impl Across {
+    /// Where the panel `i` of `input`, covering `cells` and measured in `bands`, runs across the
+    /// columns `placed`. Its header ends at its plot's right edge and starts at the left edge of
+    /// its content, where its y axis label and y tick label column start ([`PanelBands::content_left`]);
+    /// a twin's header is its panel's. A figure of one cell keeps the inner canvas for the
+    /// header, moved in with the grid on the left, where its panel's content starts. A pie's
+    /// header here is its plot's span; its own slot gives it the whole cell (see [`pie_slot`]).
+    fn of(
+        input: &GridInput<'_>,
+        bands: &[PanelBands],
+        placed: &PlacedColumns,
+        i: usize,
+        cells: CellRange,
+    ) -> Across {
+        let plot = placed.span(cells);
+        let header = if input.is_single() {
+            (placed.inner_left, input.width - PADDING)
+        } else {
+            match input.panels[i].axes {
+                crate::model::Layer::Primary(crate::Panel::Pie(_)) => plot,
+                crate::model::Layer::Primary(crate::Panel::Cartesian { .. }) => {
+                    (bands[i].content_left(plot.0), plot.1)
+                }
+                crate::model::Layer::Twin { parent, .. } => {
+                    (bands[parent].content_left(plot.0), plot.1)
+                }
+            }
+        };
+        Across { plot, header }
     }
 }
 
@@ -386,28 +422,30 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
             width: input.width,
             height: input.height,
         };
-        let header = HeaderBox {
-            left: canvas.x + PADDING,
-            right: canvas.right() - PADDING,
-            top: input.top,
-            inset: (0.0, 0.0),
-        };
         let panels = input
             .panels
             .iter()
             .zip(bands)
             .map(|(panel, bands)| {
-                solve_single(panel, bands, canvas, input.top, input.caption).map(|plot| PanelSlot {
-                    plot,
-                    aligned: plot,
-                    room: plot,
-                    plot_room: plot,
-                    header,
-                    xlabel_baseline: plot.bottom()
-                        + bands.x_band
-                        + AXIS_LABEL_GAP
-                        + bands.xlabel_ascent,
-                    frame: canvas,
+                solve_single(panel, bands, canvas, input.top, input.caption).map(|single| {
+                    let plot = single.plot;
+                    PanelSlot {
+                        plot,
+                        aligned: plot,
+                        room: plot,
+                        plot_room: plot,
+                        header: HeaderBox {
+                            left: single.header_left,
+                            right: canvas.right() - PADDING,
+                            top: input.top,
+                            inset: (0.0, 0.0),
+                        },
+                        xlabel_baseline: plot.bottom()
+                            + bands.x_band
+                            + AXIS_LABEL_GAP
+                            + bands.xlabel_ascent,
+                        frame: canvas,
+                    }
                 })
             })
             .collect::<Result<_>>()?;
@@ -440,7 +478,11 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
     };
     // The row bands are measured with every panel on its aligned plots, a pie panel too, so
     // that a pie's header and legends never move the other panels' plots.
-    let spans: Vec<(f64, f64)> = cells.iter().map(|c| placed.span(*c)).collect();
+    let spans: Vec<Across> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, c)| Across::of(input, bands, &placed, i, *c))
+        .collect();
     let rows = Rows::measure(input, &cells, bands, &spans);
     let rows = rows
         .place(input)
@@ -450,7 +492,8 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
         .zip(bands)
         .zip(input.panels)
         .zip(&spans)
-        .map(|(((cells, bands), panel), &(left, right))| {
+        .map(|(((cells, bands), panel), across)| {
+            let (left, right) = across.plot;
             let (top, bottom) = rows.span(*cells);
             let aligned = Area {
                 x: left,
@@ -474,7 +517,7 @@ pub(crate) fn solve_grid(input: &GridInput<'_>, bands: &[PanelBands]) -> Result<
                 return pie_slot(panel, bands, cell, aligned, frame);
             }
             let last_row = cells.row() + cells.row_span() - 1;
-            let (header_left, header_right) = input.header_span(left, right);
+            let (header_left, header_right) = across.header;
             PanelSlot {
                 plot: aligned,
                 aligned,
@@ -590,6 +633,9 @@ impl BarBeside {
 /// The columns placed for some growth of their bands.
 #[derive(Debug, Clone)]
 struct PlacedColumns {
+    /// Where the bands of the first column start: the left padding, moved in by the grid's
+    /// growth on that side.
+    inner_left: f64,
     /// Each column's plot left edge.
     plot_x: Vec<f64>,
     /// The plot width of every column, `P`.
@@ -862,6 +908,7 @@ impl Columns {
             plot_x.push(x);
         }
         PlacedColumns {
+            inner_left,
             plot_x,
             plot_width,
             left,
@@ -1177,26 +1224,24 @@ struct PlacedRows {
 
 impl Rows {
     /// The bands of the rows of `input`'s grid, from the panels covering `cells` with the texts
-    /// measured in `bands` and their plots running from left to right as in `spans`, which
-    /// their legend rows wrap within.
+    /// measured in `bands`, their plots and headers running across as in `spans`; their legend
+    /// rows wrap within their headers, a top-right row within its plot.
     fn measure(
         input: &GridInput<'_>,
         cells: &[CellRange],
         bands: &[PanelBands],
-        spans: &[(f64, f64)],
+        spans: &[Across],
     ) -> Rows {
         let rows = input.grid.rows();
         let mut above = vec![0.0_f64; rows];
         let mut below = vec![0.0_f64; rows];
         let mut legends = vec![0.0_f64; rows];
-        for (((cells, band), panel), &(left, right)) in
-            cells.iter().zip(bands).zip(input.panels).zip(spans)
+        for (((cells, band), panel), across) in cells.iter().zip(bands).zip(input.panels).zip(spans)
         {
             let first = cells.row();
             let last = first + cells.row_span() - 1;
-            let header = input.header_span(left, right);
-            let row = panel.legend.header_for_plot(header, (left, right));
-            let (left, right) = header;
+            let row = panel.legend.header_for_plot(across.header, across.plot);
+            let (left, right) = across.header;
             above[first] = above[first].max(band.above_with_row(&row));
             below[last] = below[last]
                 .max(band.below() - band.bottom_legend - band.bottom_colorbar - band.bottom_offset);
@@ -1297,7 +1342,7 @@ fn rows_too_short(
     input: &GridInput<'_>,
     cells: &[CellRange],
     bands: &[PanelBands],
-    spans: &[(f64, f64)],
+    spans: &[Across],
     error: Error,
 ) -> Error {
     if !input.colorbars.is_empty() {
@@ -1335,9 +1380,8 @@ fn rows_too_short(
         let first = cell.row();
         let last = first + cell.row_span() - 1;
         let legend = input.panels[i].legend;
-        let header = input.header_span(spans[i].0, spans[i].1);
-        let row = legend.header_for_plot(header, spans[i]);
-        let (left, right) = header;
+        let row = legend.header_for_plot(spans[i].header, spans[i].plot);
+        let (left, right) = spans[i].header;
         let above = band.above_with_row(&row);
         let below = band.axis_below();
         let bottom = legend.bottom_reserve(left, right) + band.bottom_colorbar;
@@ -1866,23 +1910,23 @@ pub(crate) fn check_panel_contents(
     slots: &[PanelSlot],
 ) -> Result<()> {
     for ((panel, layout), slot) in input.panels.iter().zip(layouts).zip(slots) {
-        for (label, size, name) in [
+        for (label, size, kind) in [
             (
                 layout.title.as_ref(),
                 panel.axes.title_size(),
-                TextKind::Title,
+                HeaderText::Title,
             ),
             (
                 layout.subtitle.as_ref(),
                 panel.axes.subtitle_size(),
-                TextKind::Subtitle,
+                HeaderText::Subtitle,
             ),
         ] {
-            super::panel::check_text_width(
-                label.map(super::TextBlock::extent),
+            super::panel::check_header_width(
+                label,
                 size,
                 slot.header.right - slot.header.left,
-                name,
+                kind,
                 TextContainer::Panel,
                 input.context,
             )
@@ -2483,8 +2527,9 @@ mod tests {
                 line(&mut axes);
             }
             let mut axes = f.axes_at_mut(GridIndex::At(0), GridIndex::At(1)).unwrap();
+            // An explicit size keeps the title from shrinking; the subtitle is at its floor.
             match which {
-                0 => axes.title(text),
+                0 => axes.title_sized(text, crate::SizeSpec::times(1.0).unwrap()),
                 1 => axes.subtitle(text),
                 2 => axes.xlabel(text),
                 _ => axes.ylabel(text),
@@ -2492,27 +2537,18 @@ mod tests {
             f
         };
         let text = "Station output";
-        for (which, name, hint) in [
-            (
-                0,
-                "the title \"Station output\"",
-                "make the figure wider or lower the font scale with Theme.with_font_scale().",
-            ),
+        let scale_hint =
+            "make the figure wider or lower the font scale with Theme.with_font_scale().";
+        for (which, name, at, hint) in [
+            (0, "the title \"Station output\"", "", scale_hint),
             (
                 1,
                 "the subtitle \"Station output\"",
-                "make the figure wider or lower the font scale with Theme.with_font_scale().",
+                " at 8.5 pt, the smallest size it shrinks to",
+                "make the figure wider, shorten the subtitle, or break it into lines with \"\\n\".",
             ),
-            (
-                2,
-                "the x axis label \"Station output\"",
-                "make the figure wider or lower the font scale with Theme.with_font_scale().",
-            ),
-            (
-                3,
-                "the y axis label \"Station output\"",
-                "make the figure wider or lower the font scale with Theme.with_font_scale().",
-            ),
+            (2, "the x axis label \"Station output\"", "", scale_hint),
+            (3, "the y axis label \"Station output\"", "", scale_hint),
         ] {
             let probe = titled_columns(864.0, text, which);
             let width = {
@@ -2532,7 +2568,7 @@ mod tests {
             assert_eq!(
                 err.to_string(),
                 format!(
-                    "Figure.to_scene(): row 0, col 1: {name} is {} pt wide; the panel has \
+                    "Figure.to_scene(): row 0, col 1: {name} is {} pt wide{at}; the panel has \
                      {room} pt.",
                     width.ceil().max(room + 1.0)
                 )
@@ -2703,8 +2739,9 @@ mod tests {
 
     #[test]
     fn panel_rows_wrap_within_the_plot_and_direct_labels_follow_the_panel() {
-        // A header legend row of a panel in one of three columns starts at its plot's left
-        // edge and wraps within the plot, not the canvas.
+        // A header legend row of a panel in one of three columns starts at the left edge of its
+        // y tick labels and wraps within its header, which ends at the plot's right edge, not
+        // within the canvas.
         let grid = Grid::new(1, 3)
             .unwrap()
             .with_legend(crate::LegendMode::PerPanel);
@@ -2726,9 +2763,16 @@ mod tests {
         let layout = &all[0].1;
         let entries = layout.legend.entries();
         assert_eq!(entries.len(), 12);
-        assert_eq!(entries[0].swatch.x, layout.plot.x);
+        let left = layout
+            .y_tick_labels
+            .iter()
+            .flat_map(TextBlock::lines)
+            .map(|label| label.x)
+            .fold(f64::INFINITY, f64::min);
+        assert!(left < layout.plot.x);
+        assert!((entries[0].swatch.x - left).abs() < 1e-9);
         for entry in entries {
-            assert!(entry.swatch.x >= layout.plot.x);
+            assert!(entry.swatch.x >= left - 1e-9);
             assert!(entry.label.x + entry.label.width() <= layout.plot.right() + 1e-9);
         }
         assert!(entries.last().unwrap().label.y > entries[0].label.y);

@@ -204,10 +204,16 @@ impl<'a> AxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
-    /// and if the text holds a control character other than `"\n"` or a line or paragraph
-    /// separator (U+2028, U+2029).
+    /// The title starts where the panel's content does, at the left edge of the y tick labels
+    /// and the y axis label, and its room runs from there to the plot's right edge, or across
+    /// the figure inside its padding for a one-cell figure, with or without a twin y axis. A
+    /// title too wide for its room shrinks, in steps of 0.5 pt, to the largest size at which
+    /// every line fits, but not below the theme's axis label size; the panel titles of the
+    /// figure then all take the smallest size any of them needs, so that they stay equal.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is still wider than its room, and if
+    /// the text holds a control character other than `"\n"` or a line or paragraph separator
+    /// (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -229,10 +235,15 @@ impl<'a> AxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
-    /// and if the text holds a control character other than `"\n"` or a line or paragraph
-    /// separator (U+2028, U+2029).
+    /// The subtitle starts where the panel's content does, at the left edge of the y tick
+    /// labels and the y axis label, and its room runs from there to the plot's right edge, or
+    /// across the figure inside its padding for a one-cell figure, with or without a twin y
+    /// axis. It is set at the theme's axis label size, the least a header text shrinks to, so
+    /// it does not shrink.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its room, and if the
+    /// text holds a control character other than `"\n"` or a line or paragraph separator
+    /// (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -3791,10 +3802,15 @@ impl<'a> AxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
-    /// and if the text holds a control character other than `"\n"` or a line or paragraph
-    /// separator (U+2028, U+2029).
+    /// The title starts where the panel's content does, at the left edge of the y tick labels
+    /// and the y axis label, and its room runs from there to the plot's right edge, or across
+    /// the figure inside its padding for a one-cell figure, with or without a twin y axis. With
+    /// `SizeSpec::Auto`, a title too wide for its room shrinks as [`AxesMut::title`] describes;
+    /// an explicit size is kept.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its room at the size it
+    /// is set at, and if the text holds a control character other than `"\n"` or a line or
+    /// paragraph separator (U+2028, U+2029).
     ///
     /// # Examples
     ///
@@ -3819,10 +3835,15 @@ impl<'a> AxesMut<'a> {
     /// `"\n"` breaks the text into lines, 1.2 sizes apart, each aligned by the theme's title
     /// alignment; the header grows by the further lines. An empty text removes it.
     ///
-    /// Rendering returns `Error::Style` if the widest line is wider than the panel's plot width,
-    /// or the figure inside its padding for a one-cell figure, with or without a twin y axis,
-    /// and if the text holds a control character other than `"\n"` or a line or paragraph
-    /// separator (U+2028, U+2029).
+    /// The subtitle starts where the panel's content does, at the left edge of the y tick
+    /// labels and the y axis label, and its room runs from there to the plot's right edge, or
+    /// across the figure inside its padding for a one-cell figure, with or without a twin y
+    /// axis. The size is kept: a subtitle without one is set at the theme's axis label size,
+    /// the least a header text shrinks to.
+    ///
+    /// Rendering returns `Error::Style` if the widest line is wider than its room, and if the
+    /// text holds a control character other than `"\n"` or a line or paragraph separator
+    /// (U+2028, U+2029).
     ///
     /// # Examples
     ///

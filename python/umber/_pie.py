@@ -211,6 +211,11 @@ class PieAxes:
     def title(self, text: str, *, size: Size = Size.AUTO) -> Self:
         r"""Set the title above this pie panel.
 
+        The title starts at the left edge of the pie's cell (for a one-cell figure, of the
+        figure inside its padding) and may take its whole width. Without ``size=``, a title
+        too wide for it shrinks as ``Axes.title()`` describes, to one size with the figure's
+        other panel titles.
+
         ``"\n"`` breaks the title into lines, 1.2 sizes apart, each aligned by the theme's
         title alignment; the header grows by every further line, and blank lines are kept.
 
@@ -226,8 +231,9 @@ class PieAxes:
             TypeError: If text or size has the wrong type.
             StyleError: If text is too long or cannot be displayed: it holds a lone surrogate,
                 a control character other than ``"\n"`` (such as a tab) or a line or
-                paragraph separator. Rendering raises it if the widest line is wider than its
-                panel (for a one-cell figure, than the figure inside its padding).
+                paragraph separator. Rendering raises it if the widest line is still wider
+                than its room, naming its width at the smallest size for a title without
+                ``size=``.
 
         Example:
             >>> import umber as ub

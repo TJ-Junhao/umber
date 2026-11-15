@@ -4,8 +4,9 @@
 //!
 //! Every derived value is finite: font sizes are clamped, text wider than
 //! [`MAX_TEXT_WIDTH`] is cut to a prefix that fits, and the plot area is at least [`MIN_PLOT`]
-//! by [`MIN_PLOT`] and lies on the canvas. Titles, subtitles and axis labels that do not fit
-//! their horizontal extent fail layout with `Error::Style` rather than being clipped.
+//! by [`MIN_PLOT`] and lies on the canvas. Titles without an explicit size shrink to fit their
+//! horizontal extent, down to a floor ([`shrink`]); titles, subtitles and axis labels that still
+//! do not fit fail layout with `Error::Style` rather than being clipped.
 //! A figure whose y tick labels and padding leave the plot less than [`MIN_PLOT`] wide fails the
 //! layout with `Error::Style`. Every x tick label keeps [`X_LABEL_EDGE_GAP`] from the canvas
 //! edges; x tick labels that would need a larger plot inset than [`END_LABEL_SHARE`] allows, or
@@ -33,6 +34,7 @@ mod panel;
 pub(crate) mod pie;
 pub(crate) mod placement;
 mod program;
+mod shrink;
 #[cfg(test)]
 mod title_tests;
 pub(crate) mod twin;
@@ -45,6 +47,7 @@ pub(crate) use grid::{GridInput, GridSolution, check_panel_contents, solve_grid}
 pub(crate) use inset::CONTAINMENT_TOLERANCE;
 pub(crate) use legend::{DirectLabel, EndDot, LegendRow, MeasuredLegend, RowEntry, SwatchBox};
 pub(crate) use panel::{FigureHeader, Frame, PanelBands, measure_panel, place_panel};
+pub(crate) use shrink::fit_panel_headers;
 pub(crate) use value_column::{ColumnInput, ColumnSide, PlacedColumn};
 
 use std::cell::RefCell;
@@ -1254,12 +1257,23 @@ fn figure_height_hint(
     }
 }
 
+/// The plot of a figure of one cell, and where its panel's header starts across.
+#[derive(Debug, Clone, Copy)]
+struct SinglePlot {
+    /// The plot area.
+    plot: Area,
+    /// The left edge of the header box: the left edge of the panel's content.
+    header_left: f64,
+}
+
 /// The plot area of the only panel of a figure of one cell, `input`, in `frame`, the whole
-/// canvas, for the texts measured in `bands`.
+/// canvas, for the texts measured in `bands`, and the left edge of its header.
 ///
 /// The header is stacked from the top padding, and the plot starts below it, the y label and
-/// the rise of the top y tick label. The plot starts right of the y tick labels and ends left
-/// of the room direct labels reserve. The x tick labels are centered on their ticks; they may
+/// the rise of the top y tick label. It starts at the left padding, where the y axis label and
+/// the y tick label column start, and moves in with them when x tick labels inset the plot; its
+/// legend rows then wrap within the narrower header. The plot starts right of the y tick labels
+/// and ends left of the room direct labels reserve. The x tick labels are centered on their ticks; they may
 /// reach into the outer padding, up to [`X_LABEL_EDGE_GAP`] from the canvas edge. Where one
 /// would reach further, the plot edge on that side moves in by exactly the overflow. Each side
 /// moves in by at most [`END_LABEL_SHARE`] of the inner width beyond the padding; labels that
@@ -1301,7 +1315,7 @@ fn solve_single(
     frame: Frame,
     top: f64,
     caption: f64,
-) -> Result<Area> {
+) -> Result<SinglePlot> {
     let LayoutInput {
         legend, context, ..
     } = *input;
@@ -1392,18 +1406,27 @@ fn solve_single(
             ));
         }
     };
-    // Everything under the plot: the x tick labels, the x label and the bottom padding.
+    // The header starts where the panel's content does: at the left padding, moved in with the
+    // plot when x tick labels inset it. Its legend rows wrap within it.
+    let header_left = frame.x + PADDING + (plot_left - left);
+    let header_right = frame.right() - PADDING;
+    let moved_in = header_left > frame.x + PADDING;
+    let mut bottom_legend = bands.bottom_legend;
     if legend.position == crate::LegendPosition::TopRight {
         plot_top = top + bands.above_with_row(&legend.header_within(plot_left, plot_right));
+    } else if moved_in {
+        let row = legend.header_within(header_left, header_right);
+        plot_top = bands.above_from(top, &row);
+        bottom_legend = legend.bottom_reserve(header_left, header_right);
     }
     let axis_below =
-        if bands.bottom_legend > 0.0 || bands.bottom_colorbar > 0.0 || bands.right_colorbar > 0.0 {
+        if bottom_legend > 0.0 || bands.bottom_colorbar > 0.0 || bands.right_colorbar > 0.0 {
             bands.axis_below()
         } else {
             // Keep the original single-panel extent when no bottom legend needs the label drop.
             bands.x_band + bands.x_title_band
         };
-    let below = axis_below + PADDING + bands.bottom_legend + bands.bottom_colorbar;
+    let below = axis_below + PADDING + bottom_legend + bands.bottom_colorbar;
     let plot_bottom = frame.bottom() - below;
     let plot_height = plot_bottom - plot_top;
     if plot_height < MIN_PLOT {
@@ -1514,7 +1537,7 @@ fn solve_single(
             bands.colorbar_tick_width(),
         ));
     }
-    Ok(plot)
+    Ok(SinglePlot { plot, header_left })
 }
 
 /// The widest of `labels`, the first of equally wide ones; `None` when there are none.
